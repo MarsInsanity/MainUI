@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MainUI</string>
+    <string name="overlay_service_label">MainUI in-game menu</string>
+    <string name="overlay_service_description">Shows the MainUI in-game menu (save, load, native menu, exit, Game Switcher) when you press Home inside a game launched from MainUI. Home works normally everywhere else. MainUI does not read screen content.</string>
+</resources>

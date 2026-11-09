@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "_doc": [
+    "Launch recipes for Android emulators. Copy this file to <storage>/MainUI/emulators.json to override or extend it.",
+    "Entries in the override file replace built-in entries with the same id.",
+    "Placeholders: %ROM% absolute path, %ROMURI% file:// uri, %ROMPROVIDER% content:// uri served by MainUI,",
+    "%ROMSAF% Storage Access Framework document uri, %BASENAME% file name without extension,",
+    "%PKG% the installed package, %CORE% libretro core name, %CORE_PATH% core .so path, %RA_CONFIG% retroarch.cfg path.",
+    "Extras prefixed with 'bool:' or 'int:' are typed, everything else is a string.",
+    "ingame.menu: back | key:<KEYCODE_NAME> | none. ingame.save / ingame.load: keys:<KEYCODE_A>+<KEYCODE_B> (needs root) or none."
+  ],
+  "retroarch": {
+    "name": "RetroArch",
+    "packages": ["com.retroarch.aarch64", "com.retroarch", "com.retroarch.ra32"],
+    "activity": "com.retroarch.browser.retroactivity.RetroActivityFuture",
+    "extras": {
+      "ROM": "%ROM%",
+      "LIBRETRO": "%CORE_PATH%",
+      "CONFIGFILE": "%RA_CONFIG%",
+      "QUITFOCUS": ""
+    },
+    "flags": ["NEW_TASK", "CLEAR_TASK"],
+    "commandPort": 55355
+  },
+  "standalone": [
+    {
+      "id": "drastic", "name": "DraStic",
+      "packages": ["com.dsemu.drastic"],
+      "activity": "com.dsemu.drastic.DraSticActivity",
+      "extras": { "GAMEPATH": "%ROM%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "melonds", "name": "melonDS",
+      "packages": ["me.magnum.melonds", "me.magnum.melonds.nightly"],
+      "activity": "me.magnum.melonds.ui.emulator.EmulatorActivity",
+      "extras": { "PATH": "%ROM%", "uri": "%ROMSAF%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "ppsspp", "name": "PPSSPP",
+      "packages": ["org.ppsspp.ppssppgold", "org.ppsspp.ppsspp"],
+      "activity": "org.ppsspp.ppsspp.PpssppActivity",
+      "action": "android.intent.action.VIEW",
+      "data": "%ROMPROVIDER%",
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "duckstation", "name": "DuckStation",
+      "packages": ["com.github.stenzek.duckstation"],
+      "activity": "com.github.stenzek.duckstation.EmulationActivity",
+      "extras": { "bootPath": "%ROMSAF%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "nethersx2", "name": "NetherSX2 / AetherSX2",
+      "packages": ["xyz.aethersx2.android", "xyz.aethersx2.custom"],
+      "activity": "xyz.aethersx2.android.EmulationActivity",
+      "extras": { "bootPath": "%ROMSAF%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "dolphin", "name": "Dolphin",
+      "packages": ["org.dolphinemu.dolphinemu", "org.dolphinemu.dolphinemu.debug"],
+      "activity": "org.dolphinemu.dolphinemu.ui.main.MainActivity",
+      "extras": { "AutoStartFile": "%ROMSAF%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "dolphin_mmjr", "name": "Dolphin MMJR2",
+      "packages": ["org.dolphinemu.mmjr"],
+      "activity": "org.dolphinemu.dolphinemu.ui.main.MainActivity",
+      "extras": { "AutoStartFile": "%ROM%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "azahar", "name": "Azahar",
+      "packages": ["org.azahar_emu.azahar"],
+      "activity": "org.citra.citra_emu.activities.EmulationActivity",
+      "extras": { "SelectedGame": "%ROMSAF%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "citra", "name": "Citra",
+      "packages": ["org.citra.emu", "org.citra.citra_emu", "org.citra.citra_emu.canary"],
+      "activity": "org.citra.citra_emu.activities.EmulationActivity",
+      "extras": { "SelectedGame": "%ROMSAF%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "lime3ds", "name": "Lime3DS",
+      "packages": ["io.github.lime3ds.android"],
+      "activity": "io.github.lime3ds.android.activities.EmulationActivity",
+      "extras": { "SelectedGame": "%ROMSAF%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "redream", "name": "Redream",
+      "packages": ["io.recompiled.redream"],
+      "activity": "io.recompiled.redream.MainActivity",
+      "action": "android.intent.action.VIEW",
+      "data": "%ROMPROVIDER%",
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "flycast", "name": "Flycast",
+      "packages": ["com.flycast.emulator"],
+      "activity": "com.flycast.emulator.MainActivity",
+      "action": "android.intent.action.VIEW",
+      "data": "%ROMPROVIDER%",
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "yabasanshiro2", "name": "Yaba Sanshiro 2",
+      "packages": ["org.devmiyax.yabasanshioro2.pro", "org.devmiyax.yabasanshioro2"],
+      "activity": "org.uoyabause.android.Yabause",
+      "extras": { "org.uoyabause.android.FileNameEx": "%ROMSAF%" },
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "m64plusfz", "name": "Mupen64Plus FZ",
+      "packages": ["org.mupen64plusae.v3.fzurita.pro", "org.mupen64plusae.v3.fzurita"],
+      "activity": "paulscode.android.mupen64plusae.SplashActivity",
+      "action": "android.intent.action.VIEW",
+      "data": "%ROMSAF%",
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "mame4droid", "name": "MAME4droid",
+      "packages": ["com.seleuco.mame4d2024", "com.seleuco.mame4droid"],
+      "activity": "com.seleuco.mame4droid.MAME4droid",
+      "action": "android.intent.action.VIEW",
+      "data": "%ROMSAF%",
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "eden", "name": "Eden",
+      "packages": ["dev.eden.eden_emulator"],
+      "activity": "org.yuzu.yuzu_emu.activities.EmulationActivity",
+      "action": "android.intent.action.VIEW",
+      "data": "%ROMSAF%",
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "citron", "name": "Citron",
+      "packages": ["org.citron.citron_emu"],
+      "activity": "org.citron.citron_emu.activities.EmulationActivity",
+      "action": "android.intent.action.VIEW",
+      "data": "%ROMSAF%",
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "sudachi", "name": "Sudachi",
+      "packages": ["org.sudachi.sudachi_emu"],
+      "activity": "org.sudachi.sudachi_emu.activities.EmulationActivity",
+      "action": "android.intent.action.VIEW",
+      "data": "%ROMSAF%",
+      "ingame": { "menu": "back" }
+    },
+    {
+      "id": "yuzu", "name": "yuzu",
+      "packages": ["org.yuzu.yuzu_emu", "org.yuzu.yuzu_emu.ea"],
+      "activity": "org.yuzu.yuzu_emu.activities.EmulationActivity",
+      "action": "android.intent.action.VIEW",
+      "data": "%ROMSAF%",
+      "ingame": { "menu": "back" }
+    }
+  ]
+}

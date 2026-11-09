@@ -1,0 +1,2802 @@
+{
+ "version": 1,
+ "source": "dArkOS wiki: Emulators and Ports information",
+ "systems": [
+  {
+   "id": "3do",
+   "name": "3DO",
+   "folders": [
+    "3do"
+   ],
+   "extensions": [
+    "iso",
+    "bin",
+    "chd",
+    "cue"
+   ],
+   "emulators": [
+    "ra:opera"
+   ],
+   "screenscraper": 29,
+   "icons": [
+    "3do"
+   ],
+   "short": "3DO"
+  },
+  {
+   "id": "3ds",
+   "name": "3DS",
+   "folders": [
+    "3ds"
+   ],
+   "extensions": [
+    "3ds",
+    "3dsx",
+    "z3dsx",
+    "elf",
+    "axf",
+    "cci",
+    "zcci",
+    "cxi",
+    "zcxi",
+    "app"
+   ],
+   "emulators": [
+    "ra:citra",
+    "sa:azahar",
+    "sa:citra",
+    "sa:lime3ds"
+   ],
+   "screenscraper": 17,
+   "icons": [
+    "3ds"
+   ],
+   "short": "3DS"
+  },
+  {
+   "id": "advision",
+   "name": "Adventure Vision",
+   "folders": [
+    "advision"
+   ],
+   "extensions": [
+    "zip"
+   ],
+   "emulators": [
+    "ra:mame"
+   ],
+   "screenscraper": 78,
+   "icons": [
+    "advision"
+   ],
+   "short": "ADVI"
+  },
+  {
+   "id": "alg",
+   "name": "American Laser Games",
+   "folders": [
+    "alg"
+   ],
+   "extensions": [
+    "alg"
+   ],
+   "emulators": [],
+   "screenscraper": 75,
+   "icons": [
+    "alg"
+   ],
+   "short": "ALG"
+  },
+  {
+   "id": "amiga",
+   "name": "Amiga",
+   "folders": [
+    "amiga"
+   ],
+   "extensions": [
+    "adf",
+    "hdf",
+    "lha",
+    "zip"
+   ],
+   "emulators": [
+    "ra:puae",
+    "ra:uae4arm"
+   ],
+   "screenscraper": 64,
+   "icons": [
+    "amiga"
+   ],
+   "short": "AMIG"
+  },
+  {
+   "id": "amigacd32",
+   "name": "Amiga CD32",
+   "folders": [
+    "amigacd32"
+   ],
+   "extensions": [
+    "cue",
+    "ccd",
+    "chd",
+    "lha",
+    "nrg",
+    "mds",
+    "iso",
+    "m3u"
+   ],
+   "emulators": [
+    "ra:puae",
+    "ra:uae4arm"
+   ],
+   "screenscraper": 130,
+   "icons": [
+    "amigacd32",
+    "amiga"
+   ],
+   "short": "AMIG"
+  },
+  {
+   "id": "amstradcpc",
+   "name": "Amstrad CPC",
+   "folders": [
+    "amstradcpc"
+   ],
+   "extensions": [
+    "cpc",
+    "dsk",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:crocods",
+    "ra:cap32"
+   ],
+   "screenscraper": 65,
+   "icons": [
+    "amstradcpc",
+    "cpc"
+   ],
+   "short": "AMST"
+  },
+  {
+   "id": "gx4000",
+   "name": "Amstrad GX4000",
+   "folders": [
+    "gx4000"
+   ],
+   "extensions": [
+    "cpr",
+    "dsk",
+    "zip"
+   ],
+   "emulators": [
+    "ra:cap32"
+   ],
+   "screenscraper": 87,
+   "icons": [
+    "gx4000",
+    "cpc"
+   ],
+   "short": "GX40"
+  },
+  {
+   "id": "apple2",
+   "name": "Apple II",
+   "folders": [
+    "apple2"
+   ],
+   "extensions": [
+    "dsk",
+    "sh",
+    "do",
+    "po",
+    "apple2",
+    "zip"
+   ],
+   "emulators": [],
+   "screenscraper": 86,
+   "icons": [
+    "apple2"
+   ],
+   "short": "APPL"
+  },
+  {
+   "id": "vmac",
+   "name": "Apple Macintosh",
+   "folders": [
+    "vmac"
+   ],
+   "extensions": [
+    "cmd",
+    "dsk",
+    "hvf",
+    "img",
+    "zip"
+   ],
+   "emulators": [
+    "ra:minivmac"
+   ],
+   "screenscraper": 146,
+   "icons": [
+    "vmac"
+   ],
+   "short": "VMAC"
+  },
+  {
+   "id": "piece",
+   "name": "Aquaplus P/ECE",
+   "folders": [
+    "piece"
+   ],
+   "extensions": [
+    "pex",
+    "pfi"
+   ],
+   "emulators": [],
+   "screenscraper": null,
+   "icons": [
+    "piece"
+   ],
+   "short": "PIEC"
+  },
+  {
+   "id": "arcade",
+   "name": "Arcade",
+   "folders": [
+    "arcade"
+   ],
+   "extensions": [
+    "zip",
+    "7z",
+    "cue"
+   ],
+   "emulators": [
+    "ra:fbneo",
+    "ra:fbalpha2012",
+    "ra:mame",
+    "sa:mame4droid"
+   ],
+   "screenscraper": 75,
+   "icons": [
+    "arcade"
+   ],
+   "short": "ARC"
+  },
+  {
+   "id": "arduboy",
+   "name": "Arduboy",
+   "folders": [
+    "arduboy"
+   ],
+   "extensions": [
+    "hex"
+   ],
+   "emulators": [
+    "ra:ardens",
+    "ra:arduous"
+   ],
+   "screenscraper": 263,
+   "icons": [
+    "arduboy"
+   ],
+   "short": "ARDU"
+  },
+  {
+   "id": "astrocde",
+   "name": "Astrocade",
+   "folders": [
+    "astrocde"
+   ],
+   "extensions": [
+    "7z",
+    "bin",
+    "zip"
+   ],
+   "emulators": [
+    "ra:mame"
+   ],
+   "screenscraper": 44,
+   "icons": [
+    "astrocde"
+   ],
+   "short": "ASTR"
+  },
+  {
+   "id": "atari2600",
+   "name": "Atari 2600",
+   "folders": [
+    "atari2600"
+   ],
+   "extensions": [
+    "a26",
+    "bin",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:stella2014",
+    "ra:stella"
+   ],
+   "screenscraper": 26,
+   "icons": [
+    "atari2600",
+    "atari"
+   ],
+   "short": "ATAR"
+  },
+  {
+   "id": "atari5200",
+   "name": "Atari 5200",
+   "folders": [
+    "atari5200"
+   ],
+   "extensions": [
+    "a52",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:atari800",
+    "ra:a5200"
+   ],
+   "screenscraper": 40,
+   "icons": [
+    "atari5200",
+    "5200"
+   ],
+   "short": "ATAR"
+  },
+  {
+   "id": "atari7800",
+   "name": "Atari 7800",
+   "folders": [
+    "atari7800"
+   ],
+   "extensions": [
+    "a78",
+    "zip"
+   ],
+   "emulators": [
+    "ra:prosystem"
+   ],
+   "screenscraper": 41,
+   "icons": [
+    "atari7800",
+    "7800"
+   ],
+   "short": "ATAR"
+  },
+  {
+   "id": "atari800",
+   "name": "Atari 800",
+   "folders": [
+    "atari800"
+   ],
+   "extensions": [
+    "atr",
+    "rom",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:atari800"
+   ],
+   "screenscraper": 43,
+   "icons": [
+    "atari800",
+    "atari"
+   ],
+   "short": "ATAR"
+  },
+  {
+   "id": "atarijaguar",
+   "name": "Atari Jaguar",
+   "folders": [
+    "atarijaguar"
+   ],
+   "extensions": [
+    "j64",
+    "jag",
+    "rom",
+    "abs",
+    "cof",
+    "bin",
+    "prg"
+   ],
+   "emulators": [
+    "ra:virtualjaguar"
+   ],
+   "screenscraper": 27,
+   "icons": [
+    "atarijaguar",
+    "jaguar"
+   ],
+   "short": "ATAR"
+  },
+  {
+   "id": "atarilynx",
+   "name": "Atari Lynx",
+   "folders": [
+    "atarilynx"
+   ],
+   "extensions": [
+    "7z",
+    "lnx",
+    "zip"
+   ],
+   "emulators": [
+    "ra:handy",
+    "ra:mednafen_lynx"
+   ],
+   "screenscraper": 28,
+   "icons": [
+    "atarilynx",
+    "lynx"
+   ],
+   "short": "ATAR"
+  },
+  {
+   "id": "atarist",
+   "name": "Atari ST",
+   "folders": [
+    "atarist"
+   ],
+   "extensions": [
+    "st",
+    "msa",
+    "stx",
+    "dim",
+    "ipf",
+    "zip"
+   ],
+   "emulators": [
+    "ra:hatari"
+   ],
+   "screenscraper": 42,
+   "icons": [
+    "atarist"
+   ],
+   "short": "ATAR"
+  },
+  {
+   "id": "atarixegs",
+   "name": "Atari XEGS",
+   "folders": [
+    "atarixegs"
+   ],
+   "extensions": [
+    "bin",
+    "rom",
+    "xex",
+    "zip"
+   ],
+   "emulators": [
+    "ra:atari800"
+   ],
+   "screenscraper": 43,
+   "icons": [
+    "atarixegs",
+    "atari"
+   ],
+   "short": "ATAR"
+  },
+  {
+   "id": "atomiswave",
+   "name": "Atomiswave",
+   "folders": [
+    "atomiswave"
+   ],
+   "extensions": [
+    "7z",
+    "ist",
+    "zip",
+    "bin"
+   ],
+   "emulators": [
+    "ra:flycast",
+    "sa:flycast"
+   ],
+   "screenscraper": 53,
+   "icons": [
+    "atomiswave"
+   ],
+   "short": "ATOM"
+  },
+  {
+   "id": "bbcmicro",
+   "name": "BBC Micro",
+   "folders": [
+    "bbcmicro"
+   ],
+   "extensions": [
+    "dsd",
+    "ssd"
+   ],
+   "emulators": [],
+   "screenscraper": 37,
+   "icons": [
+    "bbcmicro"
+   ],
+   "short": "BBCM"
+  },
+  {
+   "id": "cavestory",
+   "name": "Cave Story",
+   "folders": [
+    "cavestory"
+   ],
+   "extensions": [
+    "dll",
+    "exe",
+    "so"
+   ],
+   "emulators": [
+    "ra:nxengine"
+   ],
+   "screenscraper": 135,
+   "icons": [
+    "cavestory"
+   ],
+   "short": "CAVE"
+  },
+  {
+   "id": "cdimono1",
+   "name": "CDi",
+   "folders": [
+    "cdimono1"
+   ],
+   "extensions": [
+    "iso",
+    "chd"
+   ],
+   "emulators": [
+    "ra:same_cdi"
+   ],
+   "screenscraper": 133,
+   "icons": [
+    "cdimono1"
+   ],
+   "short": "CDIM"
+  },
+  {
+   "id": "coleco",
+   "name": "Colecovision",
+   "folders": [
+    "coleco"
+   ],
+   "extensions": [
+    "rom",
+    "ri",
+    "mx1",
+    "mx2",
+    "col",
+    "dsk",
+    "cas",
+    "sg",
+    "sc",
+    "m3u",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:bluemsx"
+   ],
+   "screenscraper": 48,
+   "icons": [
+    "coleco",
+    "col"
+   ],
+   "short": "COLE"
+  },
+  {
+   "id": "c128",
+   "name": "Commodore 128",
+   "folders": [
+    "c128"
+   ],
+   "extensions": [
+    "d64",
+    "d71",
+    "d80",
+    "d81",
+    "d82",
+    "g64",
+    "g41",
+    "x64",
+    "t64",
+    "tap",
+    "prg",
+    "p00",
+    "crt",
+    "bin",
+    "zip",
+    "gz",
+    "d6z",
+    "d7z",
+    "d8z",
+    "g6z",
+    "g4z",
+    "x6z",
+    "cmd",
+    "m3u",
+    "vsf",
+    "nib",
+    "nbz"
+   ],
+   "emulators": [
+    "ra:vice_x128"
+   ],
+   "screenscraper": 66,
+   "icons": [
+    "c128",
+    "c64"
+   ],
+   "short": "C128"
+  },
+  {
+   "id": "c16",
+   "name": "Commodore 16",
+   "folders": [
+    "c16"
+   ],
+   "extensions": [
+    "d64",
+    "d71",
+    "d80",
+    "d81",
+    "d82",
+    "g64",
+    "g41",
+    "x64",
+    "t64",
+    "tap",
+    "prg",
+    "p00",
+    "crt",
+    "bin",
+    "zip",
+    "gz",
+    "d6z",
+    "d7z",
+    "d8z",
+    "g6z",
+    "g4z",
+    "x6z",
+    "cmd",
+    "m3u",
+    "vsf",
+    "nib",
+    "nbz"
+   ],
+   "emulators": [
+    "ra:vice_xplus4"
+   ],
+   "screenscraper": 99,
+   "icons": [
+    "c16",
+    "c64"
+   ],
+   "short": "C16"
+  },
+  {
+   "id": "c64",
+   "name": "Commodore 64/PET",
+   "folders": [
+    "c64"
+   ],
+   "extensions": [
+    "d64",
+    "zip",
+    "7z",
+    "t64",
+    "crt",
+    "prg",
+    "nib",
+    "tap"
+   ],
+   "emulators": [
+    "ra:vice_x64"
+   ],
+   "screenscraper": 66,
+   "icons": [
+    "c64"
+   ],
+   "short": "C64"
+  },
+  {
+   "id": "vic20",
+   "name": "Commodore Vic-20",
+   "folders": [
+    "vic20"
+   ],
+   "extensions": [
+    "20",
+    "40",
+    "60",
+    "a0",
+    "b0",
+    "d64",
+    "d71",
+    "d80",
+    "d81",
+    "d82",
+    "g64",
+    "g41",
+    "x64",
+    "t64",
+    "tap",
+    "prg",
+    "p00",
+    "crt",
+    "bin",
+    "gz",
+    "d6z",
+    "d7z",
+    "d8z",
+    "g6z",
+    "g4z",
+    "x6z",
+    "cmd",
+    "m3u",
+    "vsf",
+    "nib",
+    "nbz",
+    "zip"
+   ],
+   "emulators": [
+    "ra:vice_xvic"
+   ],
+   "screenscraper": 73,
+   "icons": [
+    "vic20",
+    "c64"
+   ],
+   "short": "VIC2"
+  },
+  {
+   "id": "cps1",
+   "name": "CPS 1",
+   "folders": [
+    "cps1"
+   ],
+   "extensions": [
+    "zip",
+    "7z",
+    "cue"
+   ],
+   "emulators": [
+    "ra:fbneo",
+    "ra:fbalpha2012"
+   ],
+   "screenscraper": 6,
+   "icons": [
+    "cps1"
+   ],
+   "short": "CPS1"
+  },
+  {
+   "id": "cps2",
+   "name": "CPS 2",
+   "folders": [
+    "cps2"
+   ],
+   "extensions": [
+    "zip",
+    "7z",
+    "cue"
+   ],
+   "emulators": [
+    "ra:fbneo",
+    "ra:fbalpha2012"
+   ],
+   "screenscraper": 7,
+   "icons": [
+    "cps2"
+   ],
+   "short": "CPS2"
+  },
+  {
+   "id": "cps3",
+   "name": "CPS 3",
+   "folders": [
+    "cps3"
+   ],
+   "extensions": [
+    "zip",
+    "7z",
+    "cue"
+   ],
+   "emulators": [
+    "ra:fbneo",
+    "ra:fbalpha2012"
+   ],
+   "screenscraper": 8,
+   "icons": [
+    "cps3"
+   ],
+   "short": "CPS3"
+  },
+  {
+   "id": "daphne",
+   "name": "Daphne",
+   "folders": [
+    "daphne"
+   ],
+   "extensions": [
+    "daphne"
+   ],
+   "emulators": [],
+   "screenscraper": 49,
+   "icons": [
+    "daphne"
+   ],
+   "short": "DAPH"
+  },
+  {
+   "id": "doom",
+   "name": "Doom",
+   "folders": [
+    "doom"
+   ],
+   "extensions": [
+    "wad",
+    "sh",
+    "doom"
+   ],
+   "emulators": [
+    "ra:prboom"
+   ],
+   "screenscraper": 135,
+   "icons": [
+    "doom"
+   ],
+   "short": "DOOM"
+  },
+  {
+   "id": "dragon32",
+   "name": "Dragon32/64",
+   "folders": [
+    "dragon32"
+   ],
+   "extensions": [
+    "bin",
+    "cas",
+    "ccc",
+    "dsk",
+    "rom",
+    "wav",
+    "zip"
+   ],
+   "emulators": [],
+   "screenscraper": 91,
+   "icons": [
+    "dragon32"
+   ],
+   "short": "DRAG"
+  },
+  {
+   "id": "dreamcast",
+   "name": "Dreamcast",
+   "folders": [
+    "dreamcast"
+   ],
+   "extensions": [
+    "gdi",
+    "cdi",
+    "cue",
+    "chd",
+    "m3u"
+   ],
+   "emulators": [
+    "ra:flycast",
+    "sa:redream",
+    "sa:flycast"
+   ],
+   "screenscraper": 23,
+   "icons": [
+    "dreamcast",
+    "dc"
+   ],
+   "short": "DC"
+  },
+  {
+   "id": "vmu",
+   "name": "Dreamcast VMU",
+   "folders": [
+    "vmu"
+   ],
+   "extensions": [
+    "vms",
+    "bin"
+   ],
+   "emulators": [
+    "ra:vemulator"
+   ],
+   "screenscraper": 23,
+   "icons": [
+    "vmu"
+   ],
+   "short": "VMU"
+  },
+  {
+   "id": "easyrpg",
+   "name": "EasyRPG",
+   "folders": [
+    "easyrpg"
+   ],
+   "extensions": [
+    "easyrpg",
+    "zip"
+   ],
+   "emulators": [
+    "ra:easyrpg"
+   ],
+   "screenscraper": 231,
+   "icons": [
+    "easyrpg"
+   ],
+   "short": "EASY"
+  },
+  {
+   "id": "enterprise",
+   "name": "Enterprise 64/128",
+   "folders": [
+    "enterprise"
+   ],
+   "extensions": [
+    "128",
+    "bas",
+    "com",
+    "dsk",
+    "dtf",
+    "img",
+    "tap",
+    "trn"
+   ],
+   "emulators": [
+    "ra:ep128emu_core"
+   ],
+   "screenscraper": null,
+   "icons": [
+    "enterprise"
+   ],
+   "short": "ENTE"
+  },
+  {
+   "id": "channelf",
+   "name": "Fairchild Channel F",
+   "folders": [
+    "channelf"
+   ],
+   "extensions": [
+    "bin",
+    "rom",
+    "chf",
+    "zip"
+   ],
+   "emulators": [
+    "ra:freechaf"
+   ],
+   "screenscraper": 80,
+   "icons": [
+    "channelf",
+    "fairchild"
+   ],
+   "short": "CHAN"
+  },
+  {
+   "id": "fds",
+   "name": "Famicom Disk System",
+   "folders": [
+    "fds"
+   ],
+   "extensions": [
+    "nes",
+    "unif",
+    "unf",
+    "fds",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:nestopia",
+    "ra:fceumm"
+   ],
+   "screenscraper": 106,
+   "icons": [
+    "fds"
+   ],
+   "short": "FDS"
+  },
+  {
+   "id": "gameandwatch",
+   "name": "Game and Watch",
+   "folders": [
+    "gameandwatch"
+   ],
+   "extensions": [
+    "mgw"
+   ],
+   "emulators": [
+    "ra:gw"
+   ],
+   "screenscraper": 52,
+   "icons": [
+    "gameandwatch",
+    "gw"
+   ],
+   "short": "GAME"
+  },
+  {
+   "id": "gb",
+   "name": "Game Boy",
+   "folders": [
+    "gb"
+   ],
+   "extensions": [
+    "gb",
+    "gbc",
+    "dmg",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:gambatte",
+    "ra:mgba",
+    "ra:tgbdual",
+    "ra:DoubleCherryGB"
+   ],
+   "screenscraper": 9,
+   "icons": [
+    "gb"
+   ],
+   "short": "GB"
+  },
+  {
+   "id": "gba",
+   "name": "Game Boy Advance",
+   "folders": [
+    "gba"
+   ],
+   "extensions": [
+    "gb",
+    "gbc",
+    "gba",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mgba",
+    "ra:vbam",
+    "ra:vba_next",
+    "ra:gpsp"
+   ],
+   "screenscraper": 12,
+   "icons": [
+    "gba"
+   ],
+   "short": "GBA"
+  },
+  {
+   "id": "gbc",
+   "name": "Game Boy Color",
+   "folders": [
+    "gbc"
+   ],
+   "extensions": [
+    "gb",
+    "gbc",
+    "dmg",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:gambatte",
+    "ra:mgba",
+    "ra:tgbdual",
+    "ra:DoubleCherryGB"
+   ],
+   "screenscraper": 10,
+   "icons": [
+    "gbc"
+   ],
+   "short": "GBC"
+  },
+  {
+   "id": "gamegear",
+   "name": "Game Gear",
+   "folders": [
+    "gamegear"
+   ],
+   "extensions": [
+    "bin",
+    "gg",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:genesis_plus_gx"
+   ],
+   "screenscraper": 21,
+   "icons": [
+    "gamegear",
+    "gg"
+   ],
+   "short": "GG"
+  },
+  {
+   "id": "gc",
+   "name": "Gamecube",
+   "folders": [
+    "gc"
+   ],
+   "extensions": [
+    "elf",
+    "gcz",
+    "iso",
+    "m3u",
+    "rvz",
+    "wad",
+    "wbfs",
+    "wia"
+   ],
+   "emulators": [
+    "sa:dolphin",
+    "ra:dolphin",
+    "sa:dolphin_mmjr"
+   ],
+   "screenscraper": 13,
+   "icons": [
+    "gc"
+   ],
+   "short": "GC"
+  },
+  {
+   "id": "megadrive",
+   "name": "Genesis/Megadrive",
+   "folders": [
+    "megadrive",
+    "genesis"
+   ],
+   "extensions": [
+    "68k",
+    "mdx",
+    "md",
+    "sgd",
+    "smd",
+    "gen",
+    "bin",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:genesis_plus_gx",
+    "ra:genesis_plus_gx_wide",
+    "ra:picodrive"
+   ],
+   "screenscraper": 1,
+   "icons": [
+    "megadrive",
+    "md",
+    "genesis"
+   ],
+   "short": "MD"
+  },
+  {
+   "id": "intellivision",
+   "name": "Intellivision",
+   "folders": [
+    "intellivision"
+   ],
+   "extensions": [
+    "bin",
+    "int",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:freeintv"
+   ],
+   "screenscraper": 115,
+   "icons": [
+    "intellivision",
+    "itv"
+   ],
+   "short": "INTE"
+  },
+  {
+   "id": "j2me",
+   "name": "Java (FreeJ2ME)",
+   "folders": [
+    "j2me"
+   ],
+   "extensions": [
+    "jar"
+   ],
+   "emulators": [
+    "ra:freej2me"
+   ],
+   "screenscraper": null,
+   "icons": [
+    "j2me"
+   ],
+   "short": "J2ME"
+  },
+  {
+   "id": "lowresnx",
+   "name": "LowRes NX",
+   "folders": [
+    "lowresnx"
+   ],
+   "extensions": [
+    "nx"
+   ],
+   "emulators": [
+    "ra:lowresnx"
+   ],
+   "screenscraper": 244,
+   "icons": [
+    "lowresnx"
+   ],
+   "short": "LOWR"
+  },
+  {
+   "id": "mame2003",
+   "name": "Mame 2003",
+   "folders": [
+    "mame2003"
+   ],
+   "extensions": [
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mame2003_plus"
+   ],
+   "screenscraper": 75,
+   "icons": [
+    "mame2003",
+    "arcade"
+   ],
+   "short": "MAME"
+  },
+  {
+   "id": "mame",
+   "name": "Mame 2010",
+   "folders": [
+    "mame"
+   ],
+   "extensions": [
+    "zip",
+    "7z",
+    "chd"
+   ],
+   "emulators": [
+    "ra:mame2010",
+    "sa:mame4droid"
+   ],
+   "screenscraper": 75,
+   "icons": [
+    "mame",
+    "arcade"
+   ],
+   "short": "MAME"
+  },
+  {
+   "id": "mastersystem",
+   "name": "Master System",
+   "folders": [
+    "mastersystem"
+   ],
+   "extensions": [
+    "7z",
+    "bin",
+    "sms",
+    "zip"
+   ],
+   "emulators": [
+    "ra:genesis_plus_gx",
+    "ra:picodrive"
+   ],
+   "screenscraper": 2,
+   "icons": [
+    "mastersystem",
+    "ms"
+   ],
+   "short": "SMS"
+  },
+  {
+   "id": "megaduck",
+   "name": "Mega Duck",
+   "folders": [
+    "megaduck"
+   ],
+   "extensions": [
+    "bin",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:sameduck",
+    "ra:mame"
+   ],
+   "screenscraper": 90,
+   "icons": [
+    "megaduck"
+   ],
+   "short": "MEGA"
+  },
+  {
+   "id": "msumd",
+   "name": "Megadrive MSU",
+   "folders": [
+    "msumd"
+   ],
+   "extensions": [
+    "md"
+   ],
+   "emulators": [
+    "ra:genesis_plus_gx"
+   ],
+   "screenscraper": 1,
+   "icons": [
+    "msumd",
+    "md"
+   ],
+   "short": "MSUM"
+  },
+  {
+   "id": "mv",
+   "name": "Microvision",
+   "folders": [
+    "mv"
+   ],
+   "extensions": [
+    "bin"
+   ],
+   "emulators": [],
+   "screenscraper": null,
+   "icons": [
+    "mv"
+   ],
+   "short": "MV"
+  },
+  {
+   "id": "msx",
+   "name": "MSX",
+   "folders": [
+    "msx"
+   ],
+   "extensions": [
+    "cas",
+    "dsk",
+    "mx1",
+    "mx2",
+    "rom",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:bluemsx",
+    "ra:fmsx"
+   ],
+   "screenscraper": 113,
+   "icons": [
+    "msx"
+   ],
+   "short": "MSX"
+  },
+  {
+   "id": "msx2",
+   "name": "MSX2",
+   "folders": [
+    "msx2"
+   ],
+   "extensions": [
+    "cas",
+    "dsk",
+    "mx1",
+    "mx2",
+    "rom",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:bluemsx",
+    "ra:fmsx"
+   ],
+   "screenscraper": 116,
+   "icons": [
+    "msx2",
+    "msx"
+   ],
+   "short": "MSX2"
+  },
+  {
+   "id": "naomi",
+   "name": "Naomi",
+   "folders": [
+    "naomi"
+   ],
+   "extensions": [
+    "7z",
+    "ist",
+    "zip",
+    "bin",
+    "dat"
+   ],
+   "emulators": [
+    "ra:flycast",
+    "sa:flycast"
+   ],
+   "screenscraper": 56,
+   "icons": [
+    "naomi"
+   ],
+   "short": "NAOM"
+  },
+  {
+   "id": "neogeo",
+   "name": "Neo Geo",
+   "folders": [
+    "neogeo"
+   ],
+   "extensions": [
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:fbneo",
+    "ra:fbalpha2012",
+    "ra:geolith"
+   ],
+   "screenscraper": 142,
+   "icons": [
+    "neogeo"
+   ],
+   "short": "NEO"
+  },
+  {
+   "id": "neogeocd",
+   "name": "Neo Geo CD",
+   "folders": [
+    "neogeocd"
+   ],
+   "extensions": [
+    "cue",
+    "chd",
+    "m3u"
+   ],
+   "emulators": [
+    "ra:neocd",
+    "ra:fbneo"
+   ],
+   "screenscraper": 70,
+   "icons": [
+    "neogeocd",
+    "neocd"
+   ],
+   "short": "NEOG"
+  },
+  {
+   "id": "ngp",
+   "name": "Neo Geo Pocket",
+   "folders": [
+    "ngp"
+   ],
+   "extensions": [
+    "ngp",
+    "ngc",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mednafen_ngp"
+   ],
+   "screenscraper": 25,
+   "icons": [
+    "ngp"
+   ],
+   "short": "NGP"
+  },
+  {
+   "id": "ngpc",
+   "name": "Neo Geo Pocket Color",
+   "folders": [
+    "ngpc"
+   ],
+   "extensions": [
+    "ngp",
+    "ngc",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mednafen_ngp"
+   ],
+   "screenscraper": 82,
+   "icons": [
+    "ngpc",
+    "ngp"
+   ],
+   "short": "NGPC"
+  },
+  {
+   "id": "n64",
+   "name": "Nintendo 64",
+   "folders": [
+    "n64"
+   ],
+   "extensions": [
+    "7z",
+    "zip",
+    "z64",
+    "n64",
+    "v64"
+   ],
+   "emulators": [
+    "sa:m64plusfz",
+    "ra:parallel_n64",
+    "ra:mupen64plus_next_gles3"
+   ],
+   "screenscraper": 14,
+   "icons": [
+    "n64"
+   ],
+   "short": "N64"
+  },
+  {
+   "id": "n64dd",
+   "name": "Nintendo 64DD",
+   "folders": [
+    "n64dd"
+   ],
+   "extensions": [
+    "d64",
+    "n64",
+    "n64dd",
+    "ndd",
+    "z64"
+   ],
+   "emulators": [
+    "ra:parallel_n64"
+   ],
+   "screenscraper": 122,
+   "icons": [
+    "n64dd"
+   ],
+   "short": "N64D"
+  },
+  {
+   "id": "nds",
+   "name": "Nintendo DS",
+   "folders": [
+    "nds"
+   ],
+   "extensions": [
+    "zip",
+    "nds"
+   ],
+   "emulators": [
+    "sa:drastic",
+    "ra:melondsds",
+    "ra:melonds",
+    "ra:desmume",
+    "sa:melonds"
+   ],
+   "screenscraper": 15,
+   "icons": [
+    "nds"
+   ],
+   "short": "NDS"
+  },
+  {
+   "id": "nes",
+   "name": "Nintendo Entertainment System (NES)/Famicom",
+   "folders": [
+    "nes",
+    "famicom"
+   ],
+   "extensions": [
+    "nes",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:nestopia",
+    "ra:fceumm"
+   ],
+   "screenscraper": 3,
+   "icons": [
+    "nes",
+    "fc",
+    "famicom"
+   ],
+   "short": "NES"
+  },
+  {
+   "id": "switch",
+   "name": "Nintendo Switch",
+   "folders": [
+    "switch"
+   ],
+   "extensions": [
+    "nsp",
+    "xci",
+    "nca",
+    "nro",
+    "nso"
+   ],
+   "emulators": [
+    "sa:eden",
+    "sa:citron",
+    "sa:sudachi",
+    "sa:yuzu"
+   ],
+   "screenscraper": 225,
+   "icons": [
+    "switch"
+   ],
+   "short": "NSW"
+  },
+  {
+   "id": "wii",
+   "name": "Nintendo Wii",
+   "folders": [
+    "wii"
+   ],
+   "extensions": [
+    "iso",
+    "rvz",
+    "wbfs",
+    "wia",
+    "gcz",
+    "ciso",
+    "wad",
+    "dol",
+    "elf",
+    "m3u"
+   ],
+   "emulators": [
+    "sa:dolphin",
+    "sa:dolphin_mmjr",
+    "ra:dolphin"
+   ],
+   "screenscraper": 16,
+   "icons": [
+    "wii"
+   ],
+   "short": "Wii"
+  },
+  {
+   "id": "odyssey2",
+   "name": "Odyssey2",
+   "folders": [
+    "odyssey2"
+   ],
+   "extensions": [
+    "bin"
+   ],
+   "emulators": [
+    "ra:o2em"
+   ],
+   "screenscraper": 104,
+   "icons": [
+    "odyssey2",
+    "ody"
+   ],
+   "short": "ODYS"
+  },
+  {
+   "id": "openbor",
+   "name": "OpenBOR",
+   "folders": [
+    "openbor"
+   ],
+   "extensions": [
+    "pak"
+   ],
+   "emulators": [],
+   "screenscraper": 214,
+   "icons": [
+    "openbor"
+   ],
+   "short": "OPEN"
+  },
+  {
+   "id": "palm",
+   "name": "Palm OS",
+   "folders": [
+    "palm"
+   ],
+   "extensions": [
+    "img",
+    "prc"
+   ],
+   "emulators": [
+    "ra:mu"
+   ],
+   "screenscraper": 219,
+   "icons": [
+    "palm"
+   ],
+   "short": "PALM"
+  },
+  {
+   "id": "dos",
+   "name": "PC (MS-DOS)",
+   "folders": [
+    "dos"
+   ],
+   "extensions": [
+    "dosz",
+    "exe",
+    "com",
+    "bat",
+    "conf",
+    "cue",
+    "iso",
+    "zip"
+   ],
+   "emulators": [
+    "ra:dosbox_pure",
+    "ra:dosbox_svn"
+   ],
+   "screenscraper": 135,
+   "icons": [
+    "dos"
+   ],
+   "short": "DOS"
+  },
+  {
+   "id": "pcenginecd",
+   "name": "PC Engine CD/TurboGraphx CD",
+   "folders": [
+    "pcenginecd",
+    "turbografxcd"
+   ],
+   "extensions": [
+    "pce",
+    "ccd",
+    "iso",
+    "img",
+    "chd",
+    "cue"
+   ],
+   "emulators": [
+    "ra:mednafen_pce_fast",
+    "ra:mednafen_pce",
+    "ra:mednafen_supergrafx"
+   ],
+   "screenscraper": 114,
+   "icons": [
+    "pcenginecd",
+    "pcecd",
+    "turbografxcd"
+   ],
+   "short": "PCEN"
+  },
+  {
+   "id": "pcengine",
+   "name": "PC Engine/TurboGraphx-16",
+   "folders": [
+    "pcengine",
+    "turbografx"
+   ],
+   "extensions": [
+    "pce",
+    "chd",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mednafen_pce_fast",
+    "ra:mednafen_pce",
+    "ra:mednafen_supergrafx"
+   ],
+   "screenscraper": 31,
+   "icons": [
+    "pcengine",
+    "pce",
+    "turbografx"
+   ],
+   "short": "PCE"
+  },
+  {
+   "id": "pcfx",
+   "name": "PC-FX",
+   "folders": [
+    "pcfx"
+   ],
+   "extensions": [
+    "chd",
+    "zip",
+    "cue",
+    "ccd",
+    "toc"
+   ],
+   "emulators": [
+    "ra:mednafen_pcfx"
+   ],
+   "screenscraper": 72,
+   "icons": [
+    "pcfx"
+   ],
+   "short": "PCFX"
+  },
+  {
+   "id": "pc98",
+   "name": "PC98",
+   "folders": [
+    "pc98"
+   ],
+   "extensions": [
+    "cmd",
+    "d88",
+    "fdi",
+    "hdi",
+    "zip"
+   ],
+   "emulators": [
+    "ra:nekop2",
+    "ra:np2kai"
+   ],
+   "screenscraper": 208,
+   "icons": [
+    "pc98"
+   ],
+   "short": "PC98"
+  },
+  {
+   "id": "pico-8",
+   "name": "Pico-8",
+   "folders": [
+    "pico-8/carts"
+   ],
+   "extensions": [
+    "png",
+    "p8"
+   ],
+   "emulators": [
+    "ra:fake08"
+   ],
+   "screenscraper": 234,
+   "icons": [
+    "pico-8",
+    "pico"
+   ],
+   "short": "PICO"
+  },
+  {
+   "id": "psx",
+   "name": "Playstation 1 (PSX)",
+   "folders": [
+    "psx"
+   ],
+   "extensions": [
+    "cue",
+    "img",
+    "mdf",
+    "pbp",
+    "toc",
+    "cbn",
+    "m3u",
+    "ccd",
+    "chd",
+    "zip",
+    "7z",
+    "iso"
+   ],
+   "emulators": [
+    "ra:pcsx_rearmed",
+    "ra:swanstation",
+    "sa:duckstation"
+   ],
+   "screenscraper": 57,
+   "icons": [
+    "psx",
+    "ps"
+   ],
+   "short": "PS1"
+  },
+  {
+   "id": "ps2",
+   "name": "PlayStation 2",
+   "folders": [
+    "ps2"
+   ],
+   "extensions": [
+    "iso",
+    "chd",
+    "cso",
+    "bin",
+    "img",
+    "mdf",
+    "nrg",
+    "elf",
+    "gz",
+    "zso"
+   ],
+   "emulators": [
+    "sa:nethersx2"
+   ],
+   "screenscraper": 58,
+   "icons": [
+    "ps2"
+   ],
+   "short": "PS2"
+  },
+  {
+   "id": "psp",
+   "name": "Playstation Portable (PSP)",
+   "folders": [
+    "psp"
+   ],
+   "extensions": [
+    "iso",
+    "chd",
+    "cso",
+    "pbp"
+   ],
+   "emulators": [
+    "sa:ppsspp",
+    "ra:ppsspp"
+   ],
+   "screenscraper": 61,
+   "icons": [
+    "psp"
+   ],
+   "short": "PSP"
+  },
+  {
+   "id": "pspminis",
+   "name": "Playstation Portable (PSP) Minis",
+   "folders": [
+    "pspminis"
+   ],
+   "extensions": [
+    "iso",
+    "chd",
+    "cso",
+    "pbp"
+   ],
+   "emulators": [
+    "sa:ppsspp",
+    "ra:ppsspp"
+   ],
+   "screenscraper": 172,
+   "icons": [
+    "pspminis",
+    "psp"
+   ],
+   "short": "PSPM"
+  },
+  {
+   "id": "pokemonmini",
+   "name": "Pokemon Mini",
+   "folders": [
+    "pokemonmini"
+   ],
+   "extensions": [
+    "min",
+    "zip"
+   ],
+   "emulators": [
+    "ra:pokemini"
+   ],
+   "screenscraper": 211,
+   "icons": [
+    "pokemonmini",
+    "poke"
+   ],
+   "short": "POKE"
+  },
+  {
+   "id": "puzzlescript",
+   "name": "PuzzleScript",
+   "folders": [
+    "puzzlescript"
+   ],
+   "extensions": [
+    "pz",
+    "pzp"
+   ],
+   "emulators": [
+    "ra:puzzlescript"
+   ],
+   "screenscraper": null,
+   "icons": [
+    "puzzlescript"
+   ],
+   "short": "PUZZ"
+  },
+  {
+   "id": "satellaview",
+   "name": "Satellaview",
+   "folders": [
+    "satellaview"
+   ],
+   "extensions": [
+    "bs",
+    "sfc",
+    "smc",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:snes9x"
+   ],
+   "screenscraper": 107,
+   "icons": [
+    "satellaview",
+    "satella"
+   ],
+   "short": "SATE"
+  },
+  {
+   "id": "scummvm",
+   "name": "ScummVM",
+   "folders": [
+    "scummvm"
+   ],
+   "extensions": [
+    "scummvm"
+   ],
+   "emulators": [
+    "ra:scummvm"
+   ],
+   "screenscraper": 123,
+   "icons": [
+    "scummvm"
+   ],
+   "short": "SCUM"
+  },
+  {
+   "id": "sega32x",
+   "name": "Sega 32X",
+   "folders": [
+    "sega32x"
+   ],
+   "extensions": [
+    "32x",
+    "7z",
+    "bin",
+    "md",
+    "smd",
+    "zip"
+   ],
+   "emulators": [
+    "ra:picodrive"
+   ],
+   "screenscraper": 19,
+   "icons": [
+    "sega32x",
+    "32X"
+   ],
+   "short": "32X"
+  },
+  {
+   "id": "segacd",
+   "name": "Sega CD",
+   "folders": [
+    "segacd"
+   ],
+   "extensions": [
+    "bin",
+    "chd",
+    "cue",
+    "iso"
+   ],
+   "emulators": [
+    "ra:genesis_plus_gx",
+    "ra:picodrive"
+   ],
+   "screenscraper": 20,
+   "icons": [
+    "segacd"
+   ],
+   "short": "SCD"
+  },
+  {
+   "id": "pico",
+   "name": "Sega Pico",
+   "folders": [
+    "pico"
+   ],
+   "extensions": [
+    "mdx",
+    "md",
+    "smd",
+    "gen",
+    "bin",
+    "cue",
+    "iso",
+    "sms",
+    "gg",
+    "sg",
+    "sgd",
+    "68k",
+    "chd",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:picodrive"
+   ],
+   "screenscraper": 250,
+   "icons": [
+    "pico"
+   ],
+   "short": "PICO"
+  },
+  {
+   "id": "saturn",
+   "name": "Sega Saturn",
+   "folders": [
+    "saturn"
+   ],
+   "extensions": [
+    "img",
+    "cue",
+    "chd",
+    "iso",
+    "m3u"
+   ],
+   "emulators": [
+    "ra:yabasanshiro",
+    "ra:yabause",
+    "sa:yabasanshiro2",
+    "ra:mednafen_saturn"
+   ],
+   "screenscraper": 22,
+   "icons": [
+    "saturn"
+   ],
+   "short": "SAT"
+  },
+  {
+   "id": "sg-1000",
+   "name": "SG 1000",
+   "folders": [
+    "sg-1000"
+   ],
+   "extensions": [
+    "7z",
+    "bin",
+    "sg",
+    "zip"
+   ],
+   "emulators": [
+    "ra:genesis_plus_gx"
+   ],
+   "screenscraper": 109,
+   "icons": [
+    "sg-1000",
+    "segasgone"
+   ],
+   "short": "SG-1"
+  },
+  {
+   "id": "x1",
+   "name": "Sharp X1",
+   "folders": [
+    "x1"
+   ],
+   "extensions": [
+    "dx1",
+    "zip",
+    "2d",
+    "2hd",
+    "tfd",
+    "d88",
+    "88d",
+    "hdm",
+    "xdf",
+    "dup",
+    "cmd"
+   ],
+   "emulators": [
+    "ra:x1"
+   ],
+   "screenscraper": 220,
+   "icons": [
+    "x1"
+   ],
+   "short": "X1"
+  },
+  {
+   "id": "x68000",
+   "name": "Sharp X68000",
+   "folders": [
+    "x68000"
+   ],
+   "extensions": [
+    "dim",
+    "m3u"
+   ],
+   "emulators": [
+    "ra:px68k"
+   ],
+   "screenscraper": 79,
+   "icons": [
+    "x68000"
+   ],
+   "short": "X680"
+  },
+  {
+   "id": "solarus",
+   "name": "Solarus",
+   "folders": [
+    "solarus"
+   ],
+   "extensions": [
+    "solarus",
+    "zip"
+   ],
+   "emulators": [],
+   "screenscraper": 223,
+   "icons": [
+    "solarus"
+   ],
+   "short": "SOLA"
+  },
+  {
+   "id": "sufami",
+   "name": "SuFami Turbo",
+   "folders": [
+    "sufami"
+   ],
+   "extensions": [
+    "smc",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:snes9x2010",
+    "ra:snes9x",
+    "ra:snes9x2002",
+    "ra:snes9x2005"
+   ],
+   "screenscraper": 108,
+   "icons": [
+    "sufami"
+   ],
+   "short": "SUFA"
+  },
+  {
+   "id": "scv",
+   "name": "Super Cassette Vision",
+   "folders": [
+    "scv"
+   ],
+   "extensions": [
+    "0",
+    "bin",
+    "cart",
+    "rom",
+    "zip"
+   ],
+   "emulators": [
+    "ra:emuscv"
+   ],
+   "screenscraper": 67,
+   "icons": [
+    "scv"
+   ],
+   "short": "SCV"
+  },
+  {
+   "id": "sgb",
+   "name": "Super Game Boy",
+   "folders": [
+    "sgb"
+   ],
+   "extensions": [
+    "gb",
+    "gbc",
+    "dmg",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mgba"
+   ],
+   "screenscraper": 127,
+   "icons": [
+    "sgb"
+   ],
+   "short": "SGB"
+  },
+  {
+   "id": "supergrafx",
+   "name": "Super Grafx",
+   "folders": [
+    "supergrafx"
+   ],
+   "extensions": [
+    "pce",
+    "sgx",
+    "cue",
+    "ccd",
+    "chd",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mednafen_supergrafx"
+   ],
+   "screenscraper": 105,
+   "icons": [
+    "supergrafx",
+    "sgfx"
+   ],
+   "short": "SUPE"
+  },
+  {
+   "id": "snes",
+   "name": "Super Nintendo Entertainment System (SNES)/Super Famicom (SFC)",
+   "folders": [
+    "snes",
+    "sfc"
+   ],
+   "extensions": [
+    "sfc",
+    "smc",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:snes9x",
+    "ra:snes9x2010",
+    "ra:snes9x2002",
+    "ra:snes9x2005"
+   ],
+   "screenscraper": 4,
+   "icons": [
+    "snes",
+    "sfc"
+   ],
+   "short": "SNES"
+  },
+  {
+   "id": "snes-hacks",
+   "name": "Super Nintendo Entertainment System Hacks",
+   "folders": [
+    "snes-hacks"
+   ],
+   "extensions": [
+    "smc",
+    "fig",
+    "bs",
+    "st",
+    "sfc",
+    "gd3",
+    "gd7",
+    "dx2",
+    "bsx",
+    "swc",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:snes9x2010"
+   ],
+   "screenscraper": 4,
+   "icons": [
+    "snes-hacks",
+    "sfc"
+   ],
+   "short": "SNES"
+  },
+  {
+   "id": "snesmsu1",
+   "name": "Super Nintendo MSU1",
+   "folders": [
+    "snesmsu1"
+   ],
+   "extensions": [
+    "smc",
+    "sfc",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:snes9x"
+   ],
+   "screenscraper": 4,
+   "icons": [
+    "snesmsu1",
+    "sfc"
+   ],
+   "short": "SNES"
+  },
+  {
+   "id": "coco3",
+   "name": "Tandy Color Computer 3 aka CoCo3 (Radioshack TRS-80)",
+   "folders": [
+    "coco3"
+   ],
+   "extensions": [
+    "bin",
+    "cas",
+    "ccc",
+    "dsk",
+    "rom",
+    "wav",
+    "zip"
+   ],
+   "emulators": [
+    "ra:mame"
+   ],
+   "screenscraper": 144,
+   "icons": [
+    "coco3"
+   ],
+   "short": "COCO"
+  },
+  {
+   "id": "thomson",
+   "name": "Thomson",
+   "folders": [
+    "thomson"
+   ],
+   "extensions": [
+    "fd",
+    "k7",
+    "m5",
+    "m7",
+    "rom",
+    "sap"
+   ],
+   "emulators": [
+    "ra:theodore"
+   ],
+   "screenscraper": 141,
+   "icons": [
+    "thomson"
+   ],
+   "short": "THOM"
+  },
+  {
+   "id": "ti99",
+   "name": "TI-99",
+   "folders": [
+    "ti99"
+   ],
+   "extensions": [
+    "ctg"
+   ],
+   "emulators": [],
+   "screenscraper": 205,
+   "icons": [
+    "ti99"
+   ],
+   "short": "TI99"
+  },
+  {
+   "id": "tic80",
+   "name": "Tic-80",
+   "folders": [
+    "tic80"
+   ],
+   "extensions": [
+    "tic"
+   ],
+   "emulators": [
+    "ra:tic80"
+   ],
+   "screenscraper": 222,
+   "icons": [
+    "tic80",
+    "tic"
+   ],
+   "short": "TIC8"
+  },
+  {
+   "id": "tigerlcd",
+   "name": "Tiger LCD Games",
+   "folders": [
+    "tigerlcd"
+   ],
+   "extensions": [
+    "zip"
+   ],
+   "emulators": [
+    "ra:mame"
+   ],
+   "screenscraper": null,
+   "icons": [
+    "tigerlcd"
+   ],
+   "short": "TIGE"
+  },
+  {
+   "id": "uzebox",
+   "name": "Uzebox",
+   "folders": [
+    "uzebox"
+   ],
+   "extensions": [
+    "uze"
+   ],
+   "emulators": [
+    "ra:uzem"
+   ],
+   "screenscraper": 216,
+   "icons": [
+    "uzebox"
+   ],
+   "short": "UZEB"
+  },
+  {
+   "id": "vectrex",
+   "name": "Vectrex",
+   "folders": [
+    "vectrex"
+   ],
+   "extensions": [
+    "vec",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:vecx"
+   ],
+   "screenscraper": 102,
+   "icons": [
+    "vectrex"
+   ],
+   "short": "VECT"
+  },
+  {
+   "id": "videopac",
+   "name": "Videopac",
+   "folders": [
+    "videopac"
+   ],
+   "extensions": [
+    "bin",
+    "zip"
+   ],
+   "emulators": [
+    "ra:o2em"
+   ],
+   "screenscraper": 104,
+   "icons": [
+    "videopac",
+    "vdp"
+   ],
+   "short": "VIDE"
+  },
+  {
+   "id": "tvc",
+   "name": "Videoton TV-Computer",
+   "folders": [
+    "tvc"
+   ],
+   "extensions": [
+    "cas"
+   ],
+   "emulators": [
+    "ra:ep128emu_core"
+   ],
+   "screenscraper": null,
+   "icons": [
+    "tvc"
+   ],
+   "short": "TVC"
+  },
+  {
+   "id": "vircon32",
+   "name": "Vircon32",
+   "folders": [
+    "vircon32"
+   ],
+   "extensions": [
+    "v32"
+   ],
+   "emulators": [
+    "ra:vircon32"
+   ],
+   "screenscraper": null,
+   "icons": [
+    "vircon32"
+   ],
+   "short": "VIRC"
+  },
+  {
+   "id": "virtualboy",
+   "name": "Virtual Boy",
+   "folders": [
+    "virtualboy"
+   ],
+   "extensions": [
+    "vb",
+    "vboy",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mednafen_vb"
+   ],
+   "screenscraper": 11,
+   "icons": [
+    "virtualboy",
+    "vb"
+   ],
+   "short": "VIRT"
+  },
+  {
+   "id": "onscripter",
+   "name": "Visual Novel games engine (ONScripter)",
+   "folders": [
+    "onscripter"
+   ],
+   "extensions": [
+    "dat",
+    "txt"
+   ],
+   "emulators": [
+    "ra:onscripter"
+   ],
+   "screenscraper": null,
+   "icons": [
+    "onscripter"
+   ],
+   "short": "ONSC"
+  },
+  {
+   "id": "wasm4",
+   "name": "WASM-4",
+   "folders": [
+    "wasm4"
+   ],
+   "extensions": [
+    "wasm"
+   ],
+   "emulators": [
+    "ra:wasm4"
+   ],
+   "screenscraper": 262,
+   "icons": [
+    "wasm4"
+   ],
+   "short": "WASM"
+  },
+  {
+   "id": "supervision",
+   "name": "Watara Supervision",
+   "folders": [
+    "supervision"
+   ],
+   "extensions": [
+    "bin",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:potator"
+   ],
+   "screenscraper": 207,
+   "icons": [
+    "supervision"
+   ],
+   "short": "SUPE"
+  },
+  {
+   "id": "wolf",
+   "name": "Wolfenstein",
+   "folders": [
+    "wolf"
+   ],
+   "extensions": [
+    "wolf",
+    "ecwolf"
+   ],
+   "emulators": [
+    "ra:ecwolf"
+   ],
+   "screenscraper": 135,
+   "icons": [
+    "wolf"
+   ],
+   "short": "WOLF"
+  },
+  {
+   "id": "wonderswan",
+   "name": "WonderSwan",
+   "folders": [
+    "wonderswan"
+   ],
+   "extensions": [
+    "ws",
+    "pc2",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mednafen_wswan"
+   ],
+   "screenscraper": 45,
+   "icons": [
+    "wonderswan",
+    "ws"
+   ],
+   "short": "WOND"
+  },
+  {
+   "id": "wonderswancolor",
+   "name": "WonderSwan Color",
+   "folders": [
+    "wonderswancolor"
+   ],
+   "extensions": [
+    "wsc",
+    "pc2",
+    "zip",
+    "7z"
+   ],
+   "emulators": [
+    "ra:mednafen_wswan"
+   ],
+   "screenscraper": 46,
+   "icons": [
+    "wonderswancolor",
+    "ws"
+   ],
+   "short": "WOND"
+  },
+  {
+   "id": "zxspectrum",
+   "name": "ZX Spectrum",
+   "folders": [
+    "zxspectrum"
+   ],
+   "extensions": [
+    "sna",
+    "szx",
+    "z80",
+    "tap",
+    "tzx",
+    "gz",
+    "udi",
+    "mgt",
+    "img",
+    "trd",
+    "scl",
+    "dsk"
+   ],
+   "emulators": [
+    "ra:fuse"
+   ],
+   "screenscraper": 76,
+   "icons": [
+    "zxspectrum",
+    "zxs"
+   ],
+   "short": "ZXSP"
+  },
+  {
+   "id": "zx81",
+   "name": "ZX-81",
+   "folders": [
+    "zx81"
+   ],
+   "extensions": [
+    "p",
+    "tzx",
+    "zip"
+   ],
+   "emulators": [
+    "ra:81"
+   ],
+   "screenscraper": 77,
+   "icons": [
+    "zx81",
+    "zxs"
+   ],
+   "short": "ZX81"
+  }
+ ]
+}
