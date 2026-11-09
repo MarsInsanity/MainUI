@@ -1,0 +1,107 @@
+# Builds MainUI on every push, runs the unit tests, and publishes the APK as a
+# GitHub release that the app's updater (Settings > Updates) installs.
+#
+# Releases need a signing key, kept as repository secrets (Settings > Secrets
+# and variables > Actions):
+#   MAINUI_KEYSTORE           the keystore file, base64 encoded (required)
+#   MAINUI_KEYSTORE_PASSWORD  its password      (default "android")
+#   MAINUI_KEY_ALIAS          the key's alias   (default "androiddebugkey")
+#   MAINUI_KEY_PASSWORD       the key password  (default "android")
+# Without them the build still runs and its APK is kept as a workflow artifact,
+# but nothing is released: Android only updates an installed app with a build
+# signed by the same key, so every release must use the same one.
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version number is the commit count
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Signing key
+        id: key
+        env:
+          KEYSTORE: ${{ secrets.MAINUI_KEYSTORE }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::notice::MAINUI_KEYSTORE is not set: building with a throwaway key, no release."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/mainui.keystore"
+          echo "MAINUI_KEYSTORE=$RUNNER_TEMP/mainui.keystore" >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Test and build
+        env:
+          MAINUI_KEYSTORE_PASSWORD: ${{ secrets.MAINUI_KEYSTORE_PASSWORD }}
+          MAINUI_KEY_ALIAS: ${{ secrets.MAINUI_KEY_ALIAS }}
+          MAINUI_KEY_PASSWORD: ${{ secrets.MAINUI_KEY_PASSWORD }}
+          SS_DEV_ID: ${{ secrets.SS_DEV_ID }}
+          SS_DEV_PASSWORD: ${{ secrets.SS_DEV_PASSWORD }}
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+
+      - name: Name the APK
+        id: apk
+        run: |
+          version="0.1.$(git rev-list --count HEAD)"
+          cp app/build/outputs/apk/release/app-release.apk "MainUI-$version.apk"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "file=MainUI-$version.apk" >> "$GITHUB_OUTPUT"
+          rm -f "$RUNNER_TEMP/mainui.keystore"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MainUI-${{ steps.apk.outputs.version }}
+          path: ${{ steps.apk.outputs.file }}
+
+      - name: Publish release
+        if: steps.key.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.apk.outputs.version }}
+          FILE: ${{ steps.apk.outputs.file }}
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # Same commit (a re-run): nothing to do. Same count on another branch: keep both.
+            if [ "$(git rev-list -n 1 "$tag" 2>/dev/null)" = "$GITHUB_SHA" ]; then exit 0; fi
+            tag="v$VERSION-${GITHUB_SHA::7}"
+          fi
+          {
+            echo "Built from \`$GITHUB_REF_NAME\` at ${GITHUB_SHA::7}."
+            echo
+            git log -1 --format=%B
+          } > notes.md
+          gh release create "$tag" "$FILE" --title "MainUI $VERSION" --notes-file notes.md --target "$GITHUB_SHA" --latest
+
+      - name: Keep the newest 20 releases
+        if: steps.key.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 200 --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[20:] | .[].tagName' |
+            while read -r tag; do gh release delete "$tag" --cleanup-tag --yes; done

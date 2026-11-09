@@ -15,6 +15,23 @@ val localProps = Properties().apply {
 fun secret(key: String, env: String): String =
     (localProps.getProperty(key) ?: System.getenv(env) ?: "").replace("\"", "\\\"")
 
+// Version = number of commits, so a build made here and one made by GitHub Actions
+// from the same commit get the same number, and every later commit a higher one
+// (the in-app updater compares them). CI checks out the full history for this.
+val commitCount: Int = runCatching {
+    val p = ProcessBuilder("git", "rev-list", "--count", "HEAD").directory(rootDir).redirectErrorStream(true).start()
+    val out = p.inputStream.bufferedReader().readText().trim()
+    if (p.waitFor() == 0) out.toInt() else null
+}.getOrNull() ?: 1
+
+// Repository the in-app updater reads releases from ("owner/name").
+val updateRepo: String = System.getenv("GITHUB_REPOSITORY")?.takeIf { it.isNotBlank() } ?: "MarsInsanity/MainUI"
+
+// Release signing key: GitHub Actions writes the MAINUI_KEYSTORE secret to a file and
+// passes its path in MAINUI_KEYSTORE. Without it, builds use this machine's debug key
+// (fine for testing, but Android only updates an install with a build signed by the same key).
+val releaseKeystore: String? = System.getenv("MAINUI_KEYSTORE")?.takeIf { File(it).isFile }
+
 android {
     namespace = "io.github.marsinsanity.mainui"
     compileSdk = 35
@@ -23,18 +40,30 @@ android {
         applicationId = "io.github.marsinsanity.mainui"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = commitCount
+        versionName = "0.1.$commitCount"
+        buildConfigField("String", "UPDATE_REPO", "\"$updateRepo\"")
         buildConfigField("String", "SS_DEV_ID", "\"${secret("screenscraper.devid", "SS_DEV_ID")}\"")
         buildConfigField("String", "SS_DEV_PASSWORD", "\"${secret("screenscraper.devpassword", "SS_DEV_PASSWORD")}\"")
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) create("mainui") {
+            storeFile = file(releaseKeystore)
+            storePassword = System.getenv("MAINUI_KEYSTORE_PASSWORD")?.takeIf { it.isNotEmpty() } ?: "android"
+            keyAlias = System.getenv("MAINUI_KEY_ALIAS")?.takeIf { it.isNotEmpty() } ?: "androiddebugkey"
+            keyPassword = System.getenv("MAINUI_KEY_PASSWORD")?.takeIf { it.isNotEmpty() } ?: "android"
+        }
+    }
+
     buildTypes {
+        val signing = signingConfigs.findByName("mainui") ?: signingConfigs.getByName("debug")
+        debug {
+            signingConfig = signing
+        }
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so a release build can be sideloaded
-            // directly; replace with your own signing config for distribution.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signing
         }
     }
 
