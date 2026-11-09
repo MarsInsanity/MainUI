@@ -52,6 +52,8 @@ data class EmuDef(
     val load: String?,
     /** Where to get it ("get" in emulators.json): github, url, page, play, note, buildbot. */
     val get: Map<String, String> = emptyMap(),
+    /** "root": true in emulators.json: the game activity isn't exported, so it is started with root. */
+    val rootLaunch: Boolean = false,
 ) {
     val packages: List<String> get() = components.map { it.first }.distinct()
 }
@@ -158,6 +160,7 @@ class EmulatorManager(
             save = save,
             load = load,
             get = o.optJSONObject("get")?.let { g -> g.keys().asSequence().associateWith { k -> g.optString(k) } } ?: emptyMap(),
+            rootLaunch = o.optBoolean("root", false),
         )
     }
 
@@ -366,8 +369,10 @@ class EmulatorManager(
             runCatching { if (rom.isFile && rom.length() < 4096) rom.readText().lineSequence().firstOrNull()?.trim() else null }
                 .getOrNull()?.takeIf { it.isNotEmpty() } ?: rom.nameWithoutExtension
         }
+        val rpcsxGame by lazy { Ps3Games.rpcsxPath(rom) }
         fun sub(t: String): String = t
             .replace("%FILECONTENT%", if (t.contains("%FILECONTENT%")) fileContent else "")
+            .replace("%RPCSX_GAME%", if (t.contains("%RPCSX_GAME%")) rpcsxGame else "")
             .replace("%GAMEDIR%", rom.parentFile?.absolutePath ?: "")
             .replace("%ROM%", rom.absolutePath)
             .replace("%ROMURI%", Uri.fromFile(rom).toString())

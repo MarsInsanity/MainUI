@@ -99,7 +99,7 @@ ANDROID_EXTRA_SYSTEMS = [
     dict(id='ps2', name='PlayStation 2', folders=['ps2'],
          ext='.iso .chd .cso .ciso .bin .img .mdf .nrg .elf .gz .zso .isz .m3u .dump',
          standalone=['armsx2', 'nethersx2']),
-    dict(id='ps3', name='PlayStation 3', folders=['ps3'], ext='.iso .ps3', standalone=['armsx3']),
+    dict(id='ps3', name='PlayStation 3', folders=['ps3'], ext='.iso .ps3', standalone=['armsx3', 'rpcsx']),
     dict(id='psvita', name='PlayStation Vita', folders=['psvita'], ext='.psvita', standalone=['vita3k']),
     dict(id='xbox', name='Microsoft Xbox', folders=['xbox'], ext='.iso .xiso', standalone=['hakux']),
     dict(id='wii', name='Nintendo Wii', folders=['wii'], ext='.iso .rvz .wbfs .wia .gcz .ciso .wad .dol .elf .m3u',

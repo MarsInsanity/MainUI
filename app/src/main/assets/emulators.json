@@ -11,7 +11,8 @@
     "Placeholders: %ROM% absolute path, %ROMURI% file:// uri, %ROMPROVIDER% content:// uri served by MainUI,",
     "%ROMSAF% Storage Access Framework document uri (the emulator needs folder access), %BASENAME% file name without",
     "extension, %GAMEDIR% folder of the rom, %FILECONTENT% first line of the rom file (Vita3K title ids), %PKG%, %CORE%,",
-    "%CORE_PATH%, %RA_CONFIG%. Extras prefixed 'bool:', 'int:' or 'array:' (comma separated) are typed.",
+    "%CORE_PATH%, %RA_CONFIG%, %RPCSX_GAME% (folder of the title id's game installed in RPCSX). 'root': true starts the",
+    "activity with root (for emulators that don't export it). Extras prefixed 'bool:', 'int:' or 'array:' (comma separated) are typed.",
     "ingame.states: 'api' (RetroArch network commands), 'hotkey' (MainUI injects ingame.save / ingame.load keys with root;",
     "bind the same keys in the emulator, the in-game menu's 'Bind hotkeys' sends them for you), 'menu' (only through the",
     "emulator's own menu), 'none' (no save states). ingame.menu: back | key:<KEYCODE> | none."
@@ -59,9 +60,17 @@
     },
     {
       "id": "armsx3", "name": "ARMSX3",
-      "get": { "note": "No official download known to MainUI" },
+      "get": { "github": "ARMSX2/ARMSX3", "note": "Disc images, game folders, or .ps3 files holding a title id (ARMSX3's frontend export)" },
       "components": ["com.armsx3/com.armsx2.Main", "com.armsx3.play/com.armsx2.Main"],
       "extras": { "path": "%ROM%" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "none" }
+    },
+    {
+      "id": "rpcsx", "name": "RPCSX",
+      "get": { "github": "RPCSX/rpcsx-ui-android", "note": "Starts games installed in RPCSX: put a .ps3 file holding the title id (like BLUS12345) in roms/ps3. Needs root." },
+      "components": ["net.rpcsx/.RPCSXActivity"],
+      "root": true,
+      "extras": { "path": "%RPCSX_GAME%" }, "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "none" }
     },
     {

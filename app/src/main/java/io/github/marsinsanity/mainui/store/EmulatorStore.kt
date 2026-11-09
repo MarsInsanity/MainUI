@@ -109,7 +109,7 @@ object EmulatorStore {
     }
 
     /** Ranks an APK file name for a device whose main ABI is [abi]. */
-    fun scoreApk(name: String, abi: String): Int {
+    fun scoreApk(name: String, abi: String, sdk: Int = Build.VERSION.SDK_INT, armv82: Boolean = cpuHasArmv82): Int {
         val n = name.lowercase()
         var s = 0
         val is64 = abi == "arm64-v8a"
@@ -118,13 +118,31 @@ object EmulatorStore {
             n.contains("x86_64") || n.contains("x64") -> s += if (abi == "x86_64") 30 else -100
             n.contains("x86") -> s += if (abi == "x86") 30 else -100
             n.contains("armeabi") || n.contains("v7a") || n.contains("arm32") || n.contains("armv7") -> s += if (abi == "armeabi-v7a") 30 else -40
+            Regex("""armv8\.?\d?""").containsMatchIn(n) -> s += if (is64) 30 else -100   // ARMSX3: armv8.2 / armv8.1
             n.contains("universal") -> s += 20
         }
+        // Builds per Android version ("...-sdk33.apk"): never one this Android can't install,
+        // otherwise the newest that fits (it uses what this Android version offers).
+        Regex("""(?:^|[^a-z])sdk(\d{2})(?:[^0-9]|$)""").find(n)?.groupValues?.get(1)?.toIntOrNull()?.let { min ->
+            s += if (min > sdk) -200 else (min - 20).coerceIn(0, 19)
+        }
+        // CPU level builds: armv8.2 needs the ARMv8.2 instructions (every arm64 chip from 2019 on).
+        if (n.contains("armv8.2") && !armv82) s -= 200
         // Store-specific flavours and test builds last.
         if (n.contains("googleplay") || n.contains("play-store") || n.contains("playstore")) s -= 15
         if (n.contains("debug") || n.contains("unsigned")) s -= 25
-        if (n.contains("legacy")) s -= 5
+        if (n.contains("legacy")) s -= if (armv82) 25 else 5
         return s
+    }
+
+    /**
+     * True when the CPU has ARMv8.2 (half-precision SIMD, "asimdhp" in /proc/cpuinfo).
+     * True when it can't be read, since nearly every current arm64 handheld has it.
+     */
+    val cpuHasArmv82: Boolean by lazy {
+        val features = runCatching { File("/proc/cpuinfo").readLines() }.getOrNull()
+            ?.filter { it.startsWith("Features", true) }?.joinToString(" ")?.lowercase()
+        if (features.isNullOrBlank()) true else features.split(Regex("\\s+")).contains("asimdhp")
     }
 
     /** RetroArch's latest stable build from retroarch.com (64-bit build on arm64 devices). */
