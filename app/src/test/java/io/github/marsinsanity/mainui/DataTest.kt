@@ -89,3 +89,24 @@ class CoresTest {
         assertEquals("2.5 MB", io.github.marsinsanity.mainui.store.formatBytes(2_621_440))
     }
 }
+
+class EmulatorStoreTest {
+    private val es = io.github.marsinsanity.mainui.store.EmulatorStore
+
+    @Test
+    fun newestVersionComparesNumerically() {
+        // retroarch.com lists versions as text: 1.9.9 comes after 1.22.2 alphabetically.
+        assertEquals("1.22.2", es.newestVersion(listOf("1.9.9", "1.22.2", "1.10.0", "1.22.1")))
+        assertEquals(null, es.newestVersion(emptyList()))
+    }
+
+    @Test
+    fun picksTheRightApkForTheCpu() {
+        val names = listOf("app-armeabi-v7a-release.apk", "app-arm64-v8a-release.apk", "app-x86_64-release.apk", "app-universal-release.apk")
+        assertEquals("app-arm64-v8a-release.apk", names.maxByOrNull { es.scoreApk(it, "arm64-v8a") })
+        assertEquals("app-x86_64-release.apk", names.maxByOrNull { es.scoreApk(it, "x86_64") })
+        // Store flavours and debug builds lose to the plain build.
+        val flavours = listOf("azahar-2125.0-android-googleplay.apk", "azahar-2125.0-android-vanilla.apk", "app-debug.apk")
+        assertEquals("azahar-2125.0-android-vanilla.apk", flavours.maxByOrNull { es.scoreApk(it, "arm64-v8a") })
+    }
+}

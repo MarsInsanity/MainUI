@@ -1,6 +1,9 @@
 {
   "version": 2,
   "_doc": [
+    "get: where Apps > App Store > Emulators finds it. github: 'owner/repo' (APK of the latest release), url: direct APK,",
+    "buildbot: RetroArch from retroarch.com, play: Google Play package, page: website, note: text shown. F-Droid repos are",
+    "searched by package name automatically.",
     "Launch recipes for Android emulators. Copy this file to <storage>/MainUI/emulators.json to override or extend it;",
     "entries in the override file replace built-in entries with the same id.",
     "Recipes follow ES-DE's maintained Android rules (resources/systems/android/es_find_rules.xml and es_systems.xml).",
@@ -14,6 +17,7 @@
     "emulator's own menu), 'none' (no save states). ingame.menu: back | key:<KEYCODE> | none."
   ],
   "retroarch": {
+    "get": { "buildbot": "true", "page": "https://www.retroarch.com/?page=platforms" },
     "name": "RetroArch",
     "packages": ["com.retroarch.aarch64", "com.retroarch", "com.retroarch.ra32"],
     "activity": "com.retroarch.browser.retroactivity.RetroActivityFuture",
@@ -30,6 +34,7 @@
   "standalone": [
     {
       "id": "armsx2", "name": "ARMSX2",
+      "get": { "page": "https://armsx2.net", "play": "come.nanodata.armsx2" },
       "components": [
         "come.nanodata.armsx2/com.armsx2.MainActivity",
         "com.armsx2/.MainActivity",
@@ -42,6 +47,7 @@
     },
     {
       "id": "nethersx2", "name": "NetherSX2 / AetherSX2",
+      "get": { "page": "https://github.com/Trixarian/NetherSX2-patch", "note": "Built from an AetherSX2 APK with a patch; see the page" },
       "components": [
         "xyz.aethersx2.android/.EmulationActivity",
         "xyz.aethersx2.tturnip/xyz.aethersx2.android.EmulationActivity",
@@ -53,24 +59,28 @@
     },
     {
       "id": "armsx3", "name": "ARMSX3",
+      "get": { "note": "No official download known to MainUI" },
       "components": ["com.armsx3/com.armsx2.Main", "com.armsx3.play/com.armsx2.Main"],
       "extras": { "path": "%ROM%" }, "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "none" }
     },
     {
       "id": "vita3k", "name": "Vita3K",
+      "get": { "github": "Vita3K/Vita3K-Android", "page": "https://vita3k.org/", "note": "Newer builds may only be on vita3k.org" },
       "components": ["org.vita3k.emulator/.Emulator", "org.vita3k.emulator.ikhoeyZX/org.vita3k.emulator.Emulator"],
       "extras": { "AppStartParameters": "array:-r,%FILECONTENT%" }, "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "none" }
     },
     {
       "id": "hakux", "name": "hakuX",
+      "get": { "github": "rfandango/hakuX" },
       "components": ["com.rfandango.haku_x/.LauncherActivity"],
       "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "menu" }
     },
     {
       "id": "ppsspp", "name": "PPSSPP",
+      "get": { "page": "https://www.ppsspp.org/download/", "play": "org.ppsspp.ppsspp" },
       "components": ["org.ppsspp.ppssppgold/org.ppsspp.ppsspp.PpssppActivity", "org.ppsspp.ppsspp/.PpssppActivity"],
       "action": "android.intent.action.VIEW", "category": "android.intent.category.DEFAULT", "data": "%ROMSAF%",
       "flags": ["NEW_TASK"],
@@ -78,6 +88,7 @@
     },
     {
       "id": "duckstation", "name": "DuckStation",
+      "get": { "play": "com.github.stenzek.duckstation", "page": "https://www.duckstation.org/" },
       "components": ["com.github.stenzek.duckstation/.EmulationActivity"],
       "extras": { "resumeState": "bool:false", "bootPath": "%ROMSAF%" },
       "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
@@ -85,12 +96,14 @@
     },
     {
       "id": "drastic", "name": "DraStic",
+      "get": { "play": "com.dsemu.drastic", "note": "Paid app on Google Play" },
       "components": ["com.dsemu.drastic/.DraSticActivity"],
       "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "melonds", "name": "melonDS",
+      "get": { "github": "rafaelvcaetano/melonDS-android", "play": "me.magnum.melonds" },
       "components": [
         "me.magnum.melonds/.ui.emulator.EmulatorActivity",
         "me.magnum.melondualds/me.magnum.melonds.ui.emulator.EmulatorActivity"
@@ -100,12 +113,14 @@
     },
     {
       "id": "melonds_nightly", "name": "melonDS Nightly",
+      "get": { "page": "https://github.com/rafaelvcaetano/melonDS-android" },
       "components": ["me.magnum.melonds.nightly/me.magnum.melonds.ui.emulator.EmulatorActivity"],
       "action": "me.magnum.melonds.nightly.LAUNCH_ROM", "extras": { "uri": "%ROMSAF%" }, "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "dolphin", "name": "Dolphin",
+      "get": { "page": "https://dolphin-emu.org/download/", "play": "org.dolphinemu.dolphinemu" },
       "components": ["org.dolphinemu.dolphinemu/.ui.main.TvMainActivity"],
       "action": "android.intent.action.MAIN", "category": "android.intent.category.LEANBACK_LAUNCHER",
       "extras": { "AutoStartFile": "%ROMSAF%" }, "flags": ["NEW_TASK"],
@@ -113,6 +128,7 @@
     },
     {
       "id": "dolphin_mmjr", "name": "Dolphin MMJR / MMJR2",
+      "get": { "note": "Unofficial fork, no longer updated" },
       "components": [
         "org.dolphinemu.mmjr/org.dolphinemu.dolphinemu.ui.main.MainActivity",
         "org.mm.jr/org.dolphinemu.dolphinemu.ui.main.MainActivity"
@@ -122,6 +138,7 @@
     },
     {
       "id": "azahar", "name": "Azahar",
+      "get": { "github": "azahar-emu/azahar", "play": "io.github.lime3ds.android" },
       "components": [
         "org.azahar_emu.azahar/org.citra.citra_emu.activities.EmulationActivity",
         "io.github.azaharplus.android/org.citra.citra_emu.activities.EmulationActivity"
@@ -131,36 +148,42 @@
     },
     {
       "id": "lime3ds", "name": "Lime3DS",
+      "get": { "note": "Discontinued: use Azahar" },
       "components": ["io.github.lime3ds.android/.activities.EmulationActivity"],
       "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "citra", "name": "Citra",
+      "get": { "note": "Discontinued: use Azahar" },
       "components": ["org.citra.citra_emu/.activities.EmulationActivity", "org.citra.citra_emu.canary/org.citra.citra_emu.activities.EmulationActivity"],
       "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "citra_mmj", "name": "Citra MMJ",
+      "get": { "note": "Discontinued: use Azahar" },
       "components": ["org.citra.emu/.ui.EmulationActivity"],
       "extras": { "GamePath": "%ROM%" }, "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "menu" }
     },
     {
       "id": "redream", "name": "Redream",
+      "get": { "page": "https://redream.io/download", "play": "io.recompiled.redream" },
       "components": ["io.recompiled.redream/.MainActivity"],
       "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "menu" }
     },
     {
       "id": "flycast", "name": "Flycast",
+      "get": { "github": "flyinghead/flycast", "play": "com.flycast.emulator" },
       "components": ["com.flycast.emulator/com.flycast.emulator.MainActivity", "com.flycast.emulator/com.reicast.emulator.MainActivity"],
       "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "yabasanshiro2", "name": "Yaba Sanshiro 2",
+      "get": { "play": "org.devmiyax.yabasanshioro2" },
       "components": [
         "org.devmiyax.yabasanshioro2.pro/org.uoyabause.android.Yabause",
         "org.devmiyax.yabasanshioro2/org.uoyabause.android.Yabause"
@@ -171,6 +194,7 @@
     },
     {
       "id": "m64plusfz", "name": "M64Plus FZ",
+      "get": { "play": "org.mupen64plusae.v3.fzurita" },
       "components": [
         "org.mupen64plusae.v3.fzurita.pro/paulscode.android.mupen64plusae.SplashActivity",
         "org.mupen64plusae.v3.fzurita/paulscode.android.mupen64plusae.SplashActivity",
@@ -181,6 +205,7 @@
     },
     {
       "id": "mame4droid", "name": "MAME4droid",
+      "get": { "github": "seleuco/MAME4droid-Current", "play": "com.seleuco.mame4d2024" },
       "components": ["com.seleuco.mame4d2024/com.seleuco.mame4droid.MAME4droid", "com.seleuco.mame4droid/.MAME4droid"],
       "action": "android.intent.action.VIEW", "data": "%ROMPROVIDER%",
       "extras": { "cli_params": "-rompath '%GAMEDIR%'" }, "flags": ["NEW_TASK"],
@@ -188,6 +213,7 @@
     },
     {
       "id": "eden", "name": "Eden",
+      "get": { "page": "https://eden-emu.dev" },
       "components": [
         "dev.eden.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity",
         "dev.legacy.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity",
@@ -198,6 +224,7 @@
     },
     {
       "id": "kenjinx", "name": "Kenji-NX",
+      "get": { "note": "No official download known to MainUI" },
       "components": ["org.kenjinx.android/.MainActivity"],
       "action": "org.kenjinx.android.LAUNCH_GAME", "extras": { "bootPath": "%ROMSAF%" }, "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "none" }

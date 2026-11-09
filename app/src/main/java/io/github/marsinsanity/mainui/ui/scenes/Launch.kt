@@ -45,9 +45,19 @@ object Launch {
             if (opt != null && opt.isRetroArch && opt.installed != true) { em.refreshCores(); opt = em.choose(def, game) }
             opt
         }) { opt ->
-            if (opt != null && opt.isRetroArch && opt.installed == false) {
-                CoreInstall.offer(host, opt.core) { start(host, def, game) }
-            } else start(host, def, game)
+            when {
+                opt == null || opt.installed != false -> start(host, def, game)
+                opt.isRetroArch && em.raPackage != null -> CoreInstall.offer(host, opt.core) { start(host, def, game) }
+                else -> {
+                    // The emulator itself is missing: offer its page in the App Store.
+                    val emuId = if (opt.isRetroArch) "retroarch" else opt.ref.removePrefix("sa:")
+                    val emuName = if (opt.isRetroArch) "RetroArch" else opt.name
+                    host.push(io.github.marsinsanity.mainui.ui.DialogScene(host, "Emulator not installed",
+                        "${def.name} games need $emuName, which is not installed.\nGet it now?", "GET", "CANCEL") {
+                        host.push(EmulatorDetailScene(host, emuId))
+                    })
+                }
+            }
         }
     }
 

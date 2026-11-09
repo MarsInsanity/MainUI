@@ -44,6 +44,7 @@ class ThemeStoreScene(host: SceneHost) : ListScene(host, "Get themes") {
         this.list.set(list.map { e ->
             UiItem(e.title, sub = buildString {
                 if (ThemeStore.isInstalled(e)) append("installed  ")
+                else if (e.featured) append("featured  ")
                 append(e.author.ifEmpty { if (e.remixed) "remix" else "" })
             }.trim(), data = e,
                 preview = { Images.get("themestore:${e.name}", host, 640) { ThemeStore.preview(e) } })
@@ -143,6 +144,7 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
             if (busy == "Loading apps...") busy = null
             val items = mutableListOf(
                 UiItem("Search...", icon = { Glyphs.get("search") }, sub = query.ifEmpty { null }, onSelect = { search() }),
+                UiItem("Emulators", icon = { Glyphs.get("game") }, sub = "RetroArch, PPSSPP, Azahar...", onSelect = { host.push(EmulatorStoreScene(host)) }),
                 UiItem("Category", ItemType.ACTION, icon = { Glyphs.get("app") }, sub = category ?: "All", onSelect = { pickCategory() }),
                 UiItem(if (updatesOnly) "Showing updates" else "Updates", icon = { Glyphs.get("switcher") },
                     sub = if (updatesOnly) "show all" else null, onSelect = { updatesOnly = !updatesOnly; rebuild() }),
@@ -317,4 +319,150 @@ class RepoScene(host: SceneHost) : ListScene(host, "Repositories") {
         }
         return super.onKey(b, repeat)
     }
+}
+
+/**
+ * App Store > Emulators: every emulator MainUI can launch, with what it runs
+ * and where it comes from (installed / F-Droid / GitHub / retroarch.com /
+ * Play Store / website). A opens the emulator's page.
+ */
+class EmulatorStoreScene(host: SceneHost) : ListScene(host, "Emulators", large = true) {
+    override var aLabel: String? = "OPEN"
+    override val showPreview = false
+    private var busy: String? = "Loading emulators..."
+
+    override fun onEnter() = load()
+    override fun onResume() = load()
+
+    private fun load() {
+        host.io({ io.github.marsinsanity.mainui.store.EmulatorStore.entries() }) { entries ->
+            busy = null
+            list.set(entries.map { e ->
+                UiItem(e.def.name, icon = { emuIcon(host, e) },
+                    sub = listOf(e.systems.takeIf { it.isNotBlank() }, e.source).filterNotNull().joinToString("  ·  "),
+                    data = e, onSelect = { host.push(EmulatorDetailScene(host, e.def.id)) })
+            }, false)
+            title = "Emulators (${entries.count { it.installed != null }}/${entries.size} installed)"
+        }
+    }
+
+    override fun draw(g: Gfx) {
+        super.draw(g)
+        busy?.let { g.infoPanel(it) }
+    }
+
+    companion object {
+        fun emuIcon(host: SceneHost, e: io.github.marsinsanity.mainui.store.EmulatorStore.Entry) =
+            e.installed?.let { MainUI.apps.icon(it, 96) }
+                ?: e.fdroid?.let { a -> Images.get("appicon:${a.pkg}", host, 96) { AppStore.icon(a) } }
+                ?: Glyphs.get("game")
+    }
+}
+
+/** One emulator: install it from the best source, or open its store page / website. */
+class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(host, "Emulator", large = true) {
+    private var busy: String? = null
+    override val showPreview = false
+
+    override fun onEnter() = build()
+    override fun onResume() = build()
+
+    private fun build() {
+        host.io({ io.github.marsinsanity.mainui.store.EmulatorStore.entries().firstOrNull { it.def.id == id } }) { e ->
+            if (e == null) { close(); return@io }
+            title = e.def.name
+            val preview = { EmulatorStoreScene.emuIcon(host, e) }
+            val items = mutableListOf<UiItem>()
+            items += UiItem(e.def.name, icon = preview, sub = e.systems.ifBlank { null }, disabled = true)
+            if (e.installed != null) {
+                val v = runCatching { host.hostContext.packageManager.getPackageInfo(e.installed, 0).versionName }.getOrNull()
+                items += UiItem("Installed" + (v?.let { " ($it)" } ?: ""), sub = e.installed, preview = preview, disabled = true)
+                items += UiItem("Open", preview = preview, onSelect = {
+                    val err = MainUI.sessions.launchApp(e.installed, e.def.name, asGame = false)
+                    if (err != null) host.toast(err)
+                })
+            }
+            e.fdroid?.let { app ->
+                val apk = app.apk ?: return@let
+                val repo = repoName(app.repo)
+                val have = e.installed?.takeIf { it == app.pkg }?.let { AppStore.installedVersion(it) }
+                val mySigner = e.installed?.takeIf { it == app.pkg }?.let { AppStore.installedSigner(it) }
+                when {
+                    have == null -> items += UiItem("Install from $repo", sub = apk.versionName, preview = preview,
+                        onSelect = { run("Downloading...") { AppStore.install(app) { busy = it; host.invalidate() } } })
+                    // Installed from somewhere else (retroarch.com, Play...): Android refuses to mix signatures.
+                    apk.signer != null && mySigner != null && !apk.signer.equals(mySigner, true) ->
+                        items += UiItem("$repo has ${apk.versionName}", sub = "other signature: uninstall first", preview = preview, disabled = true)
+                    apk.versionCode > have -> items += UiItem("Update from $repo", sub = apk.versionName, preview = preview,
+                        onSelect = { run("Downloading...") { AppStore.install(app) { busy = it; host.invalidate() } } })
+                    else -> {}
+                }
+            }
+            if (e.buildbot) items += UiItem((if (e.installed != null) "Update from" else "Download from") + " retroarch.com", sub = "latest stable",
+                preview = preview, onSelect = {
+                    run("Checking retroarch.com...") {
+                        val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestRetroArch()
+                        io.github.marsinsanity.mainui.store.EmulatorStore.install("RetroArch ${r.version}", r) { busy = it; host.invalidate() }
+                    }
+                })
+            e.github?.let { repo ->
+                items += UiItem((if (e.installed != null) "Update from" else "Download from") + " GitHub", sub = repo, preview = preview, onSelect = {
+                    run("Checking GitHub...") {
+                        val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestGithub(repo)
+                        io.github.marsinsanity.mainui.store.EmulatorStore.install("${e.def.name} ${r.version}", r) { busy = it; host.invalidate() }
+                    }
+                })
+            }
+            e.url?.let { url ->
+                items += UiItem("Download", sub = url.substringAfterLast('/'), preview = preview, onSelect = {
+                    run("Downloading...") {
+                        io.github.marsinsanity.mainui.store.EmulatorStore.install(e.def.name,
+                            io.github.marsinsanity.mainui.store.EmulatorStore.Release("", url.substringAfterLast('/'), url, -1, null)) { busy = it; host.invalidate() }
+                    }
+                })
+            }
+            e.play?.let { pkg -> items += UiItem("Open in Google Play", sub = pkg, preview = preview, onSelect = { openPlay(pkg) }) }
+            e.page?.let { url -> items += UiItem("Open website", sub = url.removePrefix("https://").removeSuffix("/"), preview = preview, onSelect = { openUrl(url) }) }
+            if (e.installed != null) items += UiItem("Uninstall", preview = preview, onSelect = {
+                host.hostContext.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${e.installed}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            })
+            e.note?.let { items += UiItem(it, preview = preview, disabled = true) }
+            if (items.none { it.onSelect != null && !it.disabled }) items += UiItem("No download source known", preview = preview, disabled = true)
+            list.set(items, false)
+            // Start on the first thing that can be done.
+            list.active = items.indexOfFirst { !it.disabled && it.onSelect != null }.coerceAtLeast(0)
+        }
+    }
+
+    private fun repoName(address: String) = AppStore.repos().firstOrNull { it.address == address }?.name?.ifBlank { null } ?: "F-Droid"
+
+    private fun run(label: String, work: () -> String) {
+        if (busy != null) return
+        busy = label
+        host.io({ runCatching(work).getOrElse { "Failed: ${it.message}" } }) { msg ->
+            busy = null
+            host.toast(msg, 3500)
+            MainUI.apps.invalidate()
+            MainUI.worker.execute { MainUI.emulators.refresh() }
+            build()
+        }
+    }
+
+    private fun openPlay(pkg: String) {
+        val ctx = host.hostContext
+        val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { ctx.startActivity(market) }.onFailure { openUrl("https://play.google.com/store/apps/details?id=$pkg") }
+    }
+
+    private fun openUrl(url: String) {
+        runCatching { host.hostContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { host.toast("No browser installed. Address: $url", 5000) }
+    }
+
+    override fun draw(g: Gfx) {
+        super.draw(g)
+        busy?.let { g.infoPanel(it) }
+    }
+
+    override fun onKey(b: Btn, repeat: Boolean): Boolean = if (busy != null) true else super.onKey(b, repeat)
 }
