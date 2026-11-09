@@ -13,6 +13,8 @@ import java.net.SocketTimeoutException
  * off the UI thread.
  */
 interface GameController {
+    /** Blocking capability probe (network). Called before [states] is read; never on the UI thread. */
+    fun prepare() {}
     val states: StateSupport
     /** True when save/load can address slots 0-9 (RetroArch). */
     val hasSlots: Boolean
@@ -25,6 +27,12 @@ interface GameController {
      */
     fun pause(): Boolean
     fun unpause()
+    /**
+     * Called once MainUI's overlay has taken input focus. A frozen app can't
+     * acknowledge the focus change, and Android declares it "not responding"
+     * after 5 s, so a frozen game is thawed for a moment and frozen again.
+     */
+    fun settle() {}
     /**
      * API: works while paused. HOTKEY: the caller must close the overlay and
      * call [unpause] first, because injected keys go to the focused window.
@@ -51,20 +59,78 @@ object Freezer {
     private fun pidsCmd(pkg: String) =
         "ps -A -o PID,NAME | awk '\$2 == \"$pkg\" || index(\$2, \"$pkg:\") == 1 {print \$1}'"
 
+    /** Bumped on every freeze so a late thaw from an older menu can't undo a newer freeze. */
+    @Volatile var generation = 0
+        private set
+
+    /** Serialises freeze / settle / thaw so a settle can never re-freeze a game that was just thawed. */
+    private val lock = Any()
+
+    /** Processes frozen by the last [freeze] ("pid pid ..."), and the app's main process. */
+    @Volatile private var pids = ""
+    @Volatile private var mainPid = ""
+
+    /** Prints "<pid> <pid> ..." for every process of [pkg], then "main <pid>". */
+    private fun lookupCmd(pkg: String) =
+        "ps -A -o PID,NAME | awk '\$2 == \"$pkg\" || index(\$2, \"$pkg:\") == 1 {printf \"%s \", \$1} " +
+            "\$2 == \"$pkg\" {m = \$1} END {printf \"\\nmain %s\\n\", m}'"
+
     fun freeze(pkg: String): Boolean {
         if (!Root.knownAvailable() && !Root.available()) return false
-        MainUI.settings.prefs.edit().putString(PREF, pkg).commit()
-        val r = Root.exec("for p in \$(${pidsCmd(pkg)}); do kill -STOP \$p; done; ${pidsCmd(pkg)}")
-        val ok = r.ok && r.lines.isNotEmpty()
-        Log.d(TAG, "freeze $pkg -> $ok (${r.lines})")
-        if (!ok) MainUI.settings.prefs.edit().remove(PREF).apply()
-        return ok
+        synchronized(lock) {
+            generation++
+            MainUI.settings.prefs.edit().putString(PREF, pkg).commit()
+            val look = Root.Shell.run(lookupCmd(pkg), 15000)
+            val found = look.lines.firstOrNull { !it.startsWith("main") }?.trim().orEmpty()
+            val main = look.lines.firstOrNull { it.startsWith("main ") }?.substringAfter(' ')?.trim().orEmpty()
+            val ok = found.isNotEmpty() && Root.Shell.run("kill -STOP $found", 15000).ok
+            if (ok) { pids = found; mainPid = main }
+            else {
+                // Never leave a half-frozen game behind: if the stop may have happened, undo it.
+                if (found.isNotEmpty()) Root.Shell.run("kill -CONT $found", 15000)
+                pids = ""; mainPid = ""
+                MainUI.settings.prefs.edit().remove(PREF).apply()
+            }
+            Log.d(TAG, "freeze $pkg -> $ok ($found, main $main)")
+            return ok
+        }
     }
 
-    fun thaw(pkg: String) {
-        Root.exec("for p in \$(${pidsCmd(pkg)}); do kill -CONT \$p; done")
-        if (MainUI.settings.prefs.getString(PREF, null) == pkg) MainUI.settings.prefs.edit().remove(PREF).commit()
-        Log.d(TAG, "thaw $pkg")
+    /**
+     * Lets a frozen app run just long enough for its main thread to handle the
+     * window events that are waiting for it (the focus change caused by MainUI's
+     * overlay), then freezes it again. A frozen app can't acknowledge them, and
+     * Android shows "isn't responding" after 5 s. The main thread is done once
+     * it has run and is back waiting in its event loop (epoll): usually a few
+     * milliseconds, at most 20 polls of 10 ms.
+     */
+    fun settle(pkg: String, gen: Int) {
+        synchronized(lock) {
+            if (gen != generation || frozen() != pkg || pids.isEmpty()) return
+            val m = mainPid.ifEmpty { pids.substringBefore(' ') }
+            val r = Root.Shell.run(
+                "c0=\$(grep -m1 voluntary_ctxt /proc/$m/status); kill -CONT $pids; i=0; " +
+                    "while [ \$i -lt 20 ]; do sleep 0.01; i=\$((i+1)); " +
+                    "[ \"\$(grep -m1 voluntary_ctxt /proc/$m/status)\" = \"\$c0\" ] && continue; " +
+                    "case \"\$(cat /proc/$m/wchan 2>/dev/null)\" in *epoll*|0|'') break;; esac; done; " +
+                    "sleep 0.02; kill -STOP $pids; echo \$i", 15000)
+            Log.d(TAG, "settle $pkg: ${if (r.ok) "after ${r.out.trim()} polls" else "failed ${r.err}"}")
+        }
+    }
+
+    /** Thaws [pkg] if [gen] is still the latest freeze (null = always, used by the safety net). */
+    fun thaw(pkg: String, gen: Int? = null) {
+        synchronized(lock) {
+            if (gen != null && gen != generation) { Log.d(TAG, "stale thaw ignored"); return }
+            val cached = pids
+            // After a MainUI restart the cached list is gone: look the processes up again.
+            val cmd = if (cached.isNotEmpty()) "kill -CONT $cached" else "for p in \$(${pidsCmd(pkg)}); do kill -CONT \$p; done"
+            val r = Root.Shell.run(cmd, 15000)
+            if (!r.ok && cached.isNotEmpty()) Root.exec("kill -CONT $cached")
+            pids = ""; mainPid = ""
+            if (MainUI.settings.prefs.getString(PREF, null) == pkg) MainUI.settings.prefs.edit().remove(PREF).commit()
+            Log.d(TAG, "thaw $pkg")
+        }
     }
 
     /** Safety net: thaw whatever a previous MainUI process may have left frozen. */
@@ -77,12 +143,25 @@ object Freezer {
 }
 
 /**
- * RetroArch network command interface (UDP). Needs `network_cmd_enable = true`
- * which Settings > Emulators > "Configure RetroArch" writes for you.
+ * RetroArch. Official Android builds of RetroArch do **not** include the
+ * network command interface (verified on 1.22.2: no PAUSE_TOGGLE / GET_STATUS
+ * handlers compiled in), and keyboard hotkeys injected from outside did not
+ * reach it in testing. So MainUI probes the command port once:
+ *  - a build that answers (custom / future builds): pause, slots 0-9 and quit
+ *    through UDP commands;
+ *  - otherwise: pause by freezing the process (root), Save / Load through
+ *    RetroArch's own quick menu (Back opens it), Exit by force stop.
  */
-class RetroArchController(private val port: Int) : GameController {
-    override val states = StateSupport.API
-    override val hasSlots = true
+class RetroArchController(private val port: Int, private val pkg: String? = null) : GameController {
+    @Volatile private var reachable: Boolean? = null
+    private var frozen = false
+    private var frozenGen = -1
+
+    override fun prepare() { if (reachable == null) reachable = status() != null }
+    private val api get() = reachable == true
+
+    override val states get() = if (api) StateSupport.API else StateSupport.MENU
+    override val hasSlots get() = api
     override val saveKeyName: String? = null
     override val loadKeyName: String? = null
 
@@ -109,20 +188,33 @@ class RetroArchController(private val port: Int) : GameController {
     fun status(): String? = ask("GET_STATUS", 200)
 
     override fun pause(): Boolean {
+        prepare()
+        if (!api) {
+            frozen = pkg != null && MainUI.settings.freezeStandalone && Freezer.freeze(pkg)
+            frozenGen = Freezer.generation
+            return frozen
+        }
         val st = status() ?: return false
         if (st.contains("PAUSED")) return true
         send("PAUSE_TOGGLE")
-        // Wait until RetroArch confirms, so the screenshot shows the paused frame.
-        repeat(10) {
-            Thread.sleep(30)
+        // Wait (up to ~1.5 s on slow devices) until RetroArch confirms, so the
+        // menu only opens over a paused game and the screenshot is the paused frame.
+        repeat(30) {
+            Thread.sleep(50)
             if (status()?.contains("PAUSED") == true) return true
         }
         return false
     }
 
-    override fun unpause() { if (status()?.contains("PAUSED") == true) send("PAUSE_TOGGLE") }
+    override fun settle() { if (frozen) Freezer.settle(pkg!!, frozenGen) }
+
+    override fun unpause() {
+        if (frozen) { Freezer.thaw(pkg!!, frozenGen); frozen = false; return }
+        if (api && status()?.contains("PAUSED") == true) send("PAUSE_TOGGLE")
+    }
 
     override fun save(slot: Int): Boolean {
+        if (!api) return false
         // RetroArch >= 1.17 understands the *_SLOT variants; older builds ignore them,
         // so fall back to selecting the slot by stepping.
         val reply = ask("SAVE_STATE_SLOT $slot", 1500)
@@ -132,6 +224,7 @@ class RetroArchController(private val port: Int) : GameController {
     }
 
     override fun load(slot: Int): Boolean {
+        if (!api) return false
         val reply = ask("LOAD_STATE_SLOT $slot", 1500)
         if (reply != null && !reply.contains("-1")) return true
         selectSlot(slot)
@@ -146,13 +239,25 @@ class RetroArchController(private val port: Int) : GameController {
         }
     }
 
-    override fun openNativeMenu(): Boolean = send("MENU_TOGGLE")
+    override fun openNativeMenu(): Boolean {
+        if (api) return send("MENU_TOGGLE")
+        // Back opens RetroArch's quick menu on Android (Save State / Load State live there)
+        return io.github.marsinsanity.mainui.service.OverlayService.instance?.globalBack()
+            ?: Root.keyEvent("KEYCODE_BACK")
+    }
 
     override fun quit(autoSave: Boolean): Boolean {
-        // savestate_auto_save (set by "Configure RetroArch") writes the auto slot on QUIT.
-        send("QUIT")
-        Thread.sleep(150)
-        return send("QUIT") // RetroArch asks for confirmation on the first QUIT by default
+        if (api) {
+            // savestate_auto_save (set by "Configure RetroArch") writes the auto slot on QUIT.
+            send("QUIT")
+            Thread.sleep(150)
+            send("QUIT") // RetroArch asks for confirmation on the first QUIT by default
+            Thread.sleep(1500)
+        }
+        // Make sure it is really gone (also the only way without the command interface).
+        return if (pkg != null && Root.knownAvailable()) {
+            if (Root.exec("pidof $pkg").out.isNotBlank()) Root.forceStop(pkg) else true
+        } else api
     }
 }
 
@@ -173,13 +278,18 @@ class StandaloneController(private val pkg: String, private val def: EmuDef?) : 
     override val loadKeyName get() = def?.load?.let { keyLabel(it) }
     private var frozen = false
 
+    private var frozenGen = -1
+
     override fun pause(): Boolean {
         frozen = MainUI.settings.freezeStandalone && Freezer.freeze(pkg)
+        frozenGen = Freezer.generation
         return frozen
     }
 
+    override fun settle() { if (frozen) Freezer.settle(pkg, frozenGen) }
+
     override fun unpause() {
-        if (frozen || Freezer.frozen() == pkg) Freezer.thaw(pkg)
+        if (frozen) Freezer.thaw(pkg, frozenGen)
         frozen = false
     }
 

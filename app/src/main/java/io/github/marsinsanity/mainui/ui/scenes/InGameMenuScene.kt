@@ -68,6 +68,8 @@ class InGameMenuScene(
 
     override fun onEnter() {
         buildItems()
+        // Fallback mode: nothing has probed the emulator yet (network, so off the UI thread)
+        if (!overlayMode) host.io({ runCatching { controller.prepare() } }) { buildItems() }
         val shot = screenshot
         if (shot == null) {
             // Fallback mode: show the last screenshot we have for this game
@@ -91,7 +93,7 @@ class InGameMenuScene(
                     items += UiItem(if (controller.hasSlots) "Save  [slot $slot]" else "Save", data = Action.SAVE)
                     items += UiItem(if (controller.hasSlots) "Load  [slot $slot]" else "Load", data = Action.LOAD)
                 }
-                StateSupport.MENU -> if (!session.isAndroidApp) items += UiItem("Save / Load (in emulator)", data = Action.STATES_MENU)
+                StateSupport.MENU -> if (!session.isAndroidApp) items += UiItem("Save / Load (menu)", data = Action.STATES_MENU)
                 StateSupport.NONE -> {}
             }
             items += UiItem("Native Menu", data = Action.NATIVE)

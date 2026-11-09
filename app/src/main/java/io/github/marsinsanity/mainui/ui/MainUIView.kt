@@ -97,8 +97,20 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     }
 
     override fun <T> io(work: () -> T, done: (T) -> Unit): Job = scope.launch {
-        val r = withContext(Dispatchers.IO) { work() }
-        done(r)
+        // A failing background task (I/O error, bad file...) must never take MainUI down.
+        val r = try {
+            withContext(Dispatchers.IO) { work() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            android.util.Log.e("MainUI", "background task failed", e)
+            toast("Error: ${e.message ?: e.javaClass.simpleName}".take(120), 3000)
+            return@launch
+        }
+        try { done(r) } catch (e: Throwable) {
+            android.util.Log.e("MainUI", "task callback failed", e)
+            toast("Error: ${e.message ?: e.javaClass.simpleName}".take(120), 3000)
+        }
         invalidate()
     }
 
@@ -149,6 +161,14 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         super.onDetachedFromWindow()
         runCatching { context.unregisterReceiver(batteryReceiver) }
         handler.removeCallbacksAndMessages(null)
+    }
+
+    /** Window focus callback (the overlay uses it to know when the game lost focus). */
+    var onWindowFocus: ((Boolean) -> Unit)? = null
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        onWindowFocus?.invoke(hasWindowFocus)
     }
 
     fun destroy() {

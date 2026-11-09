@@ -20,9 +20,9 @@
     "extras": {
       "ROM": "%ROM%",
       "LIBRETRO": "%CORE_PATH%",
-      "CONFIGFILE": "%RA_CONFIG%",
-      "QUITFOCUS": ""
+      "CONFIGFILE": "%RA_CONFIG%"
     },
+    "_note": "Do not add QUITFOCUS: it makes RetroArch quit when it loses focus, which kills the game when the Game Switcher or MainUI opens.",
     "flags": ["NEW_TASK", "CLEAR_TASK"],
     "commandPort": 55355,
     "ingame": { "states": "api" }

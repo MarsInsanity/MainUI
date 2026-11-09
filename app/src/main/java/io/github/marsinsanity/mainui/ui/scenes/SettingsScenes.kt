@@ -46,11 +46,7 @@ class SettingsScene(host: SceneHost) : ListScene(host, "Settings") {
             action("Android settings") {
                 host.hostContext.startActivity(Intent(AndroidSettings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             },
-            action("About", "v${BuildConfig.VERSION_NAME}") {
-                host.push(DialogScene(host, "MainUI for Android",
-                    "An OnionOS style frontend.\nThemes: ${MainUI.storage.themeDirs().joinToString { it.path }.ifEmpty { "<storage>/Themes" }}\nData: ${MainUI.storage.dataRoot().path}",
-                    "OK", null))
-            },
+            action("About", "v${BuildConfig.VERSION_NAME}") { host.push(AboutScene(host)) },
         ))
     }
 }
@@ -206,14 +202,14 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
         val items = mutableListOf<UiItem>()
         val ra = em.raPackage
         val cores = em.raCores
-        items += UiItem("RetroArch", sub = when {
-            ra == null -> "not installed"
-            cores == null -> "$ra (cores: root needed)"
-            else -> "${cores.size} cores"
-        }, onSelect = { if (cores != null) host.push(CoresScene(host)) })
+        items += UiItem("RetroArch cores", sub = when {
+            ra == null -> "RetroArch not installed"
+            cores == null -> "${cores?.size ?: "?"} (root needed)"
+            else -> "${cores.size} installed"
+        }, onSelect = { if (ra != null) host.push(CoresScene(host)) else CoreInstall.offer(host, "mgba") })
         if (ra != null) items += action("Configure RetroArch for MainUI") {
             host.push(DialogScene(host, "Configure RetroArch",
-                "Enables RetroArch's network commands (needed for Save, Load and Exit in the in-game menu) and auto save states. RetroArch will be closed.") {
+                "Sets RetroArch up for MainUI's in-game menu: pause while the menu is open, save games every 10 s, auto save state on exit, and the command port (used by builds that have it). RetroArch will be closed.") {
                 host.io({ em.configureRetroArch() }) { host.toast(it, 3000) }
             })
         }
@@ -241,11 +237,66 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
     }
 }
 
+/**
+ * RetroArch cores: installed ones, then every core MainUI recommends for a
+ * system (A downloads it). "Get cores for my games" fetches the default core
+ * of every system that has roms but no working RetroArch core yet.
+ */
 class CoresScene(host: SceneHost) : ListScene(host, "RetroArch cores") {
     override val showPreview = false
+    override val extraHints get() = listOf("Y" to "RESCAN")
+
+    private var needed: List<String> = emptyList()
+    private var local: Map<String, java.io.File> = emptyMap()
+
     override fun onEnter() {
+        build()
+        rescan()
+    }
+
+    override fun onResume() = rescan()
+
+    private fun rescan() {
+        host.io({ MainUI.emulators.refreshCores(); coresForMyGames() to MainUI.emulators.localCores() }) { (n, l) ->
+            needed = n; local = l; build()
+        }
+    }
+
+    private fun build() {
         val em = MainUI.emulators
-        list.set((em.raCores ?: emptySet()).sorted().map { UiItem(em.coreDisplayName(it), sub = it) })
+        val installed = (em.raCores ?: emptySet()).sorted()
+        val missing = em.recommendedCores().filter { em.coreInstalled(it) == false }.distinct()
+            .sortedBy { em.coreDisplayName(it).lowercase() }
+        val items = mutableListOf<UiItem>()
+        val needed = needed
+        items += UiItem("Get cores for my games", sub = if (needed.isEmpty()) "nothing missing" else "${needed.size} to download",
+            disabled = needed.isEmpty(), onSelect = { CoreInstall.install(host, needed) { rescan() } })
+        em.raCoreDir?.let { items += UiItem("Folder", sub = it.removePrefix("/data/data/"), disabled = true) }
+        // Custom builds dropped into MainUI/cores.
+        for (c in local.keys.sorted()) items += UiItem(em.coreDisplayName(c), sub = if (c in installed) "file: reinstall" else "file: install",
+            data = c, onSelect = { CoreInstall.install(host, listOf(c)) { rescan() } })
+        for (c in installed) if (c !in local) items += UiItem(em.coreDisplayName(c), sub = "installed", data = c)
+        for (c in missing) if (c !in local) items += UiItem(em.coreDisplayName(c), sub = "A: get", data = c,
+            onSelect = { CoreInstall.offer(host, c) { rescan() } })
+        list.set(items)
+        title = "RetroArch cores (${installed.size})"
+    }
+
+    /** Default RetroArch core of every system that has games but nothing installed to run them. */
+    private fun coresForMyGames(): List<String> {
+        val em = MainUI.emulators
+        if (em.raPackage == null) return emptyList()
+        return MainUI.games.systems(false).filter { it.gameCount > 0 || it.dirs.any { d -> (d.listFiles()?.size ?: 0) > 0 } }
+            .mapNotNull { s ->
+                val opts = em.optionsFor(s.def)
+                if (opts.any { it.installed == true }) null
+                else opts.firstOrNull { it.isRetroArch && it.installed == false }?.core
+            }.distinct()
+    }
+
+    override fun onKey(b: Btn, repeat: Boolean): Boolean {
+        if (b == Btn.Y && !repeat) { host.toast("Scanning..."); rescan(); return true }
+        return super.onKey(b, repeat)
     }
 }
 

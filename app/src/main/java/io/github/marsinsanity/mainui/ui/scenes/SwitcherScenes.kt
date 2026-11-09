@@ -202,14 +202,14 @@ class ThemeSwitcherScene(host: SceneHost) : Scene(host) {
     override fun onEnter() {
         host.io({ MainUI.themes.list() }) { list ->
             themes = list
-            val cur = MainUI.settings.themePath
-            index = list.indexOfFirst { (it.dir?.absolutePath ?: "") == cur }.coerceAtLeast(0)
+            val cur = MainUI.themes.currentKey
+            index = list.indexOfFirst { it.key == cur }.coerceAtLeast(0)
         }
     }
 
     override fun draw(g: Gfx) {
         g.c.drawColor(Color.BLACK)
-        if (themes.isEmpty()) { g.background(); g.header("Themes"); g.footer(null, "BACK"); return }
+        if (themes.isEmpty()) { g.background(); g.header("Themes"); g.footer(null, "BACK", listOf("X" to "GET MORE")); return }
         val t = themes[index]
         val prev = Images.getBitmap("themepreview:${t.id}", host) { MainUI.themes.preview(t) }
         if (prev != null) g.bmpFit(prev, 0f, 0f, g.W, g.H) else {
@@ -224,9 +224,9 @@ class ThemeSwitcherScene(host: SceneHost) : Scene(host) {
         g.text(t.name, g.theme.title, g.W / 2, y + 24f, Align.CENTER, maxW = g.W - 100f, color = Color.WHITE)
         val by = listOf(t.author.takeIf { it.isNotBlank() }?.let { "by $it" }, t.description.takeIf { it.isNotBlank() }).filterNotNull().joinToString(" - ")
         g.text(by, g.theme.list, g.W / 2, y + 54f, Align.CENTER, maxW = g.W - 100f, size = 18f, color = Color.LTGRAY, marquee = true)
-        val active = (t.dir?.absolutePath ?: "") == MainUI.settings.themePath && t.zip == null
+        val active = t.key == MainUI.themes.currentKey && t.zip == null
         g.header(if (active) "Themes (current)" else "Themes")
-        g.footer(if (active) null else "APPLY", "BACK")
+        g.footer(if (active) null else "APPLY", "BACK", listOf("X" to "GET MORE"))
         g.footerStatus(index + 1, themes.size)
         if (busy) g.infoPanel("Applying theme...")
     }
@@ -246,14 +246,20 @@ class ThemeSwitcherScene(host: SceneHost) : Scene(host) {
                     if (err != null) host.toast(err) else {
                         host.toast("Theme applied")
                         themes = MainUI.themes.list()
-                        index = themes.indexOfFirst { (it.dir?.absolutePath ?: "") == MainUI.settings.themePath }.coerceAtLeast(0)
+                        index = themes.indexOfFirst { it.key == MainUI.themes.currentKey }.coerceAtLeast(0)
                     }
                 }
             }
             Btn.B -> if (!repeat) close()
+            Btn.X -> if (!repeat) host.push(ThemeStoreScene(host))
             else -> return false
         }
         return true
+    }
+
+    override fun onResume() {
+        // Themes downloaded meanwhile show up right away
+        host.io({ MainUI.themes.list() }) { list -> themes = list; index = index.coerceIn(0, maxOf(0, list.size - 1)) }
     }
 
     override fun onTap(x: Float, y: Float): Boolean {

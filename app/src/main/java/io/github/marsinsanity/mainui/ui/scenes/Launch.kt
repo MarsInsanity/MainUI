@@ -19,8 +19,17 @@ object Launch {
     fun game(host: SceneHost, game: Game) {
         val active = MainUI.sessions.active
         if (active != null && active.gameKey == game.key) {
-            if (MainUI.sessions.resume()) return
+            // Only bring the emulator back if it is still running; otherwise
+            // relaunch the game (resuming a dead emulator would open it empty).
+            host.io({ MainUI.sessions.isRunning(active) }) { running ->
+                if (!(running && MainUI.sessions.resume())) launchFresh(host, game)
+            }
+            return
         }
+        launchFresh(host, game)
+    }
+
+    private fun launchFresh(host: SceneHost, game: Game) {
         if (game.isAndroid) {
             val err = MainUI.sessions.launchApp(game.pkg!!, game.name, asGame = true)
             if (err != null) host.toast(err)
@@ -29,6 +38,20 @@ object Launch {
         val def = systemDef(game.systemId)
         if (def == null) { host.toast("Unknown system ${game.systemId}"); return }
         if (game.file?.exists() != true) { host.toast("File not found"); return }
+        val em = MainUI.emulators
+        host.io({
+            // Cores may have been added in RetroArch since the last scan: look again before giving up.
+            var opt = em.choose(def, game)
+            if (opt != null && opt.isRetroArch && opt.installed != true) { em.refreshCores(); opt = em.choose(def, game) }
+            opt
+        }) { opt ->
+            if (opt != null && opt.isRetroArch && opt.installed == false) {
+                CoreInstall.offer(host, opt.core) { start(host, def, game) }
+            } else start(host, def, game)
+        }
+    }
+
+    private fun start(host: SceneHost, def: SystemDef, game: Game) {
         host.io({ MainUI.sessions.launch(def, game, null) }) { err ->
             if (err != null) host.push(io.github.marsinsanity.mainui.ui.DialogScene(host, "Can't start game",
                 "$err\n\nInstall it, or press SELECT on the game > Core to pick another emulator.", "OK", null))

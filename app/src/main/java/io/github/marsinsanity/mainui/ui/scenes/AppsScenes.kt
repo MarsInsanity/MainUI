@@ -25,6 +25,8 @@ class AppsScene(host: SceneHost) : ListScene(host, "Apps", large = true) {
 
     private fun builtins(): List<Builtin> = listOf(
         Builtin("Theme Switcher", "themes", "theme") { host.push(ThemeSwitcherScene(host)) },
+        Builtin("Theme Downloader", "download", "theme") { host.push(ThemeStoreScene(host)) },
+        Builtin("App Store", "pacman", "app") { host.push(AppStoreScene(host)) },
         Builtin("Game Switcher", "gameswitcher", "switcher") { host.push(GameSwitcherScene(host)) },
         Builtin("Search", "search", "search") { SearchFlow.start(host) },
         Builtin("Scraper", "gallery", "scraper") { host.push(ScraperScene(host, null)) },
