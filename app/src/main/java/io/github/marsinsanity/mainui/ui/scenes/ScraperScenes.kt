@@ -29,11 +29,18 @@ class ScraperScene(host: SceneHost, private val systems: List<String>?) :
         val items = mutableListOf(
             UiItem(if (ScrapeState.running) "Show progress" else "Start scraping", onSelect = {
                 if (!ScrapeState.running) {
-                    if (!ScreenScraper.hasDevCredentials()) { host.toast("Enter a ScreenScraper developer ID first", 2500); return@UiItem }
+                    if (s.artSources == "ss" && !ScreenScraper.hasDevCredentials()) {
+                        host.toast("Enter a ScreenScraper developer ID first, or choose free box art sources", 3000); return@UiItem
+                    }
                     ScraperService.start(host.hostContext, systems)
                 }
                 host.push(ScraperProgressScene(host))
             }),
+            multi("Box art sources", listOf(
+                "ss,gametdb,libretro" to "All",
+                "gametdb,libretro" to "Free only",
+                "ss" to "ScreenScraper",
+            ), { s.artSources }) { s.artSources = it },
             action("Username", s.ssUser.ifBlank { "(anonymous: 1 thread)" }) {
                 host.push(KeyboardScene(host, "ScreenScraper username", s.ssUser) { v -> s.ssUser = v.trim(); build() })
             },
