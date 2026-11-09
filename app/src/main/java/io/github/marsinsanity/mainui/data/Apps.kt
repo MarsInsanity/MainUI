@@ -86,12 +86,17 @@ class Apps(private val ctx: Context, private val library: Library, private val s
         if (!settings.autoSortAndroidGames) { settings.lastPackageReconcile = System.currentTimeMillis(); return }
         val since = settings.lastPackageReconcile
         invalidate()
+        // Emulators sorted in as games before MainUI knew them (another build's id): take them out.
+        for (pkg in library.androidGames()) {
+            val label = all().firstOrNull { it.pkg == pkg }?.label
+            if (emulators.isEmulatorPackage(pkg, label)) library.setAndroidGame(pkg, false)
+        }
         for (a in all()) {
             if (since != 0L && a.installTime <= since) continue
             if (since == 0L) {
                 // First run: sort everything that declares itself a game.
-                if (a.isGame && !emulators.isEmulatorPackage(a.pkg)) library.setAndroidGame(a.pkg, true)
-            } else if (a.isGame && !emulators.isEmulatorPackage(a.pkg)) {
+                if (a.isGame && !emulators.isEmulatorPackage(a.pkg, a.label)) library.setAndroidGame(a.pkg, true)
+            } else if (a.isGame && !emulators.isEmulatorPackage(a.pkg, a.label)) {
                 library.setAndroidGame(a.pkg, true)
             }
         }
