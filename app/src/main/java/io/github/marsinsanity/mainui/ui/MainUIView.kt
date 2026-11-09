@@ -91,6 +91,17 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     }
 
     override fun top(): Scene? = stack.lastOrNull()
+
+    /**
+     * Redraw. Scenes also call this from background work (download / unpack / scrape progress).
+     * View.invalidate() is only safe on the UI thread: from another thread it can schedule a frame
+     * while the UI thread does too and leave a sync barrier in the main queue, after which the app
+     * no longer handles input ("MainUI isn't responding" while downloading cores). Elsewhere the
+     * redraw is posted to the UI thread.
+     */
+    override fun invalidate() {
+        if (Looper.myLooper() == Looper.getMainLooper()) super.invalidate() else postInvalidate()
+    }
     fun scenes(): List<Scene> = stack.toList()
 
     override fun toast(message: String, millis: Long) {
