@@ -42,6 +42,10 @@ class Gfx {
     var now = 0L; private set
     /** Set during draw when something (marquee text) needs another frame. */
     var wantsFrame = false
+    /** Smallest delay (ms) after which a scene wants to be redrawn, 0 = none. Cheaper than [wantsFrame]. */
+    var redrawIn = 0L
+
+    fun redrawAfter(ms: Long) { if (redrawIn == 0L || ms < redrawIn) redrawIn = ms }
 
     val theme: Theme get() = MainUI.themes.current
     private val smooth get() = MainUI.settings.smoothScaling
@@ -75,6 +79,7 @@ class Gfx {
         scale = screenW / W
         now = System.currentTimeMillis()
         wantsFrame = false
+        redrawIn = 0L
         bmpPaint.isFilterBitmap = smooth
         c.save()
         c.scale(scale, scale)
@@ -412,7 +417,9 @@ class Gfx {
         list.visible = rows
         list.ensureVisible()
         val effectiveItemH = if (stretch) (bottom - top) / rows else itemH
-        val startY = if (stretch) top else bottom - rows * itemH
+        // Onion anchors rows to the bottom of a 360px area; on taller screens the
+        // spare space is split above and below instead of leaving a gap on top.
+        val startY = if (stretch) top else listStartY(list.large, top, bottom)
         val width = right - left
 
         // Preview image of the active item (box art etc.)
@@ -454,7 +461,13 @@ class Gfx {
             }
             var end = labelEnd
             when (item.type) {
-                ItemType.TOGGLE -> { val tw = toggle(item.checked, end - 20f, cy, alpha); end -= tw + 30f }
+                ItemType.TOGGLE -> {
+                    val tw = toggle(item.checked, end - 20f, cy, alpha); end -= tw + 30f
+                    item.sub?.let { s ->
+                        val sw = text(s, theme.list, end, cy, Align.RIGHT, maxW = 200f, size = theme.list.size * 0.75f, alpha = alpha * 200 / 255)
+                        end -= sw + 20f
+                    }
+                }
                 ItemType.MULTI -> {
                     val mw = 226f
                     val rightArrowX = end - 20f
@@ -475,6 +488,12 @@ class Gfx {
         if (list.size == 0) {
             text("Empty", theme.list, (left + right) / 2, (top + bottom) / 2, Align.CENTER, alpha = 160)
         }
+    }
+
+    fun listStartY(large: Boolean, top: Float = HEADER, bottom: Float = H - FOOTER): Float {
+        val itemH = if (large) 90f else 60f
+        val rows = max(1, ((bottom - top) / itemH).toInt())
+        return top + ((bottom - top) - rows * itemH) / 2f
     }
 
     /** Panel background for pop menus (bg-pop-menu-N) and the in-game menu. */
@@ -512,7 +531,7 @@ class Gfx {
 
     /** Main menu tile replacement for ic-<name>-n/f (156x278). */
     fun menuTile(kind: String, x: Float, y: Float, w: Float, h: Float, selected: Boolean) {
-        val bgCol = if (selected) withAlpha(theme.accent, 235) else Color.argb(90, 255, 255, 255)
+        val bgCol = if (selected) withAlpha(theme.accent, 235) else Color.argb(38, 255, 255, 255)
         fillRect(x + 6, y + 6, w - 12, h - 12, bgCol, 18f)
         val cx = x + w / 2; val cy = y + h * 0.36f
         glyph(kind, cx, cy, w * 0.26f, if (selected) Color.WHITE else Color.argb(200, 255, 255, 255))

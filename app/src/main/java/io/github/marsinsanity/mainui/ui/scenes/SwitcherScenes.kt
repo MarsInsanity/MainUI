@@ -59,7 +59,6 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
         brightness = Brightness.get(ctx)
     }
 
-    override fun animating(now: Long) = now < legendUntil || now < brightnessUntil
 
     private fun screenshot(e: Library.Entry): Bitmap? {
         val f = e.screenshot?.let { File(it) }?.takeIf { it.isFile }
@@ -120,6 +119,8 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
             g.text(e.name, g.theme.title, g.W / 2, y + 30f, Align.CENTER, maxW = g.W - 2 * pad, color = Color.WHITE, marquee = true)
         }
 
+        val until = maxOf(legendUntil, brightnessUntil)
+        if (g.now < until) g.redrawAfter(until - g.now + 10)
         if (g.now < legendUntil && view != 2) {
             g.skin("extra/gs-legend")?.let { g.bmp(it, g.W - it.width, headerH) }
         }

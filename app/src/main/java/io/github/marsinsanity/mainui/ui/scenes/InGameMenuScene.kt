@@ -212,9 +212,11 @@ class InGameMenuScene(
             if (!ok) {
                 // No root: once MainUI is in front the emulator is a background
                 // process and may be killed with the normal permission.
-                main.postDelayed({
+                val kill = Runnable {
                     runCatching { ctx.getSystemService(ActivityManager::class.java).killBackgroundProcesses(session.pkg) }
-                }, 800)
+                }
+                main.postDelayed(kill, 800)
+                main.postDelayed(kill, 3000)
             }
         }
     }

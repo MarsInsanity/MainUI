@@ -76,9 +76,8 @@ class ScraperScene(host: SceneHost, private val systems: List<String>?) :
 
 /** Live progress of the background scraper. B leaves it running, X stops it. */
 class ScraperProgressScene(host: SceneHost) : Scene(host) {
-    override fun animating(now: Long) = true
-
     override fun draw(g: Gfx) {
+        g.redrawAfter(500) // live progress
         val st = ScrapeState
         g.background()
         g.header("Scraper")

@@ -100,7 +100,8 @@ class SystemRegistry(ctx: Context, private val storage: Storage) {
                     def = SystemDef.unknown(dir.name)
                 }
                 defsFound[def.id] = def
-                found.getOrPut(def.id) { mutableListOf() } += target
+                val dirs = found.getOrPut(def.id) { mutableListOf() }
+                if (dirs.none { it.absolutePath.equals(target.absolutePath, ignoreCase = true) }) dirs += target
             }
         }
         return found.map { (id, dirs) -> GameSystem(defsFound.getValue(id), dirs) }

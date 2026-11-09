@@ -29,7 +29,10 @@ object Launch {
         val def = systemDef(game.systemId)
         if (def == null) { host.toast("Unknown system ${game.systemId}"); return }
         if (game.file?.exists() != true) { host.toast("File not found"); return }
-        host.io({ MainUI.sessions.launch(def, game, null) }) { err -> if (err != null) host.toast(err, 3000) }
+        host.io({ MainUI.sessions.launch(def, game, null) }) { err ->
+            if (err != null) host.push(io.github.marsinsanity.mainui.ui.DialogScene(host, "Can't start game",
+                "$err\n\nInstall it, or press SELECT on the game > Core to pick another emulator.", "OK", null))
+        }
     }
 
     fun formatTime(seconds: Long): String {
