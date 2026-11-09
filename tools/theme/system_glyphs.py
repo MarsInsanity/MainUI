@@ -137,12 +137,6 @@ class Pen:
                     xa, ya = x0 + i * cell, y0 + j * cell
                     self.rr(xa + 0.3, ya + 0.3, xa + cell - 0.3, ya + cell - 0.3, r=0.4, fill=ch == "X", soft=ch == "o")
 
-    def hinge(self, y_top, y_bot, half_w, inset=9):
-        """Clamshell hinge: two short links across the thin gap between the halves."""
-        for sx in (-1, 1):
-            x = sx * (half_w - inset)
-            self.rr(x - 3, y_top - 1, x + 3, y_bot + 1, 1.2, fill=True)
-
     def stick(self, x, y0, y1, ball=4.0, w=None):
         """Joystick: shaft from (x, y0) up to (x, y1) with a ball on top."""
         self.ln((x, y0), (x, y1), w=w or self.w * 0.9)
@@ -339,26 +333,25 @@ def gba(p):
 
 @glyph("nds")
 def nds(p):
-    p.rr(-36, -42, 36, -3, 6)
-    p.screen(-20, -36, 20, -10, r=1.5)
-    p.grid_dots(-30, -28, -26, -20, 2, 3, 0.9)            # speakers
-    p.grid_dots(26, -28, 30, -20, 2, 3, 0.9)
-    p.hinge(-3, 2, 36)
-    p.rr(-36, 2, 36, 42, 6)
-    p.screen(-16, 8, 16, 34, r=1.5)
+    # the two halves meet at the hinge: one shared line, notched by the rounded corners
+    p.rr(-36, -42, 36, 0, 6)
+    p.rr(-36, 0, 36, 42, 6)
+    p.screen(-20, -35, 20, -8, r=1.5)
+    p.grid_dots(-30, -27, -26, -17, 2, 3, 0.9)            # speakers
+    p.grid_dots(26, -27, 30, -17, 2, 3, 0.9)
+    p.screen(-16, 7, 16, 34, r=1.5)
     p.dpad(-27, 20, 4.5)
     p.diamond(27, 20, 4, 1.5)
 
 
 @glyph("3ds")
 def three_ds(p):
-    p.rr(-38, -42, 38, -3, 6)
-    p.screen(-28, -36, 28, -10, r=1.5, color=True)        # wide 3D screen
+    p.rr(-38, -42, 38, 0, 6)
+    p.rr(-38, 0, 38, 42, 6)
+    p.screen(-28, -35, 28, -8, r=1.5, color=True)         # wide 3D screen
     p.ci(0, -39, 1.3, fill=True)
-    p.hinge(-3, 2, 38)
-    p.rr(-38, 2, 38, 42, 6)
-    p.screen(-16, 8, 16, 34, r=1.5)
-    p.ci(-28, 13, 4.6, w=2.0)                             # circle pad
+    p.screen(-16, 7, 16, 34, r=1.5)
+    p.ci(-28, 12, 4.6, w=2.0)                             # circle pad
     p.dpad(-28, 30, 3.6)
     p.diamond(28, 20, 4, 1.5)
 
