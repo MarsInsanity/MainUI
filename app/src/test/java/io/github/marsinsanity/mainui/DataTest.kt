@@ -144,3 +144,26 @@ class RetroArchConfigTest {
         assertNull(c.mergeConfig(cfg(20), mapOf("a" to "b")))
     }
 }
+
+class BuildbotListTest {
+    private val c = io.github.marsinsanity.mainui.emu.RetroArchCores
+
+    @Test
+    fun readsCoresAndSizesFromTheFolderPage() {
+        val html = """<table><tr><td class="fb-i"><img src="/_h5ai/public/images/fallback/folder-parent.png"/></td><td class="fb-n"><a href="..">Parent Directory</a></td><td class="fb-d"></td><td class="fb-s"></td></tr>""" +
+            """<tr><td class="fb-i"><img src="/_h5ai/public/images/fallback/file.png" alt="file"/></td><td class="fb-n"><a href="/nightly/android/latest/arm64-v8a/mgba_libretro_android.so.zip">mgba_libretro_android.so.zip</a></td><td class="fb-d">2026-11-07 07:32</td><td class="fb-s">419 KB</td></tr>""" +
+            """<tr><td class="fb-i"><img src="/_h5ai/public/images/fallback/file.png" alt="file"/></td><td class="fb-n"><a href="/nightly/android/latest/arm64-v8a/mame2016_libretro_android.so.zip">mame2016_libretro_android.so.zip</a></td><td class="fb-d">2026-11-07 09:32</td><td class="fb-s">40.3 MB</td></tr></table>"""
+        val rows = c.parseListing(html)
+        assertEquals(listOf("mgba", "mame2016"), rows.map { it.core })
+        assertEquals(419L * 1024, rows[0].bytes)
+        assertEquals((40.3 * 1048576).toLong(), rows[1].bytes)
+        assertEquals("2026-11-07", rows[0].date)
+    }
+
+    @Test
+    fun readsThePlainIndexToo() {
+        val rows = c.parseIndexExtended("2026-10-31 7f42945f squirreljme_libretro_android.so.zip\n2026-11-08 657995de mednafen_psx_hw_libretro_android.so.zip\n\n")
+        assertEquals(listOf("squirreljme", "mednafen_psx_hw"), rows.map { it.core })
+        assertEquals(0L, rows[0].bytes)
+    }
+}

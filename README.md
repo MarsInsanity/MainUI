@@ -243,6 +243,9 @@ Settings > Emulators & cores > **RetroArch cores** lists installed cores and eve
 recommends. `A` on a missing core downloads it from `buildbot.libretro.com/nightly/android/latest/<abi>/`
 and installs it into RetroArch's core folder with RetroArch's owner and SELinux label (root).
 Launching a game whose core is missing offers the same download instead of failing.
+**Download all cores** fetches every core the buildbot has that isn't installed yet (about 250 for
+arm64, roughly 0.9 GB to download): it shows the count and size first, warns if storage looks too
+small, installs three at a time, and B stops it after the cores in progress.
 
 Cores that aren't on the buildbot can be installed from **`MainUI/cores`**: drop
 `<name>_libretro_android.so` (or a `.zip` of it, optionally with `<name>_libretro.info`) there and it

@@ -6,6 +6,7 @@ import io.github.marsinsanity.mainui.core.Root
 import io.github.marsinsanity.mainui.ui.BusyScene
 import io.github.marsinsanity.mainui.ui.DialogScene
 import io.github.marsinsanity.mainui.ui.SceneHost
+import io.github.marsinsanity.mainui.store.formatBytes
 
 /** Helps the user get RetroArch cores: download with root, or point to RetroArch's own updater. */
 object CoreInstall {
@@ -69,6 +70,87 @@ object CoreInstall {
                     "${em.coreDisplayName(c)}: ${r.exceptionOrNull()?.message ?: "failed"}"
                 }.take(360), "OK", null))
             }
+        }
+    }
+
+    /**
+     * Downloads every core the libretro buildbot has that isn't installed yet:
+     * shows how many and how big first, checks free space, then installs three
+     * at a time. B stops after the cores being downloaded.
+     */
+    fun installAll(host: SceneHost, done: () -> Unit = {}) {
+        val em = MainUI.emulators
+        if (em.raPackage == null) { offer(host, "mgba"); return }
+        val busy = BusyScene(host, "Checking the core list...")
+        host.push(busy)
+        host.io({ runCatching { Root.available() to em.missingRemoteCores() } }) { r ->
+            host.pop(busy)
+            r.onFailure { host.push(DialogScene(host, "Download all cores", "Could not get the core list:\n${it.message}", "OK", null)) }
+            r.onSuccess { (root, missing) ->
+                when {
+                    !root -> host.push(DialogScene(host, "Download all cores",
+                        "MainUI needs root to add cores to RetroArch. Without root: RetroArch > Online Updater > Core Downloader.", "OK", null))
+                    missing.isEmpty() -> host.toast("All cores are already installed", 2500)
+                    else -> confirmAll(host, missing, done)
+                }
+            }
+        }
+    }
+
+    private fun confirmAll(host: SceneHost, missing: List<io.github.marsinsanity.mainui.emu.RetroArchCores.Remote>, done: () -> Unit) {
+        val bytes = missing.sumOf { it.bytes }
+        // Cores unpack to roughly 2.5 times their download size.
+        val needed = (bytes * 2.5).toLong() + 200L * 1024 * 1024
+        val free = runCatching { android.os.StatFs(android.os.Environment.getDataDirectory().path).availableBytes }.getOrDefault(Long.MAX_VALUE)
+        val size = if (bytes > 0) " (${formatBytes(bytes)} to download, about ${formatBytes((bytes * 2.5).toLong())} installed)" else ""
+        val msg = "Download ${missing.size} cores$size?" +
+            if (bytes > 0 && free < needed) "\n\nOnly ${formatBytes(free)} free: it may not all fit." else ""
+        host.push(DialogScene(host, "Download all cores", msg, "DOWNLOAD", "CANCEL") { runAll(host, missing, done) })
+    }
+
+    private fun runAll(host: SceneHost, missing: List<io.github.marsinsanity.mainui.emu.RetroArchCores.Remote>, done: () -> Unit) {
+        val em = MainUI.emulators
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val busy = BusyScene(host, "Starting...") { stop.set(true) }
+        host.push(busy)
+        val queue = java.util.concurrent.ConcurrentLinkedQueue(missing.sortedBy { it.bytes })   // small ones first
+        val ok = java.util.concurrent.atomic.AtomicInteger()
+        val failed = java.util.Collections.synchronizedList(ArrayList<String>())
+        val current = java.util.concurrent.ConcurrentHashMap<String, String>()
+        val total = missing.size
+        fun show() {
+            val head = "Cores: ${ok.get() + failed.size} of $total" + if (failed.isNotEmpty()) " (${failed.size} failed)" else ""
+            busy.text = (listOf(head) + current.values.take(3) + listOfNotNull(if (stop.get()) "Stopping after these..." else null))
+                .joinToString("\n")
+            host.invalidate()
+        }
+        host.io({
+            val workers = (1..3).map {
+                Thread {
+                    while (!stop.get()) {
+                        val c = queue.poll() ?: break
+                        current[c.core] = c.core
+                        show()
+                        em.installCore(c.core, rescan = false) { msg -> current[c.core] = msg; show() }
+                            .onSuccess { ok.incrementAndGet() }
+                            .onFailure { failed += "${c.core}: ${it.message}" }
+                        current.remove(c.core)
+                        show()
+                    }
+                }.apply { start() }
+            }
+            workers.forEach { it.join() }
+            em.refreshCores()
+        }) {
+            host.pop(busy)
+            val skipped = total - ok.get() - failed.size
+            val summary = buildString {
+                append("${ok.get()} cores installed.")
+                if (skipped > 0) append(" $skipped not downloaded (stopped).")
+                if (failed.isNotEmpty()) append("\n${failed.size} failed:\n" + failed.take(4).joinToString("\n").take(260))
+            }
+            host.push(DialogScene(host, "Download all cores", summary, "OK", null))
+            done()
         }
     }
 
