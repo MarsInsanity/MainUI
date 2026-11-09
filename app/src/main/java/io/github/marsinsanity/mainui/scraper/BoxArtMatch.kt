@@ -31,6 +31,8 @@ object BoxArtMatch {
         var t = name.substringBefore(" (").substringBefore(" [").trim()
         t = trailingArticle.replace(t, "")
         t = leadingArticle.replace(t, "")
+        // Accents don't count ("Pokémon" = "Pokemon").
+        t = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
         t = t.lowercase().replace("&", " and ").replace("'", "")
         return Regex("[^a-z0-9]+").replace(t, " ").trim()
     }

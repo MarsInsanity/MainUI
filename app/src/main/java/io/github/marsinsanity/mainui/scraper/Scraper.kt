@@ -97,6 +97,11 @@ object Scraper {
             val jobs = ArrayList<Pair<GameSystem, Game>>()
             for (s in systems) { if (cancel.get()) break; collect(s, null, 0, jobs) }
             if (cancel.get()) { st.message = "Cancelled"; return }
+            // LaunchBox matches by title against its whole database: fetch / refresh it first.
+            if (FreeArt.LAUNCHBOX in free && jobs.any { LaunchBoxDb.supports(it.first.id) }) {
+                if (!FreeArt.ensureLaunchBox({ st.message = it }, { cancel.get() })) st.addLog("LaunchBox database unavailable")
+                if (cancel.get()) { st.message = "Cancelled"; return }
+            }
             st.total = jobs.size
             if (jobs.isEmpty()) { st.message = "Nothing to scrape"; return }
 
