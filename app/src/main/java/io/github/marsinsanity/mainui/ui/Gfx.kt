@@ -398,7 +398,7 @@ class Gfx {
     fun buttonIcon(btn: String, x: Float, cy: Float, size: Float = 44f, scale: Float = 1f, draw: Boolean = true): Float {
         val skinName = when (btn) {
             "A" -> "icon-A-54"; "B" -> "icon-B-54"; "X" -> "icon-x"; "Y" -> "icon-y"
-            "MENU" -> "ic-MENU"; "START" -> "icon-START"; else -> null
+            "MENU" -> "ic-MENU"; "START" -> "icon-START"; "SELECT" -> "icon-SELECT"; else -> null
         }
         val b = skinName?.let { skin(it) }
         if (b != null && btn in setOf("A", "B")) {
