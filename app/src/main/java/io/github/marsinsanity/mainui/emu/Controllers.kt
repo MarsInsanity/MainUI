@@ -157,10 +157,27 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     private var frozen = false
     private var frozenGen = -1
 
-    override fun prepare() { if (reachable == null) reachable = status() != null }
+    override fun prepare() {
+        if (reachable == null) reachable = status() != null
+        // Official builds: keyboard hotkeys through MainUI's virtual keyboard (needs root).
+        if (reachable == false && Root.available()) io.github.marsinsanity.mainui.core.VirtualKeys.warmUp()
+    }
     private val api get() = reachable == true
 
-    override val states get() = if (api) StateSupport.API else StateSupport.MENU
+    /**
+     * Official Android builds have no network commands. RetroArch ignores keys injected with
+     * `input keyevent` / accessibility actions (Android's virtual keyboard device), and only
+     * treats Back from player 1's controller as the menu key. So with root MainUI presses its
+     * keyboard hotkeys (F1 menu, F2 save state, F4 load state; "Configure RetroArch" makes sure
+     * they are set) on its own virtual keyboard ([io.github.marsinsanity.mainui.core.VirtualKeys]).
+     */
+    private val keys get() = !api && Root.knownAvailable()
+
+    override val states get() = when {
+        api -> StateSupport.API
+        keys -> StateSupport.HOTKEY
+        else -> StateSupport.MENU
+    }
     override val hasSlots get() = api
     override val saveKeyName: String? = null
     override val loadKeyName: String? = null
@@ -213,8 +230,11 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
         if (api && status()?.contains("PAUSED") == true) send("PAUSE_TOGGLE")
     }
 
+    /** Held long enough for RetroArch to see it on a frame (a tap can come and go between polls). */
+    private fun hotkey(key: String) = io.github.marsinsanity.mainui.core.VirtualKeys.press(key, 250)
+
     override fun save(slot: Int): Boolean {
-        if (!api) return false
+        if (!api) return keys && hotkey("F2")
         // RetroArch >= 1.17 understands the *_SLOT variants; older builds ignore them,
         // so fall back to selecting the slot by stepping.
         val reply = ask("SAVE_STATE_SLOT $slot", 1500)
@@ -224,7 +244,7 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     }
 
     override fun load(slot: Int): Boolean {
-        if (!api) return false
+        if (!api) return keys && hotkey("F4")
         val reply = ask("LOAD_STATE_SLOT $slot", 1500)
         if (reply != null && !reply.contains("-1")) return true
         selectSlot(slot)
@@ -241,9 +261,10 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
 
     override fun openNativeMenu(): Boolean {
         if (api) return send("MENU_TOGGLE")
-        // Back opens RetroArch's quick menu on Android (Save State / Load State live there)
-        return io.github.marsinsanity.mainui.service.OverlayService.instance?.globalBack()
-            ?: Root.keyEvent("KEYCODE_BACK")
+        if (Root.knownAvailable() || Root.available()) return hotkey("F1")
+        // Without root only Back is possible; RetroArch opens its menu with it when the
+        // controller profile has no menu button of its own.
+        return io.github.marsinsanity.mainui.service.OverlayService.instance?.globalBack() ?: false
     }
 
     override fun quit(autoSave: Boolean): Boolean {

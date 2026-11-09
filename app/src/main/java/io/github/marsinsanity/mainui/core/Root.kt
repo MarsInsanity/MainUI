@@ -67,6 +67,20 @@ object Root {
         return if (ns == Ns.MOUNT_MASTER) arrayOf("su", "--mount-master") else arrayOf("su")
     }
 
+    /**
+     * Starts a long-running root command with stdin / stdout piped to it: a root shell
+     * (in the system-wide view) that execs into [cmd]. Null without root.
+     */
+    fun startInteractive(cmd: String): Process? = runCatching {
+        ready()
+        val p = ProcessBuilder(*shellArgv()).redirectErrorStream(true).start()
+        val w = p.outputStream.bufferedWriter()
+        shellPrelude()?.let { w.write("$it\n") }
+        w.write("exec $cmd\n")
+        w.flush()
+        p
+    }.onFailure { Log.w(TAG, "startInteractive failed", it) }.getOrNull()
+
     /** First line sent to a new interactive root shell. */
     private fun shellPrelude(): String? = if (ns == Ns.NSENTER) "exec nsenter -t 1 -m -- sh" else null
 

@@ -67,6 +67,12 @@ android {
         }
     }
 
+    // libmainuiinput.so: the virtual keyboard MainUI presses RetroArch's hotkeys with (tools/KeyInject).
+    ndkVersion = "27.2.12479018"
+    externalNativeBuild {
+        ndkBuild { path = file("src/main/jni/Android.mk") }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -79,6 +85,8 @@ android {
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Extracted to the native library folder, so the root helper can System.load() it by path.
+        jniLibs.useLegacyPackaging = true
     }
 }
 
