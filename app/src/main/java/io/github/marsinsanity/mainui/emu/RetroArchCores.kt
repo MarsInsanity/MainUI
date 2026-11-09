@@ -17,8 +17,9 @@ import java.util.zip.ZipFile
  * Where cores live depends on the build and on the user's settings:
  *  - `libretro_directory` in retroarch.cfg (empty = default),
  *  - the default `/data/data/<pkg>/cores` (website / F-Droid builds, Online Updater),
- *  - the app's native library folder and its split APKs (Play Store builds
- *    deliver cores as Play Feature Delivery modules),
+ *  - the app's native library folder and its split APKs,
+ *  - Play Store builds: Play Feature Delivery modules "core_<name>" (lib<name>.so),
+ *    which RetroArch links into its cores folder when it starts,
  *  - anywhere else under the app's data folder (split-compat extraction).
  * The data folders need root; the APK / native library checks don't.
  */
@@ -46,6 +47,16 @@ object RetroArchCores {
     )
 
     fun coreName(file: String) = file.substringAfterLast('/').removeSuffix(SUFFIX)
+
+    /**
+     * Core in a Play Store build's feature module split ("core_mgba" -> "mgba"), or null for
+     * other splits ("config.arm64_v8a", "core_mgba.config.arm64_v8a" belongs to "core_mgba").
+     * Module names can't contain dashes; RetroArch maps the one core that has one back.
+     */
+    fun playModuleCore(split: String): String? {
+        if (!split.startsWith("core_") || split.contains('.') || split.length <= 5) return null
+        return if (split == "core_mesen_s") "mesen-s" else split.removePrefix("core_")
+    }
 
     /** `key = "value"` from retroarch.cfg; null for missing, empty or "default". */
     fun cfgValue(cfg: String?, key: String): String? = cfg?.lineSequence()
@@ -109,6 +120,12 @@ object RetroArchCores {
                     }
                 }
             }
+        }
+        // 3. Play Store builds: each core is a feature module "core_<name>" holding lib<name>.so,
+        //    which RetroArch links to <data>/cores/<name>_libretro_android.so every time it starts.
+        //    Listing the cores folder (root) is exact; without it the installed modules are the best guess.
+        if (!complete) ai?.splitNames?.forEach { split ->
+            playModuleCore(split)?.let { found.putIfAbsent(it, "$dataDir/cores/$it$SUFFIX") }
         }
         Log.d(TAG, "scan $pkg: ${found.size} cores, complete=$complete, dir=$coreDir")
         return Scan(found, complete, coreDir, infoDir)

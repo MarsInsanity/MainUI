@@ -246,6 +246,9 @@ Launching a game whose core is missing offers the same download instead of faili
 Android 11+ hides every other app's `/data/data` folder from an app, and Magisk's `su` starts in the
 app's view by default, so MainUI runs its root commands in the system-wide view (`nsenter -t 1 -m`,
 or `su --mount-master` if `nsenter` is missing). Without that, RetroArch's core folder looks empty.
+Play Store RetroArch keeps each downloaded core in a feature module (`core_mgba`, holding `libmgba.so`)
+and links it into its cores folder when it starts; MainUI lists that folder with root and, without
+root, recognizes the installed modules.
 **Download all cores** fetches every core the buildbot has that isn't installed yet (about 250 for
 arm64, roughly 0.9 GB to download): it shows the count and size first, warns if storage looks too
 small, installs three at a time, and B stops it after the cores in progress.
