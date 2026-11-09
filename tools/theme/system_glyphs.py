@@ -418,13 +418,16 @@ def ps2(p):
 
 @glyph("ps3")
 def ps3(p):
-    p.ln((-50, 26), (50, 26), w=3.2)
-    p.ln((-50, 26), (-50, 6))
-    p.ln((50, 26), (50, 6))
-    p.ellarc(-50, -22, 50, 34, 180, 360)                  # curved top
-    p.ln((-30, 16), (30, 16), w=2.4)                      # slot-loading drive
-    p.ci(38, 14, 2, fill=True)
-    p.ellarc(-34, -10, 34, 20, 200, 340, w=1.6)           # glossy top line
+    # original PS3, front view: wide slab with a gently curved top,
+    # slot-loading drive, touch power/eject on the right, USB ports at the front
+    p.ln((-50, -4), (-50, 22), (50, 22), (50, -4))
+    p.ellarc(-50, -16, 50, 8, 180, 360)
+    p.ln((-46, 14), (46, 14), w=1.4)                      # lower body seam
+    p.ln((-30, 0), (14, 0), w=2.8)                        # disc slot
+    p.rr(24, -2, 32, 2, 1.5, fill=True)                   # power / eject
+    p.rr(36, -2, 44, 2, 1.5, fill=True)
+    for x in (-42, -35, -28, -21):                        # USB ports
+        p.rr(x, 16, x + 4, 20, 0.6, fill=True)
 
 
 @glyph("psp")
@@ -834,14 +837,14 @@ def atari800(p):
 
 @glyph("atarist")
 def atarist(p):
-    p.rr(-50, -6, 50, 28, 3)
-    p.keys(-44, 0, 22, 22, 10, 3)
-    p.keys(28, 0, 44, 22, 3, 3)
-    p.rr(-6, -40, 14, -18, 8)                             # mouse
-    p.ln((4, -40), (4, -32), w=1.4)
-    p.ln((4, -18), (4, -8), w=1.6)
-    for i in range(4):                                    # diagonal vents
-        p.ln((24 + i * 6, -14), (30 + i * 6, -6), w=1.6)
+    p.rr(-50, -14, 50, 28, 3)
+    for i in range(4):                                    # diagonal vents, top right
+        p.ln((22 + i * 6, -10), (27 + i * 6, -4), w=1.6)
+    p.keys(-44, 0, 22, 24, 10, 3)
+    p.keys(28, 0, 44, 24, 3, 3)
+    p.rr(-30, -42, -10, -22, 8)                           # mouse
+    p.ln((-20, -42), (-20, -34), w=1.4)
+    p.ln((-20, -22), (-20, -14), w=1.6)
 
 
 @glyph("atarixegs")
@@ -1090,10 +1093,11 @@ def daphne(p):
 @glyph("alg")
 def alg(p):
     # light gun
-    p.poly([(-46, -18), (30, -18), (34, -10), (34, -2), (-6, -2), (-12, 26), (-30, 26), (-24, -2), (-46, -2)])
+    p.poly([(-46, -18), (30, -18), (34, -14), (34, -6), (30, -2), (-6, -2), (-12, 26), (-30, 26), (-24, -2), (-46, -2)])
     p.ln((-6, -2), (-2, 10), (-12, 10), w=2.2)            # trigger guard
-    p.ln((-44, -24), (-36, -24), w=2.4)                   # sight
-    p.ln((40, -10), (48, -10), w=2.0)
+    p.rr(-42, -24, -34, -18, 1, fill=True)                # rear sight
+    p.rr(22, -23, 27, -18, 1, fill=True)                  # front sight
+    p.ln((-40, -10), (20, -10), w=1.4)
 
 
 # =====================================================================================
@@ -1183,10 +1187,10 @@ def amstradcpc(p):
 
 @glyph("zxspectrum")
 def zxspectrum(p):
-    p.rr(-50, -20, 50, 22, 4)
-    p.grid_dots(-42, -12, 26, 14, 10, 4, 1.8)             # rubber keys
-    for i in range(4):                                    # rainbow stripes
-        p.ln((30 + i * 4, 18), (40 + i * 4, 4), w=2.2)
+    p.rr(-50, -22, 50, 24, 4)
+    p.grid_dots(-41, -14, 41, 4, 10, 4, 1.8)              # rubber keys
+    for i in range(4):                                    # rainbow stripes, bottom-right corner
+        p.ln((16 + i * 6, 19), (24 + i * 6, 10), w=2.4)
 
 
 @glyph("zx81")
