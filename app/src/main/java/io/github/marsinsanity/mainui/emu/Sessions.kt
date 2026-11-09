@@ -65,6 +65,7 @@ class SessionManager(
     fun launch(sys: SystemDef, game: Game, opt: EmuOption?): String? {
         val option = opt ?: emulators.choose(sys, game) ?: return "No emulator available for ${sys.name}"
         if (option.installed == false) return "${option.name} is not installed"
+        if (option.isRetroArch) runCatching { emulators.ensureRetroArchConfigured() }
         val intent = try { emulators.buildIntent(game, option) } catch (e: IllegalStateException) { return e.message }
         endActive()
         return try {

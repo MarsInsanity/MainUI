@@ -49,7 +49,7 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
 | 8 | **Apps menu** | Every launchable Android app with its icon. `Y` hides an app; hidden apps live in their own **Hidden apps** menu (with *Edit hidden apps...* to toggle any app). `SELECT` for app info, uninstall, move to Android games. |
 | 9 | **Theme Switcher + downloader** | Full screen previews, applies instantly, installs `.zip` themes dropped into a `Themes` folder. **Theme Downloader** browses the [OnionUI theme repository](https://github.com/OnionUI/Themes) on GitHub (200+ themes, the repository's featured ones first) with previews: `A` get, `Y` get and apply, `START` refresh. |
 | 10 | **Android system** | An "Android" system for native games. Add games by hand or let MainUI sort apps that declare themselves games into it automatically on install. |
-| 11 | **Process manager** | Lists apps MainUI launched first (current game marked), with memory and CPU. Switch to, force stop one, or stop everything MainUI launched (root). |
+| 11 | **Process manager** | The apps that are running, one row per app, with memory and CPU; the current game and apps MainUI launched come first. Only apps you open yourself are listed: System UI, Google Play services, the keyboard, the launcher, accessibility services and other parts of Android are never offered. Switch to one, force stop one, or stop everything MainUI launched (root). **Hold Back anywhere** to open it as a popup over the app in front. |
 | 12 | **In-game menu** | Press **Home** in a game: the game is paused, then a Miyoo style menu appears over it (one press, flush with the top of the screen) with **Continue, Save / Load, Native Menu, Game Switcher, Exit Game**. Hold Home for the Game Switcher; both are configurable, also for Home inside MainUI. See [Emulators](#emulators) for what Save/Load can do per emulator. |
 | 13 | **App Store** | Controller driven client for F-Droid compatible repositories (F-Droid and IzzyOnDroid by default, add your own with `?fingerprint=`): signed index verification, search, categories, updates, install (silent with root, otherwise Android's installer). Downloads (indexes, APKs, cores, themes) use up to 6 parallel connections when the server supports ranges, an unchanged index is not downloaded again, repositories refresh at the same time, and the mirrors listed in a repository's signed index are used if the repository itself fails. Its **Emulators** section lists every emulator MainUI can launch, what it runs, and installs it from the best source: an F-Droid repository (RetroArch, PPSSPP, Dolphin...), the project's latest GitHub release (Azahar, Flycast, melonDS, MAME4droid, hakuX, Vita3K, ARMSX3, RPCSX; when a release has builds per Android version or CPU level, the newest one this device can run), or retroarch.com; otherwise it opens the Google Play page or website. Launching a game whose emulator is missing offers its page. |
 | 14 | **About** | Device, chipset, CPU, display, RAM and storage use, battery, MainUI / Android / kernel versions, root and RetroArch status. *Build number* opens Developer options (turning them on first with root). |
@@ -64,7 +64,7 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
    - **In-game menu overlay**: Android Settings > Accessibility > *MainUI in-game menu*.
    - **Root**: grant MainUI superuser in Magisk (core detection, process manager, key injection, force stop).
 3. In **Settings > Emulators & cores**, run **Configure RetroArch for MainUI** once. It makes RetroArch
-   pause itself while MainUI's menu is open, flush in-game saves every 10 s, auto save a state on exit,
+   pause itself while MainUI's menu is open, flush in-game saves every 10 s, auto save / load states,
    and turns on the network command port (used by RetroArch builds that include it; the official
    Android builds don't, see below).
 4. **Settings > Emulators & cores > RetroArch cores > Get cores for my games** downloads a core for
@@ -138,10 +138,11 @@ Differences from a Miyoo Mini, due to the screen:
 | | Y | Search |
 | | START (grid) | Rescan roms |
 | Game list | Y | Toggle favorite |
-| | SELECT | Game options: favorite, core for this game, system core, scrape, info |
+| | SELECT | Game options: favorite, core for this game (*Default* follows the system's core), system core, scrape, info |
 | Game Switcher | A / B / X / Y | Resume / back / remove / view mode |
 | | SELECT / UP / DOWN | Play time / brightness |
-| In game | Home | In-game menu (hold: Game Switcher) |
+| In game | Home | In-game menu, opened on the press itself (hold: Game Switcher) |
+| Anywhere | hold Back | Process manager popup (Settings > Controls > Hold Back) |
 | Touch | tap / drag / swipe / long press | Select, tap a hint to use it / scroll / next page / SELECT |
 
 ## Emulators
@@ -198,8 +199,12 @@ Recipes live in `app/src/main/assets/emulators.json`. To fix or add one without 
 copy that file to `MainUI/emulators.json` and edit it (Settings > Emulators & cores, `Y` rescans).
 The file documents every field: launch components, intent action / category / data / extras
 (`array:` extras for Vita3K), and the in-game `states` / `save` / `load` / `menu` behaviour.
-Emulators launched with `%ROMSAF%` (most of them) need to have been given access to your rom
-folder once in their own settings, exactly as with ES-DE.
+Emulators launched with `%ROMSAF%` (most of them: DuckStation, DraStic, Dolphin...) need to have been
+given access to your rom folder once in their own settings, exactly as with ES-DE. Android only lets
+them open a game through a folder they were given, so MainUI builds the game's link through that
+folder: with root it reads the folders each emulator was given (`dumpsys activity permissions`) and
+uses the deepest one holding the game (`roms`, `roms/psx`, the whole storage...); without root it uses
+the ROMs folder (`roms`), so give the emulator that one.
 
 ### In-game menu: how it works
 
@@ -217,11 +222,39 @@ folder once in their own settings, exactly as with ES-DE.
    MainUI or the service starts, so a crash can't leave a game frozen.
 4. *Native Menu* opens the emulator's own menu (Back, or `MENU_TOGGLE` where RetroArch has commands).
    *Exit Game* force stops the emulator with root (RetroArch flushes SRAM saves every 10 s once
-   configured), after an auto save via its hotkey if it has one.
+   configured), after an auto save via its hotkey if it has one (the menu closes first so the key
+   reaches the running game).
+
+**Auto save & load** (Settings > Controls, on by default), like OnionOS: leaving a game for the Game
+Switcher (hold Home, or the menu's *Game Switcher*) or exiting it saves its state first. RetroArch
+saves into its **auto slot** (MainUI sets `state_slot = -1` with `savestate_auto_save` /
+`savestate_auto_load`), which RetroArch loads by itself whenever the game starts again, so picking a
+game in the Game Switcher continues it where you left. The menu's Save / Load use the same slot.
+MainUI applies these RetroArch settings by itself before a RetroArch game starts (while RetroArch isn't
+running) whenever it needs new ones, so *Configure RetroArch* doesn't have to be run again. Standalone
+emulators save with their save key; loading on start is up to each emulator's own resume option.
+
+RetroArch only takes note of a new keyboard when it gets its first key, and ignored that key, so the
+first Save or Load did nothing. MainUI now taps Ctrl (unused by RetroArch) on its virtual keyboard
+once per RetroArch run before the first hotkey.
 
 **Home button behaviour is configurable** (Settings > Controls): *Press Home in game* and *Hold Home
 in game* can each be the in-game menu, the Game Switcher, "Go to MainUI" or nothing; *Hold time*
 sets how long counts as a hold (0.3-1.5 s). Defaults: press = in-game menu, hold = Game Switcher.
+The menu opens as soon as Home goes down, without waiting for the release; if Home is still held after
+the hold time, the menu gives way to the hold action (the game is resumed and the Game Switcher opens).
+Some handhelds only hand Android the Home key once the button is released, too late to tell a hold, so
+with root MainUI also watches the button itself (`getevent`, `KEY_HOMEPAGE` / `BTN_MODE`): whichever
+notices the hold first runs it, and the late Home that follows is ignored.
+A second press while the menu is still opening is ignored, so it can't close the menu it opened.
+The root shell and the game's controller are prepared as soon as the game is in front, so the first
+press is as quick as the later ones.
+
+**Hold Back** (anywhere, Settings > Controls > *Hold Back*) opens the process manager as a popup over
+the app in front, after the same hold time. Back is only watched, never taken from the app, so a short
+press still goes to the app as usual (Android apps act on the release, which the popup cancels; apps
+that act as soon as Back goes down, like RetroArch opening its menu, still do). B or Home closes the
+popup, A switches to the app.
 Without the accessibility service, MainUI only receives Android's Home intent, so a hold can't be
 detected and the *press* action is used.
 
@@ -260,8 +293,10 @@ Settings shows the count. Where each update comes from:
   number against the installed one (repositories are refreshed first; unchanged indexes cost nothing);
 - **retroarch.com**: the newest stable version against the installed one (`1.22.2_GIT` reads as 1.22.2);
 - the project's **GitHub releases**: the release's version against the installed one, ignoring git
-  hashes (`0.2.0-3600-g1f2e3d4` is 0.2.0 build 3600). When the two can't be compared (a date tag against
-  a version number), a release published after the app was installed counts as newer.
+  hashes (`0.2.0-3600-g1f2e3d4` is 0.2.0 build 3600). A tag that is just a build number is compared
+  with the installed build (Vita3K's release `v12` is the app's `0.2.0-12`, version code 12). When the
+  two can't be compared otherwise (a date tag against a version number), a release published after the
+  app was installed counts as newer.
 
 Apps installed by Google Play are left to it.
 
@@ -293,6 +328,13 @@ from **`MainUI/cores`**: drop `<name>_libretro_android.so` (or a `.zip` of it, o
 Settings > **Scraper** fetches box art (and, from ScreenScraper, game information). *Box art sources*:
 **All** (ScreenScraper first, then the free sources for whatever it lacks), **Free only** (no account
 needed) or **ScreenScraper**.
+
+While it collects the games to scrape, the progress screen counts them per system ("Collecting games:
+GBA... 340 found (120 already have art)"). Checking which games already have art lists each image
+folder once instead of testing a few hundred possible file names per game, which on an SD card took
+minutes for a large library and looked stuck. Every run is logged to **`MainUI/logs/scraper.txt`**:
+the sources, the ScreenScraper account answer, how many games, and each game's outcome or error. If a
+run finds nothing, the progress screen says so, and that file says why.
 
 ### Free sources: GameTDB, libretro thumbnails, LaunchBox
 
@@ -339,7 +381,9 @@ The Cover Project isn't a source: its site refuses automated clients.
 
 ScreenScraper requires a **developer ID** for every application that uses its API. Developer
 IDs are free; ask the ScreenScraper team for one through the forum on [screenscraper.fr](https://www.screenscraper.fr).
-Enter it under Settings > Scraper > Developer ID, or build it into the APK:
+Enter it under Settings > Scraper > Developer ID, or build it into the APK. *Software name* (Settings >
+Scraper) is the `softname` sent with every request, `MainUI-Android` by default; set it to the name
+your developer ID was registered for:
 
 ```properties
 # local.properties (not committed)

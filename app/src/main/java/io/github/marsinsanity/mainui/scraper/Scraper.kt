@@ -56,12 +56,27 @@ object Scraper {
 
     private fun regions() = MainUI.settings.ssRegions.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
+    private var logOut: java.io.Writer? = null
+
+    /** The run's log, <MainUI>/logs/scraper.txt: every step and every game's outcome. */
+    private fun fileLog(s: String) {
+        synchronized(this) {
+            runCatching {
+                logOut?.apply { write(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + s + "\n"); flush() }
+            }
+        }
+    }
+
     /** Blocking. Call from [io.github.marsinsanity.mainui.service.ScraperService]. */
     fun run(systemIds: List<String>?) {
         val st = ScrapeState
         st.reset()
         st.running = true
         cancel.set(false)
+        logOut = runCatching { File(MainUI.storage.dataDir("logs"), "scraper.txt").bufferedWriter() }.getOrNull()
+        fileLog("MainUI ${io.github.marsinsanity.mainui.BuildConfig.VERSION_NAME}, sources ${MainUI.settings.artSources}, " +
+            "ScreenScraper developer ID ${if (ScreenScraper.hasDevCredentials()) "set" else "not set"}, " +
+            "user ${MainUI.settings.ssUser.ifBlank { "anonymous" }}, only missing art ${MainUI.settings.ssOnlyMissing}, systems ${systemIds ?: "all"}")
         try {
             val sources = MainUI.settings.artSources.split(',').map { it.trim() }.filter { it.isNotEmpty() }
             val free = sources.filter { it != "ss" }
@@ -81,8 +96,13 @@ object Scraper {
                     threads = u.maxThreads.coerceAtLeast(1)
                     perMin = u.maxRequestsPerMin
                     st.quota = "${u.requestsToday}/${u.maxRequestsPerDay} requests today"
+                    fileLog("ScreenScraper: level ${u.level}, ${u.maxThreads} threads, ${st.quota}, $perMin per minute")
                 } catch (e: ScreenScraper.ApiException) {
+                    fileLog("ScreenScraper user info failed: ${e.code} ${e.message}")
                     if (e.code == 403 || e.code == 401) { st.message = "Login failed: ${e.message}"; return }
+                    Log.w(TAG, "userInfo failed", e)
+                } catch (e: java.io.IOException) {
+                    fileLog("ScreenScraper unreachable: ${e.message}")
                     Log.w(TAG, "userInfo failed", e)
                 }
             }
@@ -95,11 +115,16 @@ object Scraper {
                 .filter { systemIds == null || it.id in systemIds }
                 .filter { (api != null && it.def.screenscraperId != null) || FreeArt.supports(free, it.id) }
             val jobs = ArrayList<Pair<GameSystem, Game>>()
-            for (s in systems) { if (cancel.get()) break; collect(s, null, 0, jobs) }
+            for (s in systems) {
+                if (cancel.get()) break
+                st.message = "Collecting games: ${s.def.short}..."
+                collect(s, null, 0, jobs)
+            }
             if (cancel.get()) { st.message = "Cancelled"; return }
+            fileLog("${jobs.size} games to scrape in ${systems.size} systems (${systems.joinToString { it.id }}), ${st.skipped.get()} already have art")
             // LaunchBox matches by title against its whole database: fetch / refresh it first.
             if (FreeArt.LAUNCHBOX in free && jobs.any { LaunchBoxDb.supports(it.first.id) }) {
-                if (!FreeArt.ensureLaunchBox({ st.message = it }, { cancel.get() })) st.addLog("LaunchBox database unavailable")
+                if (!FreeArt.ensureLaunchBox({ st.message = it }, { cancel.get() })) { st.addLog("LaunchBox database unavailable"); fileLog("LaunchBox database unavailable") }
                 if (cancel.get()) { st.message = "Cancelled"; return }
             }
             st.total = jobs.size
@@ -118,16 +143,20 @@ object Scraper {
                         val (sys, game) = queue.poll() ?: break
                         st.current = "${sys.def.short}: ${game.name}"
                         try {
-                            when (scrapeGame(api, freeArt, sys, game, gamelists, dats, limiter)) {
+                            val r = scrapeGame(api, freeArt, sys, game, gamelists, dats, limiter)
+                            when (r) {
                                 Result.FOUND -> st.found.incrementAndGet()
                                 Result.NOT_FOUND -> { st.missing.incrementAndGet(); st.addLog("Not found: ${game.name}") }
                                 Result.SKIPPED -> st.skipped.incrementAndGet()
                             }
+                            fileLog("${sys.id}: ${game.file?.name}: $r")
                         } catch (e: ScreenScraper.ApiException) {
+                            fileLog("${sys.id}: ${game.file?.name}: ScreenScraper ${e.code} ${e.message}")
                             if (e.fatal) { fatal.set(true); st.message = "Stopped: ${describe(e)}" }
                             else if (e.tooManyThreads) { queue.put(sys to game); Thread.sleep(2000); continue }
-                            else { st.errors.incrementAndGet(); st.addLog("Error ${e.code}: ${game.name}") }
+                            else { st.errors.incrementAndGet(); st.addLog("ScreenScraper ${e.code}: ${game.name}: ${e.message?.take(60)}") }
                         } catch (e: Exception) {
+                            fileLog("${sys.id}: ${game.file?.name}: error $e")
                             st.errors.incrementAndGet(); st.addLog("Error: ${game.name}: ${e.message}")
                             Log.w(TAG, "scrape failed ${game.file}", e)
                         }
@@ -140,11 +169,23 @@ object Scraper {
             gamelists.values.forEach { gl -> synchronized(gl) { runCatching { gl.save() } } }
             dats.values.forEach { d -> synchronized(d) { runCatching { d.save() } } }
             MainUI.games.invalidate()
-            if (!fatal.get()) st.message = if (cancel.get()) "Cancelled" else "Done"
+            if (!fatal.get()) st.message = when {
+                cancel.get() -> "Cancelled"
+                st.found.get() == 0 && st.errors.get() > 0 -> "Done, but every game failed: see the log below"
+                st.found.get() == 0 -> "Done: no box art found (check Box art sources)"
+                else -> "Done"
+            }
         } catch (e: Exception) {
             Log.e(TAG, "scraper crashed", e)
+            fileLog("crashed: ${Log.getStackTraceString(e)}")
             st.message = "Error: ${e.message}"
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "scraper out of memory", e)
+            fileLog("out of memory: $e")
+            st.message = "Error: out of memory"
         } finally {
+            fileLog("end: ${st.message} (found ${st.found.get()}, not found ${st.missing.get()}, errors ${st.errors.get()}, skipped ${st.skipped.get()})")
+            synchronized(this) { runCatching { logOut?.close() }; logOut = null }
             st.current = ""
             st.running = false
         }
@@ -160,11 +201,17 @@ object Scraper {
         else -> e.message ?: "HTTP ${e.code}"
     }
 
+    /** Adds the games to scrape; the progress line counts them as it goes, so it never looks stuck. */
     private fun collect(sys: GameSystem, dir: File?, depth: Int, out: MutableList<Pair<GameSystem, Game>>) {
+        val st = ScrapeState
         for (g in MainUI.games.list(sys, dir)) {
-            if (g.isFolder) { if (depth < 3) collect(sys, g.file, depth + 1, out) }
-            else if (!MainUI.settings.ssOnlyMissing || MainUI.games.imageFor(sys, g) == null) out += sys to g
-            else ScrapeState.skipped.incrementAndGet()
+            if (cancel.get()) return
+            if (g.isFolder) { if (depth < 3) collect(sys, g.file, depth + 1, out); continue }
+            if (!MainUI.settings.ssOnlyMissing || MainUI.games.imageFor(sys, g) == null) out += sys to g
+            else st.skipped.incrementAndGet()
+            val n = out.size + st.skipped.get()
+            if (n % 10 == 0) st.message = "Collecting games: ${sys.def.short}... $n found" +
+                if (st.skipped.get() > 0) " (${st.skipped.get()} already have art)" else ""
         }
     }
 

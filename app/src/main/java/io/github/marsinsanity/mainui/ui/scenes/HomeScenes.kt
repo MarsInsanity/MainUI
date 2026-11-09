@@ -94,7 +94,8 @@ object HomeScenes {
     fun systemOptions(host: SceneHost, sys: GameSystem) {
         val cur = MainUI.emulators.choose(sys.def, null)
         host.push(PopMenuScene(host, sys.name, listOf(
-            UiItem("Core: ${cur?.name ?: "none"}", onSelect = { host.push(CoreSelectScene(host, sys.def, null)) }),
+            UiItem("Core: ${if (MainUI.library.coreForSystem(sys.def.id) != null) cur?.name ?: "none" else "Default (${cur?.shortName ?: "none"})"}",
+                onSelect = { host.push(CoreSelectScene(host, sys.def, null)) }),
             UiItem("Scrape artwork", onSelect = { host.push(ScraperScene(host, listOf(sys.id))) }),
             UiItem("Rescan folder", onSelect = {
                 MainUI.games.invalidate()

@@ -101,6 +101,8 @@ class ControlSettingsScene(host: SceneHost) : ListScene(host, "Controls") {
             multi("Hold Home in game", HOME_ACTIONS, { s.homeHold }) { s.homeHold = it },
             multi("Hold time", listOf("300" to "0.3 s", "500" to "0.5 s", "700" to "0.7 s", "1000" to "1 s", "1500" to "1.5 s"),
                 { s.homeHoldMs.toString() }) { s.homeHoldMs = it.toInt() },
+            multi("Hold Back", listOf("processes" to "Process manager", "none" to "Nothing"),
+                { s.backHold }) { s.backHold = it },
             multi("Extra menu combo", listOf(
                 "off" to "Off", "select_start" to "Select+Start", "l3_r3" to "L3+R3",
             ), { s.comboTrigger }) { s.comboTrigger = it; OverlayService.instance?.updateHotkeyListener() },
@@ -111,7 +113,7 @@ class ControlSettingsScene(host: SceneHost) : ListScene(host, "Controls") {
                 { s.homeHoldInMainUI }) { s.homeHoldInMainUI = it },
             toggle("Pause game while menu is open", { s.pauseOnMenu }) { s.pauseOnMenu = it },
             toggle("Freeze standalone emulators (root)", { s.freezeStandalone }) { s.freezeStandalone = it },
-            toggle("Auto save state on exit", { s.autoSaveOnExit }) { s.autoSaveOnExit = it },
+            toggle("Auto save & load (exit, Game Switcher)", { s.autoSaveOnExit }) { s.autoSaveOnExit = it },
             action("Overlay service", if (overlayOn) "enabled" else "disabled") { openAccessibility(host) },
         ))
     }

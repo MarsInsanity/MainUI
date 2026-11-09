@@ -19,6 +19,8 @@ class ScreenScraper(
     private val devPassword: String,
     private val user: String,
     private val password: String,
+    /** softname: identifies the scraping software to ScreenScraper (Scraper > Software name). */
+    softName: String = DEFAULT_SOFTNAME,
 ) {
     class ApiException(val code: Int, message: String) : IOException(message) {
         /** Daily quota / account level problems: stop the whole run. */
@@ -48,7 +50,7 @@ class ScreenScraper(
         val medias: List<Media>,
     )
 
-    private val software = "MainUI-Android"
+    private val software = softName.trim().ifBlank { DEFAULT_SOFTNAME }
 
     private fun base(endpoint: String) = StringBuilder("https://api.screenscraper.fr/api2/$endpoint?devid=")
         .append(enc(devId)).append("&devpassword=").append(enc(devPassword))
@@ -156,9 +158,11 @@ class ScreenScraper(
             return ScreenScraper(
                 s.ssDevId.ifBlank { BuildConfig.SS_DEV_ID },
                 s.ssDevPassword.ifBlank { BuildConfig.SS_DEV_PASSWORD },
-                s.ssUser, s.ssPassword,
+                s.ssUser, s.ssPassword, s.ssSoftName,
             )
         }
+
+        const val DEFAULT_SOFTNAME = "MainUI-Android"
 
         fun hasDevCredentials(): Boolean {
             val s = MainUI.settings

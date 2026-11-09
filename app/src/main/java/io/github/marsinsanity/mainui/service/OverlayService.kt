@@ -10,6 +10,7 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.Display
@@ -22,6 +23,7 @@ import io.github.marsinsanity.mainui.core.Root
 import io.github.marsinsanity.mainui.emu.Freezer
 import io.github.marsinsanity.mainui.ui.MainUIView
 import io.github.marsinsanity.mainui.ui.scenes.InGameMenuScene
+import io.github.marsinsanity.mainui.ui.scenes.ProcessManagerScene
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -29,9 +31,12 @@ import java.util.concurrent.Executors
  * Accessibility service behind the in-game menu.
  *
  * - Tracks which app is in front (window state events).
- * - While a game MainUI launched is in front, consumes the HOME key: a short
- *   press opens the Miyoo style menu as an overlay above the game, a long
- *   press opens the Game Switcher. Everywhere else HOME behaves normally.
+ * - While a game MainUI launched is in front, consumes the HOME key: a press
+ *   opens the Miyoo style menu as an overlay above the game (on the press
+ *   itself), holding it opens the Game Switcher. Everywhere else HOME behaves
+ *   normally.
+ * - Watches Back (never consumes it): holding it opens the process manager
+ *   as a popup over whatever is in front.
  * - Optionally listens for Select+Start / L3+R3 through root `getevent`
  *   (no input latency since it only observes).
  */
@@ -47,10 +52,71 @@ class OverlayService : AccessibilityService() {
     private val shotExecutor = Executors.newSingleThreadExecutor()
     private val worker = Executors.newSingleThreadExecutor()
 
-    private val longPress = Runnable {
+    /** What the HOME press in progress does; decided on its first DOWN so its UP matches it. */
+    private enum class HomePress { PASS, MAINUI, CLOSE, IGNORE, OPENED, WAIT, DONE }
+    private var homeState: HomePress? = null
+    /** HOME was held while the menu its press opened was still opening: run this instead. */
+    private var pendingHold: String? = null
+    private var openingSince = 0L
+    /** The session the root shell and game controller were warmed up for. */
+    private var warmed: Any? = null
+
+    /** When a hold last ran (from Android's HOME key or the raw button), so it runs once per hold. */
+    private var holdHandledAt = -10_000L
+    /** A hold ran before Android delivered that press's HOME: ignore it when it comes (until then). */
+    private var lateHomeUntil = 0L
+
+    private fun holdRan(now: Long) {
+        holdHandledAt = now
         longFired = true
-        Log.d(TAG, "HOME held -> ${MainUI.settings.homeHold}")
-        perform(MainUI.settings.homeHold)
+        lateHomeUntil = if (homeState == null) now + 2500 else 0L
+    }
+    private val longPress = Runnable { homeHeld(raw = false) }
+    private val rawLongPress = Runnable { homeHeld(raw = true) }
+
+    /**
+     * HOME held for the hold time, seen through Android's HOME key or through the raw button
+     * (root getevent, [HotkeyListener]): on some handhelds Android only gets HOME when the button
+     * is released, too late to tell a hold. Whichever notices first runs the hold action.
+     */
+    private fun homeHeld(raw: Boolean) {
+        val now = SystemClock.uptimeMillis()
+        if (now - holdHandledAt < 1500) return
+        if (foregroundPackage == packageName && overlay == null && !opening) {
+            // MainUI in front: homeInMainUI handles it; the raw button helps where HOME comes late.
+            if (raw && MainUI.settings.homeHoldInMainUI == "gs") {
+                holdRan(now); main.removeCallbacks(mainUiHold)
+                MainActivity.instance?.showGameSwitcher()
+            }
+            return
+        }
+        val press = MainUI.settings.homePress
+        val hold = MainUI.settings.homeHold
+        if (hold == "none" || hold == press) return
+        if (homeState == HomePress.OPENED) {
+            // This press already opened the menu: swap it for the hold action.
+            holdRan(now)
+            Log.d(TAG, "HOME held (${if (raw) "button" else "key"}) -> $hold, instead of the menu")
+            if (opening) { pendingHold = hold; return }
+            val menu = overlay?.scenes()?.firstOrNull() as? InGameMenuScene
+            if (menu != null) { menu.leave(); performHold(hold) } else perform(hold)
+            return
+        }
+        if (overlay != null || opening || !gameInFront()) return
+        holdRan(now)
+        Log.d(TAG, "HOME held (${if (raw) "button" else "key"}) -> $hold")
+        perform(hold)
+    }
+
+    /** Raw HOME button (root getevent): starts / cancels the hold timer. */
+    private fun rawHome(down: Boolean) {
+        main.removeCallbacks(rawLongPress)
+        if (down) main.postDelayed(rawLongPress, MainUI.settings.homeHoldMs.toLong().coerceIn(200, 3000))
+    }
+
+    private val backHold = Runnable {
+        Log.d(TAG, "Back held -> process manager")
+        showProcesses()
     }
 
     override fun onServiceConnected() {
@@ -82,6 +148,7 @@ class OverlayService : AccessibilityService() {
         if (pkg == "com.android.systemui" || pkg.contains("inputmethod")) return
         if (pkg != foregroundPackage) Log.d(TAG, "foreground: $pkg")
         foregroundPackage = pkg
+        if (gameInFront()) prewarm()
     }
 
     private fun gameInFront(): Boolean {
@@ -90,39 +157,107 @@ class OverlayService : AccessibilityService() {
     }
 
     /**
-     * HOME inside a game launched from MainUI. A short press and a hold each run
-     * the action chosen in Settings > Controls (default: press = in-game menu,
-     * hold = Game Switcher). Everywhere else HOME behaves normally.
+     * Gets the root shell and the game's controller ready as soon as a game is in front,
+     * so the first HOME press opens the menu as fast as the later ones.
      */
-    override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode != KeyEvent.KEYCODE_HOME) return false
-        if (overlay != null || opening) {
-            // HOME while the menu is up closes it (Continue)
-            if (event.action == KeyEvent.ACTION_UP && overlay != null) overlay?.dispatch(io.github.marsinsanity.mainui.ui.Btn.B, false)
-            return true
+    private fun prewarm() {
+        val s = MainUI.sessions.active ?: return
+        if (warmed === s) return
+        warmed = s
+        Thread({
+            runCatching {
+                if (Root.available()) Root.Shell.run("true", 5000)
+                MainUI.sessions.controllerFor(s).prepare()
+            }
+        }, "menu-prewarm").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * HOME and Back. HOME inside a game launched from MainUI runs the actions chosen in
+     * Settings > Controls (default: press = in-game menu, hold = Game Switcher); everywhere
+     * else it behaves normally. Back is only watched, never taken: holding it opens the
+     * process manager popup.
+     */
+    override fun onKeyEvent(event: KeyEvent): Boolean = when (event.keyCode) {
+        KeyEvent.KEYCODE_HOME -> onHome(event)
+        KeyEvent.KEYCODE_BACK -> { watchBack(event); false }
+        else -> false
+    }
+
+    private fun onHome(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            if (event.repeatCount == 0) homeState = homeDown()
+            return when (homeState) {
+                HomePress.PASS -> false
+                HomePress.MAINUI -> homeInMainUI(event)
+                else -> true
+            }
         }
-        if (foregroundPackage == packageName) return homeInMainUI(event)
+        // The release ends the press the way its DOWN started it.
+        val st = homeState
+        homeState = null
+        main.removeCallbacks(longPress)
+        return when (st) {
+            null -> overlay != null || opening
+            HomePress.PASS -> false
+            HomePress.MAINUI -> homeInMainUI(event)
+            // HOME while the menu is up closes it (Continue)
+            HomePress.CLOSE -> { overlay?.dispatch(io.github.marsinsanity.mainui.ui.Btn.B, false); true }
+            HomePress.WAIT -> { if (!longFired) { Log.d(TAG, "HOME pressed -> ${MainUI.settings.homePress}"); perform(MainUI.settings.homePress) }; true }
+            HomePress.OPENED, HomePress.IGNORE, HomePress.DONE -> true
+        }
+    }
+
+    private fun homeDown(): HomePress {
+        main.removeCallbacks(longPress)
+        // Android's HOME for a button that was just held (and handled through the raw button).
+        if (SystemClock.uptimeMillis() < lateHomeUntil) { lateHomeUntil = 0L; return HomePress.IGNORE }
+        if (opening && SystemClock.uptimeMillis() - openingSince > 10_000) {
+            Log.w(TAG, "menu still opening after 10 s, giving up on it")
+            opening = false
+        }
+        if (overlay != null) return HomePress.CLOSE
+        // Its own press opens the menu; a second press while it opens must not close it again.
+        if (opening) return HomePress.IGNORE
+        if (foregroundPackage == packageName) return HomePress.MAINUI
         val press = MainUI.settings.homePress
         val hold = MainUI.settings.homeHold
         if (!gameInFront() || (press == "home" && hold == "home")) {
-            if (event.action == KeyEvent.ACTION_DOWN) Log.d(TAG, "HOME passed through (fg=$foregroundPackage, session=${MainUI.sessions.active?.pkg})")
-            return false
+            Log.d(TAG, "HOME passed through (fg=$foregroundPackage, session=${MainUI.sessions.active?.pkg})")
+            return HomePress.PASS
         }
-        // No separate hold action: act on the press itself, no waiting for release.
-        val instant = hold == "none" || hold == press
+        longFired = false
+        val holdMs = MainUI.settings.homeHoldMs.toLong().coerceIn(200, 3000)
+        // No separate hold action: act on the press itself.
+        if (hold == "none" || hold == press) {
+            longFired = true
+            Log.d(TAG, "HOME pressed -> $press")
+            perform(press)
+            return HomePress.DONE
+        }
+        if (press == "menu") {
+            // One press opens the menu right away, no waiting for the release. Still held
+            // after the hold time, the menu gives way to the hold action (Game Switcher).
+            Log.d(TAG, "HOME pressed -> menu")
+            pendingHold = null
+            showMenu()
+            main.postDelayed(longPress, holdMs)
+            return HomePress.OPENED
+        }
+        main.postDelayed(longPress, holdMs)
+        return HomePress.WAIT
+    }
+
+    /** Back held anywhere (unless a MainUI popup is already up) opens the process manager popup. */
+    private fun watchBack(event: KeyEvent) {
         when (event.action) {
             KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) {
-                longFired = false
-                main.removeCallbacks(longPress)
-                if (instant) { longFired = true; Log.d(TAG, "HOME pressed -> $press"); perform(press) }
-                else main.postDelayed(longPress, MainUI.settings.homeHoldMs.toLong().coerceIn(200, 3000))
+                main.removeCallbacks(backHold)
+                if (MainUI.settings.backHold == "processes" && overlay == null && !opening)
+                    main.postDelayed(backHold, MainUI.settings.homeHoldMs.toLong().coerceIn(200, 3000))
             }
-            KeyEvent.ACTION_UP -> {
-                main.removeCallbacks(longPress)
-                if (!longFired) { Log.d(TAG, "HOME pressed -> $press"); perform(press) }
-            }
+            else -> main.removeCallbacks(backHold)
         }
-        return true
     }
 
     private val mainUiHold = Runnable {
@@ -152,6 +287,32 @@ class OverlayService : AccessibilityService() {
         return true
     }
 
+    /** A hold action replacing the menu its press opened (the menu already saved the frame). */
+    private fun performHold(action: String) {
+        if (action == "gs") leaveForSwitcher(500) else perform(action)
+    }
+
+    /**
+     * Opens the Game Switcher from the game in front. With auto save on, the game is saved
+     * first, like OnionOS (RetroArch: into its auto slot, which it loads by itself when the game
+     * starts again). [settleMs]: time for the game to run again after a menu closed.
+     */
+    private fun leaveForSwitcher(settleMs: Long) {
+        val s = MainUI.sessions.active
+        if (s == null || !MainUI.settings.autoSaveOnExit) { startGameSwitcher(); return }
+        worker.execute {
+            runCatching {
+                val c = MainUI.sessions.controllerFor(s)
+                c.prepare()
+                if (c.states == io.github.marsinsanity.mainui.emu.StateSupport.HOTKEY) {
+                    if (settleMs > 0) Thread.sleep(settleMs)
+                    if (c.save(0)) Thread.sleep(800)
+                }
+            }.onFailure { Log.w(TAG, "save before Game Switcher failed", it) }
+            main.post { startGameSwitcher() }
+        }
+    }
+
     /** Runs one of the configurable HOME actions. */
     fun perform(action: String) {
         when (action) {
@@ -170,6 +331,7 @@ class OverlayService : AccessibilityService() {
         val s = MainUI.sessions.active ?: return
         if (overlay != null || opening) return
         opening = true
+        openingSince = SystemClock.uptimeMillis()
         Log.d(TAG, "showing in-game menu for ${s.name}")
         worker.execute {
             val controller = MainUI.sessions.controllerFor(s)
@@ -179,6 +341,18 @@ class OverlayService : AccessibilityService() {
             capture { bmp ->
                 main.post {
                     opening = false
+                    val hold = pendingHold
+                    pendingHold = null
+                    if (hold != null) {
+                        // HOME was held while the menu opened: the hold action instead of the menu.
+                        Log.d(TAG, "menu replaced by $hold")
+                        worker.execute {
+                            if (bmp != null) runCatching { MainUI.sessions.saveScreenshot(s.gameKey, bmp) }
+                            runCatching { controller.unpause() }
+                            main.post { performHold(hold) }
+                        }
+                        return@post
+                    }
                     addOverlay { view -> InGameMenuScene(view, s, bmp, overlayMode = true, controller = controller, paused = paused) }
                     val v = overlay
                     if (v == null) worker.execute { controller.unpause() } // could not show: never leave it paused
@@ -265,32 +439,47 @@ class OverlayService : AccessibilityService() {
         val s = MainUI.sessions.active
         capture { bmp ->
             if (bmp != null && s != null) MainUI.sessions.saveScreenshot(s.gameKey, bmp)
-            main.post {
-                startActivity(Intent(this, MainActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                    .putExtra(MainActivity.EXTRA_GAME_SWITCHER, true))
-            }
+            main.post { leaveForSwitcher(0) }
         }
+    }
+
+    private fun startGameSwitcher() {
+        startActivity(Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            .putExtra(MainActivity.EXTRA_GAME_SWITCHER, true))
+    }
+
+    /** The process manager as a popup over whatever is in front (Back held). */
+    fun showProcesses() {
+        if (overlay != null || opening) return
+        addOverlay { view -> ProcessManagerScene(view, overlayMode = true) }
     }
 
     fun globalBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
 
-    /** Starts / stops the root key-combo listener according to settings. */
+    /**
+     * Starts / restarts the root raw button listener: the optional menu combo, and the HOME
+     * button's hold (see [homeHeld]). Without root there is nothing to listen with.
+     */
     fun updateHotkeyListener() {
         hotkeys?.stop(); hotkeys = null
         val combo = when (MainUI.settings.comboTrigger) {
             "select_start" -> setOf("BTN_SELECT", "BTN_START")
             "l3_r3" -> setOf("BTN_THUMBL", "BTN_THUMBR")
-            else -> return
+            else -> emptySet()
         }
         Thread {
             if (!Root.available()) return@Thread
-            hotkeys = HotkeyListener(combo) { main.post { if (gameInFront()) showMenu() } }.also { it.start() }
+            hotkeys = HotkeyListener(combo, { main.post { if (gameInFront()) showMenu() } }) { key, down ->
+                if (key in HOME_BUTTONS) main.post { rawHome(down) }
+            }.also { it.start() }
         }.start()
     }
 
     companion object {
         private const val TAG = "MainUI.Overlay"
+        /** Raw names of a handheld's HOME button (Linux KEY_HOMEPAGE, a gamepad's BTN_MODE). */
+        val HOME_BUTTONS = setOf("KEY_HOMEPAGE", "BTN_MODE")
 
         @Volatile var instance: OverlayService? = null
             private set
@@ -304,10 +493,15 @@ class OverlayService : AccessibilityService() {
 }
 
 /**
- * Watches raw input events through root `getevent -ql` and fires when every
- * key of [combo] is held. Passive: the game still receives every key.
+ * Watches raw input events through root `getevent -ql`: fires when every key of [combo]
+ * is held, and reports every button to [onKey]. Passive: the game still receives every key.
  */
-class HotkeyListener(private val combo: Set<String>, private val onCombo: () -> Unit) {
+class HotkeyListener(
+    private val combo: Set<String>,
+    private val onCombo: () -> Unit,
+    /** Every button press / release: (Linux key name, down). */
+    private val onKey: (String, Boolean) -> Unit = { _, _ -> },
+) {
     @Volatile private var running = true
     private var process: Process? = null
 
@@ -324,8 +518,8 @@ class HotkeyListener(private val combo: Set<String>, private val onCombo: () -> 
                         if (parts.size < 3 || parts[0] != "EV_KEY") continue
                         val key = parts[1]
                         when (parts[2]) {
-                            "DOWN" -> { down += key; if (down.containsAll(combo)) { down.clear(); onCombo() } }
-                            "UP" -> down -= key
+                            "DOWN" -> { down += key; onKey(key, true); if (combo.isNotEmpty() && down.containsAll(combo)) { down.clear(); onCombo() } }
+                            "UP" -> { down -= key; onKey(key, false) }
                         }
                     }
                 }

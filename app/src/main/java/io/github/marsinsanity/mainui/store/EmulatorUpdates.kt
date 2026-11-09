@@ -12,8 +12,9 @@ import org.json.JSONObject
  *  - an F-Droid compatible repository: its build number against the installed one, when the
  *    repository's build is signed like the installed app (another signature can't update it);
  *  - retroarch.com: the newest stable version against the installed one;
- *  - the project's GitHub releases: the release's version against the installed one, or, when
- *    a tag has no version number, a release published after the app was installed.
+ *  - the project's GitHub releases: the release's version against the installed one; a tag
+ *    that is a build number ("v12") against the installed build ("0.2.0-12" / version code 12);
+ *    otherwise a release published after the app was installed.
  * Apps installed by Google Play are left to it.
  */
 object EmulatorUpdates {
@@ -53,13 +54,28 @@ object EmulatorUpdates {
     fun isNewer(latest: String, installed: String): Boolean? {
         val a = numbers(latest); val b = numbers(installed)
         if (a.isEmpty() || b.isEmpty()) return null
-        // A date-like tag (20250425) against a dotted version (1.2) can't be compared.
-        if ((a.size == 1) != (b.size == 1) && (a.first() > 9999 || b.first() > 9999)) return null
+        // A single number (a build number "v12" or a date tag "v20250425") against a dotted
+        // version ("0.2.0-12") can't be compared as versions; see [buildNumberNewer].
+        if ((a.size == 1) != (b.size == 1)) return null
         for (i in 0 until maxOf(a.size, b.size)) {
             val x = a.getOrElse(i) { 0 }; val y = b.getOrElse(i) { 0 }
             if (x != y) return x > y
         }
         return false
+    }
+
+    /**
+     * A tag that is just a build number ("v12") against the installed app: its version code, or
+     * the build number its version name ends with ("0.2.0-12", Vita3K). Equal: not newer. When
+     * the app's name ends with its version code (one counter on both sides), the higher number
+     * wins; otherwise null (unknown, decided by release date).
+     */
+    fun buildNumberNewer(tag: String, installedName: String, code: Long): Boolean? {
+        val t = numbers(tag).singleOrNull() ?: return null
+        val last = numbers(installedName).lastOrNull()
+        if (t == code || t == last) return false
+        if (last == code) return t > code
+        return null
     }
 
     // ---- checking ------------------------------------------------------------------------------
@@ -101,7 +117,8 @@ object EmulatorUpdates {
         // 3. GitHub releases.
         val repo = e.github ?: return null
         val r = EmulatorStore.latestGithub(repo)
-        val newer = isNewer(r.version, installedName) ?: (r.published > installedAt + 3_600_000L)
+        val newer = isNewer(r.version, installedName) ?: buildNumberNewer(r.version, installedName, code)
+            ?: (r.published > installedAt + 3_600_000L)
         return if (newer) Update(e.def.id, e.def.name, pkg, installedName, r.version, Source.GITHUB, repo) else null
     }
 
@@ -132,11 +149,15 @@ object EmulatorUpdates {
     private fun save(list: List<Update>) {
         val s = MainUI.settings
         s.prefs.edit().putString("emu_updates", JSONArray().apply { list.forEach { put(it.json()) } }.toString())
-            .putLong("emu_updates_checked", System.currentTimeMillis()).apply()
+            .putLong("emu_updates_checked", System.currentTimeMillis())
+            .putInt("emu_updates_build", io.github.marsinsanity.mainui.BuildConfig.VERSION_CODE).apply()
     }
 
+    /** Results from an older MainUI may have been judged by older rules: check again. */
+    private fun sameBuild() = MainUI.settings.prefs.getInt("emu_updates_build", -1) == io.github.marsinsanity.mainui.BuildConfig.VERSION_CODE
+
     /** Updates the last check found (still installed and still at the old version). */
-    fun known(): List<Update> = runCatching {
+    fun known(): List<Update> = if (!sameBuild()) emptyList() else runCatching {
         val a = JSONArray(MainUI.settings.prefs.getString("emu_updates", "[]"))
         val pm = MainUI.app.packageManager
         (0 until a.length()).map { Update.of(a.getJSONObject(it)) }.filter { u ->
@@ -151,6 +172,6 @@ object EmulatorUpdates {
     fun lastCheck(): Long = MainUI.settings.prefs.getLong("emu_updates_checked", 0L)
 
     /** Automatic checks are on and the last one was a day ago or more. */
-    fun isDue(): Boolean = autoCheck && System.currentTimeMillis() - lastCheck() >= CHECK_EVERY_MS
+    fun isDue(): Boolean = autoCheck && (!sameBuild() || System.currentTimeMillis() - lastCheck() >= CHECK_EVERY_MS)
 
 }
