@@ -116,11 +116,8 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
     private fun refreshAll() {
         busy = "Updating repositories..."
         host.io({
-            val errors = ArrayList<String>()
             val repos = AppStore.repos()
-            for (r in repos.filter { it.enabled }) {
-                runCatching { AppStore.refresh(r) { busy = it; host.invalidate() } }.onFailure { errors += "${r.name}: ${it.message}" }
-            }
+            val errors = AppStore.refreshAll(repos.filter { it.enabled }) { busy = it; host.invalidate() }
             AppStore.saveRepos(repos) // stores trusted fingerprints / names
             errors
         }) { errors ->
@@ -289,11 +286,8 @@ class RepoScene(host: SceneHost) : ListScene(host, "Repositories") {
     private fun refresh() {
         busy = "Updating..."
         host.io({
-            val errors = ArrayList<String>()
             val repos = AppStore.repos()
-            for (r in repos.filter { it.enabled }) {
-                runCatching { AppStore.refresh(r) { busy = it; host.invalidate() } }.onFailure { errors += "${r.name}: ${it.message}" }
-            }
+            val errors = AppStore.refreshAll(repos.filter { it.enabled }) { busy = it; host.invalidate() }
             AppStore.saveRepos(repos)
             errors
         }) { errors ->
