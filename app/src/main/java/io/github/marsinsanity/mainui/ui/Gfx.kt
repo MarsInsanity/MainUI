@@ -74,6 +74,8 @@ class Gfx {
     companion object {
         const val HEADER = 60f
         const val FOOTER = 60f
+        /** Smallest gap between the battery indicator and the right edge of the screen. */
+        const val BATTERY_MARGIN = 16f
 
         fun logicalSize(screenW: Int, screenH: Int): Pair<Float, Float> {
             val aspect = screenW.toFloat() / screenH
@@ -307,6 +309,11 @@ class Gfx {
                 "center" -> textX = left + (iw - tw) / 2 + st.offsetX
             }
         }
+        // Onion centres the group 44 px from the right edge, which pushes a wide one
+        // (percentage next to the icon) off screen: keep it at least 16 px inside.
+        val right = max(iconX + iw, if (visible) textX + tw else 0f)
+        val overflow = right - (W - BATTERY_MARGIN)
+        if (overflow > 0f) { iconX -= overflow; textX -= overflow }
         if (icon != null) bmp(icon, iconX, cy - ih / 2) else drawBatteryIcon(iconX, cy, lvl, charging)
         if (visible) text(label, style, textX, cy + st.offsetY)
     }
@@ -326,9 +333,15 @@ class Gfx {
      * without the n/total counter ([reserveRight] is its width), and only as a
      * last resort are trailing hints left out (their buttons still work).
      */
-    fun footer(aLabel: String?, bLabel: String?, extra: List<Pair<String, String>> = emptyList(), reserveRight: Float = 0f) {
+    fun footer(aLabel: String?, bLabel: String?, extra: List<Pair<String, String>> = emptyList(), reserveRight: Float = 0f,
+               covering: Boolean = false) {
         val bg = skin("tips-bar-bg")
         val y = H - FOOTER
+        if (covering) {
+            // An overlay (dialog, menu, progress) replaces the bar of the screen below it: repaint
+            // the background there first, or that screen's hints show through a see-through bar.
+            c.save(); c.clipRect(0f, y, W, H); background(); c.restore()
+        }
         if (bg != null) bar(bg, y, FOOTER) else fillRect(0f, y, W, FOOTER, darken(theme.bgColor, 0.45f))
         val cy = H - 30f
         val hideLabels = theme.hideHintLabels

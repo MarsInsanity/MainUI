@@ -127,6 +127,44 @@ object RetroArchCores {
 
     fun downloadUrl(abi: String, core: String) = "$buildbot/$abi/$core$SUFFIX.zip"
 
+    /** A core the buildbot offers: name, build date and download size (0 = unknown). */
+    data class Remote(val core: String, val date: String, val bytes: Long)
+
+    /**
+     * Every core the libretro buildbot has for [abi]. Read from the folder's web
+     * page, which also gives the sizes; if its layout ever changes, from the plain
+     * `.index-extended` list (names and dates only).
+     */
+    fun listRemote(abi: String): List<Remote> {
+        val page = runCatching { Http.text("$buildbot/$abi/") }.getOrNull()
+        if (page != null) {
+            val rows = parseListing(page)
+            if (rows.isNotEmpty()) return rows
+        }
+        return parseIndexExtended(Http.text("$buildbot/$abi/.index-extended"))
+    }
+
+    /** Rows of the buildbot's h5ai folder page: name, "date time", "12.3 MB". */
+    fun parseListing(html: String): List<Remote> =
+        Regex("""<td class="fb-n"><a href="[^"]*?([A-Za-z0-9_+.-]+)_libretro_android\.so\.zip">[^<]*</a></td><td class="fb-d">([^<]*)</td><td class="fb-s">([^<]*)</td>""")
+            .findAll(html).map { m -> Remote(m.groupValues[1], m.groupValues[2].substringBefore(' '), parseSize(m.groupValues[3])) }
+            .distinctBy { it.core }.toList()
+
+    /** Lines of `.index-extended`: "2026-11-08 657995de mednafen_psx_hw_libretro_android.so.zip". */
+    fun parseIndexExtended(text: String): List<Remote> = text.lines().mapNotNull { l ->
+        val parts = l.trim().split(Regex("\\s+"))
+        val file = parts.lastOrNull() ?: return@mapNotNull null
+        if (!file.endsWith("$SUFFIX.zip")) null else Remote(file.removeSuffix("$SUFFIX.zip"), parts.firstOrNull().orEmpty(), 0)
+    }.distinctBy { it.core }
+
+    /** "241 KB" / "12.5 MB" / "1.2 GB" -> bytes. */
+    fun parseSize(s: String): Long {
+        val m = Regex("""([\d.]+)\s*(B|KB|MB|GB)?""", RegexOption.IGNORE_CASE).find(s.trim()) ?: return 0
+        val v = m.groupValues[1].toDoubleOrNull() ?: return 0
+        val mult = when (m.groupValues[2].uppercase()) { "KB" -> 1024.0; "MB" -> 1048576.0; "GB" -> 1073741824.0; else -> 1.0 }
+        return (v * mult).toLong()
+    }
+
     /**
      * Downloads [core] from the libretro buildbot (the same files RetroArch's
      * Online Updater installs) and installs it. Needs root. Returns the installed path.

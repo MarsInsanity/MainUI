@@ -238,14 +238,22 @@ class EmulatorManager(
      * Installs [core] into RetroArch (root): from MainUI/cores when a file for it
      * is there, otherwise downloaded from the libretro buildbot.
      */
-    fun installCore(core: String, progress: (String) -> Unit = {}): Result<String> = runCatching {
+    fun installCore(core: String, rescan: Boolean = true, progress: (String) -> Unit = {}): Result<String> = runCatching {
         val ra = raPackage ?: throw IllegalStateException("RetroArch is not installed")
         val dir = raCoreDir ?: "/data/data/$ra/cores"
         val local = localCores()[core]
         if (local != null) RetroArchCores.installFile(ctx, ra, dir, local, core, progress)
         else RetroArchCores.install(ctx, ra, dir, core, progress)
-        refreshCores()
+        if (rescan) refreshCores()
         "${coreDisplayName(core)} installed"
+    }
+
+    /** Cores the buildbot has for this RetroArch that aren't installed yet. */
+    fun missingRemoteCores(): List<RetroArchCores.Remote> {
+        val ra = raPackage ?: throw IllegalStateException("RetroArch is not installed")
+        refreshCores()
+        val have = raCores ?: emptySet()
+        return RetroArchCores.listRemote(RetroArchCores.abiOf(ctx, ra)).filter { it.core !in have }
     }
 
     /** Folder for cores that aren't on the buildbot (custom builds): <storage>/MainUI/cores. */

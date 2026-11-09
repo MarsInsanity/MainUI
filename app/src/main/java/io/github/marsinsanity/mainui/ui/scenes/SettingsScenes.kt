@@ -276,6 +276,8 @@ class CoresScene(host: SceneHost) : ListScene(host, "RetroArch cores") {
         val needed = needed
         items += UiItem("Get cores for my games", sub = if (needed.isEmpty()) "nothing missing" else "${needed.size} to download",
             disabled = needed.isEmpty(), onSelect = { CoreInstall.install(host, needed) { rescan() } })
+        items += UiItem("Download all cores", sub = "everything on the libretro buildbot",
+            onSelect = { CoreInstall.installAll(host) { rescan() } })
         em.raCoreDir?.let { items += UiItem("Folder", sub = it.removePrefix("/data/data/"), disabled = true) }
         // Custom builds dropped into MainUI/cores.
         for (c in local.keys.sorted()) items += UiItem(em.coreDisplayName(c), sub = if (c in installed) "file: reinstall" else "file: install",

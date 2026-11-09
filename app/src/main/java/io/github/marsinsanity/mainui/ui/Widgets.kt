@@ -121,7 +121,7 @@ class DialogScene(
 
     override fun draw(g: Gfx) {
         g.dialog(title, message)
-        g.footer(confirmLabel, cancelLabel)
+        g.footer(confirmLabel, cancelLabel, covering = true)
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
@@ -138,13 +138,18 @@ class DialogScene(
 }
 
 /** "Working..." panel over the current screen; swallows input until the caller pops it. */
-class BusyScene(host: SceneHost, @Volatile var text: String) : Scene(host) {
+class BusyScene(host: SceneHost, @Volatile var text: String, private val onCancel: (() -> Unit)? = null) : Scene(host) {
     override val isOverlay = true
+    @Volatile private var cancelled = false
     override fun draw(g: Gfx) {
         g.dim(90)
         g.infoPanel(text)
+        if (onCancel != null) g.footer(null, if (cancelled) null else "STOP", covering = true)
     }
-    override fun onKey(b: Btn, repeat: Boolean) = true
+    override fun onKey(b: Btn, repeat: Boolean): Boolean {
+        if (b == Btn.B && !repeat && onCancel != null && !cancelled) { cancelled = true; onCancel.invoke(); host.invalidate() }
+        return true
+    }
     override fun onTap(x: Float, y: Float) = true
 }
 
@@ -171,7 +176,7 @@ class PopMenuScene(
         g.popPanel(rows, x, top, w, h)
         panel = android.graphics.RectF(x, top, x + w, top + h)
         g.list(list, top + 5f, top + h - 5f, x, x + w, showPreview = false, dividers = false, stretch = true)
-        g.footer("SELECT", "BACK")
+        g.footer("SELECT", "BACK", covering = true)
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean = when (b) {
@@ -271,7 +276,7 @@ class KeyboardScene(
             }
             y += keyH + gap
         }
-        g.footer("TYPE", "DEL", listOf("START" to "OK", "Y" to "SHIFT"))
+        g.footer("TYPE", "DEL", listOf("START" to "OK", "Y" to "SHIFT"), covering = true)
     }
 
     private val keyRects = ArrayList<Triple<android.graphics.RectF, Int, Int>>()
