@@ -46,6 +46,9 @@ class SettingsScene(host: SceneHost) : ListScene(host, "Settings") {
             action("Android settings") {
                 host.hostContext.startActivity(Intent(AndroidSettings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             },
+            action("Updates", io.github.marsinsanity.mainui.store.Updater.knownAvailable().let {
+                if (it.isNotEmpty()) "$it available" else "v${BuildConfig.VERSION_NAME}"
+            }) { host.push(UpdateScene(host)) },
             action("About", "v${BuildConfig.VERSION_NAME}") { host.push(AboutScene(host)) },
         ))
     }

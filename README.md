@@ -278,6 +278,29 @@ Then add your normal ScreenScraper username and password. The scraper reads your
 is updated (a `gamelist.xml.bak` is kept the first time). Scraping keeps running in the background
 with a notification. `SELECT` on a system or game scrapes just that.
 
+## Updates
+
+**Settings > Updates** (also *About > MainUI*) checks the project's GitHub releases, shows the newest
+build and installs it: silently with root (MainUI restarts by itself), otherwise through Android's
+installer. The download's SHA-256 is checked against GitHub's, and its signing key against the
+installed MainUI's. With *Check automatically* on, MainUI checks every few hours when the home screen
+opens and says when a newer build is out.
+
+Releases come from GitHub Actions (`.github/workflows/build.yml`): every push runs the unit tests,
+builds `MainUI-0.1.<n>.apk` (`n` = commit count, also the version code, so a later commit is always a
+newer version) and keeps it as a workflow artifact. It is published as a release only when the
+signing key is set as repository secrets, because Android installs an update only when it is signed
+with the same key as the installed app:
+
+| Secret | Value |
+| --- | --- |
+| `MAINUI_KEYSTORE` | the keystore file, base64 encoded (required) |
+| `MAINUI_KEYSTORE_PASSWORD` | its password (default `android`) |
+| `MAINUI_KEY_ALIAS` | the key's alias (default `androiddebugkey`) |
+| `MAINUI_KEY_PASSWORD` | the key's password (default `android`) |
+
+The key is never committed. The newest 20 releases are kept.
+
 ## Building
 
 Requirements: JDK 17+, Android SDK with platform 35.
@@ -293,10 +316,12 @@ Requirements: JDK 17+, Android SDK with platform 35.
 Debug builds read a few system properties so root features and downloads can be tested on an
 emulator without internet or a working `su`: `debug.mainui.rootport` (a root shell server on
 127.0.0.1:<port>), `debug.mainui.themebase` and `debug.mainui.corebase` (local mirrors of the theme
-repository and the libretro buildbot). Release builds ignore them.
+repository and the libretro buildbot) and `debug.mainui.updateapi` (a stand-in for the GitHub releases
+API). Release builds ignore them.
 
-The release APK is signed with the debug key so it can be sideloaded directly:
-`app/build/outputs/apk/release/app-release.apk`.
+Without the `MAINUI_KEYSTORE` environment variable (the path of a keystore; CI sets it from the
+secret), builds are signed with the machine's debug key. Such builds install fine, but a build signed
+with a different key can't update them.
 
 ## Known limitations
 

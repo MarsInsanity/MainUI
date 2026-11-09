@@ -237,3 +237,23 @@ class PlayStoreCoresTest {
         assertNull(f("core_"))
     }
 }
+
+class UpdaterTest {
+    @Test fun picksTheNewestMainUiBuildFromReleases() {
+        val json = """[
+          {"tag_name":"v0.1.30","draft":false,"published_at":"2026-11-10T10:00:00Z","body":"Fix things",
+           "assets":[{"name":"MainUI-0.1.30.apk","size":11000000,"digest":"sha256:abc","browser_download_url":"https://x/30.apk"}]},
+          {"tag_name":"v0.1.41","draft":true,"assets":[{"name":"MainUI-0.1.41.apk","browser_download_url":"https://x/41.apk"}]},
+          {"tag_name":"v0.1.35-1a2b3c4","draft":false,"published_at":"2026-11-11T10:00:00Z","body":"",
+           "assets":[{"name":"MainUI-0.1.35.apk","size":1,"browser_download_url":"https://x/35.apk"},{"name":"notes.txt"}]},
+          {"tag_name":"other","draft":false,"assets":[{"name":"something-else.apk"}]}
+        ]"""
+        val all = io.github.marsinsanity.mainui.store.Updater.parseReleases(json)
+        assertEquals(listOf(35, 30), all.map { it.versionCode })          // drafts and other APKs skipped
+        assertEquals("0.1.35", all[0].versionName)
+        assertEquals("https://x/35.apk", all[0].url)
+        assertNull(all[0].sha256)
+        assertEquals("abc", all[1].sha256)
+        assertEquals("2026-11-10", all[1].published)
+    }
+}
