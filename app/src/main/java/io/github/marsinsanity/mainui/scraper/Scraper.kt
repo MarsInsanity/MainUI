@@ -40,7 +40,8 @@ object ScrapeState {
 /**
  * Scrapes artwork + metadata from ScreenScraper using as many worker threads
  * as the user's ScreenScraper account allows (maxthreads grows with the
- * donation level). Images go to <volume>/roms/<system>/images/ on the SD card
+ * donation level), and box art from GameTDB / libretro thumbnails ([FreeArt])
+ * where ScreenScraper has none or isn't set up. Images go to <volume>/roms/<system>/images/ on the SD card
  * or on internal storage; metadata goes to gamelist.xml (dArkOS / ES format),
  * a Logiqx DAT, or both.
  */
@@ -59,30 +60,36 @@ object Scraper {
         st.running = true
         cancel.set(false)
         try {
-            if (!ScreenScraper.hasDevCredentials()) {
+            val sources = MainUI.settings.artSources.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            val free = sources.filter { it != "ss" }
+            val useSs = "ss" in sources && ScreenScraper.hasDevCredentials()
+            if (!useSs && free.isEmpty()) {
                 st.message = "ScreenScraper developer ID missing (Scraper > Developer ID)"; return
             }
-            val api = ScreenScraper.fromSettings()
-            st.message = "Connecting to ScreenScraper..."
-            var threads = 1
+            val api = if (useSs) ScreenScraper.fromSettings() else null
+            val freeArt = FreeArt.Session(free, BoxArtMatch.regionPrefs(MainUI.settings.ssRegions))
+            var threads = if (useSs) 1 else 4
             var perMin = 0
-            try {
-                val u = api.userInfo()
-                threads = u.maxThreads.coerceAtLeast(1)
-                perMin = u.maxRequestsPerMin
-                st.quota = "${u.requestsToday}/${u.maxRequestsPerDay} requests today"
-            } catch (e: ScreenScraper.ApiException) {
-                if (e.code == 403 || e.code == 401) { st.message = "Login failed: ${e.message}"; return }
-                Log.w(TAG, "userInfo failed", e)
+            if (api != null) {
+                st.message = "Connecting to ScreenScraper..."
+                try {
+                    val u = api.userInfo()
+                    threads = u.maxThreads.coerceAtLeast(1)
+                    perMin = u.maxRequestsPerMin
+                    st.quota = "${u.requestsToday}/${u.maxRequestsPerDay} requests today"
+                } catch (e: ScreenScraper.ApiException) {
+                    if (e.code == 403 || e.code == 401) { st.message = "Login failed: ${e.message}"; return }
+                    Log.w(TAG, "userInfo failed", e)
+                }
             }
             val override = MainUI.settings.ssThreadsOverride
-            if (override in 1 until threads) threads = override
+            if (override in 1 until threads || (api == null && override > 0)) threads = override
             st.threads = threads
 
             st.message = "Collecting games..."
             val systems = MainUI.games.systems(MainUI.settings.showUnknownFolders, refresh = true)
                 .filter { systemIds == null || it.id in systemIds }
-                .filter { it.def.screenscraperId != null }
+                .filter { (api != null && it.def.screenscraperId != null) || FreeArt.supports(free, it.id) }
             val jobs = ArrayList<Pair<GameSystem, Game>>()
             for (s in systems) collect(s, null, 0, jobs)
             st.total = jobs.size
@@ -94,14 +101,14 @@ object Scraper {
             val dats = ConcurrentHashMap<String, LogiqxDat>()
             val pool = Executors.newFixedThreadPool(threads)
             val fatal = AtomicBoolean(false)
-            st.message = "Scraping with $threads thread${if (threads > 1) "s" else ""}"
+            st.message = "Scraping with $threads thread${if (threads > 1) "s" else ""}" + if (api == null) " (no ScreenScraper)" else ""
             repeat(threads) {
                 pool.execute {
                     while (!cancel.get() && !fatal.get()) {
                         val (sys, game) = queue.poll() ?: break
                         st.current = "${sys.def.short}: ${game.name}"
                         try {
-                            when (scrapeGame(api, sys, game, gamelists, dats, limiter)) {
+                            when (scrapeGame(api, freeArt, sys, game, gamelists, dats, limiter)) {
                                 Result.FOUND -> st.found.incrementAndGet()
                                 Result.NOT_FOUND -> { st.missing.incrementAndGet(); st.addLog("Not found: ${game.name}") }
                                 Result.SKIPPED -> st.skipped.incrementAndGet()
@@ -153,53 +160,75 @@ object Scraper {
 
     enum class Result { FOUND, NOT_FOUND, SKIPPED }
 
-    private fun scrapeGame(api: ScreenScraper, sys: GameSystem, game: Game, gamelists: ConcurrentHashMap<String, GameListXml>,
-                           dats: ConcurrentHashMap<String, LogiqxDat>, limiter: RateLimiter): Result {
+    private fun scrapeGame(api: ScreenScraper?, freeArt: FreeArt.Session, sys: GameSystem, game: Game,
+                           gamelists: ConcurrentHashMap<String, GameListXml>, dats: ConcurrentHashMap<String, LogiqxDat>,
+                           limiter: RateLimiter): Result {
         val file = game.file ?: return Result.SKIPPED
-        val ssId = sys.def.screenscraperId ?: return Result.SKIPPED
-        val hashes = runCatching { Hashes.of(file) }.getOrNull()
-        limiter.acquire()
-        val info = api.gameInfo(ssId, file, hashes, MainUI.settings.ssLanguage, regions()) ?: return Result.NOT_FOUND
-        val media = api.pickMedia(info, MainUI.settings.ssMedia, regions())
-            ?: api.pickMedia(info, "box-2D", regions()) ?: api.pickMedia(info, "ss", regions())
-        val sysRoot = MainUI.games.systemRootFor(sys, file.parentFile ?: file)
+        val ssId = sys.def.screenscraperId
+        val hashes = if (api != null && ssId != null) runCatching { Hashes.of(file) }.getOrNull() else null
+        var info: ScreenScraper.GameInfo? = null
         var imageRel: String? = null
-        if (media != null) {
+        var source = "ScreenScraper.fr"
+        val sysRoot = MainUI.games.systemRootFor(sys, file.parentFile ?: file)
+        fun dest(ext: String): File {
             val romRoot = sysRoot.parentFile ?: sysRoot
             val imgRoot = File(MainUI.storage.imageRootFor(romRoot), sysRoot.name)
             val relDir = runCatching { file.parentFile!!.relativeTo(sysRoot).path }.getOrDefault("")
-            val ext = if (media.format.equals("jpg", true) || media.format.equals("jpeg", true)) "jpg" else "png"
-            val dest = File(File(File(imgRoot, "images"), relDir), "${file.nameWithoutExtension}.$ext")
-            api.download(media, dest, MainUI.settings.ssMaxImageWidth)
-            imageRel = if (dest.absolutePath.startsWith(sysRoot.absolutePath + "/")) "./" + dest.relativeTo(sysRoot).path else dest.absolutePath
+            return File(File(File(imgRoot, "images"), relDir), "${file.nameWithoutExtension}.$ext")
         }
+        fun rel(f: File) = if (f.absolutePath.startsWith(sysRoot.absolutePath + "/")) "./" + f.relativeTo(sysRoot).path else f.absolutePath
+
+        if (api != null && ssId != null) {
+            limiter.acquire()
+            info = api.gameInfo(ssId, file, hashes, MainUI.settings.ssLanguage, regions())
+            val media = info?.let {
+                api.pickMedia(it, MainUI.settings.ssMedia, regions()) ?: api.pickMedia(it, "box-2D", regions()) ?: api.pickMedia(it, "ss", regions())
+            }
+            if (media != null) {
+                val ext = if (media.format.equals("jpg", true) || media.format.equals("jpeg", true)) "jpg" else "png"
+                val d = dest(ext)
+                api.download(media, d, MainUI.settings.ssMaxImageWidth)
+                imageRel = rel(d)
+            }
+        }
+        // Box art from the free sources when ScreenScraper had none (or isn't used).
+        if (imageRel == null && freeArt.sources.isNotEmpty()) {
+            val d = dest("png")
+            FreeArt.find(freeArt, sys.id, file, d, MainUI.settings.ssMaxImageWidth, hashes?.crc)?.let { imageRel = rel(d); source = it }
+        }
+        if (info == null && imageRel == null) return Result.NOT_FOUND
         val format = MainUI.settings.ssMetaFormat
-        if (format == "logiqx" || format == "both") {
+        if (info != null && (format == "logiqx" || format == "both")) {
             val d = dats.getOrPut(sysRoot.absolutePath) { LogiqxDat.forWriting(sysRoot) }
             synchronized(d) {
                 d.put(file, info.name, info.desc, info.releaseDate, info.publisher ?: info.developer, hashes)
                 if (ScrapeState.done.get() % 25 == 0) runCatching { d.save() }
             }
         }
-        if (format == "gamelist" || format == "both") {
+        // The image path always goes to gamelist.xml (that is where it is read from), metadata when wanted.
+        if (format != "none" || info == null) {
             val gl = gamelists.getOrPut(sysRoot.absolutePath) { GameListXml(sysRoot).load() }
+            val meta = info != null && (format == "gamelist" || format == "both")
             synchronized(gl) {
                 gl.put(file) { e ->
-                    info.name?.let { e.fields["name"] = it }
-                    info.desc?.let { e.fields["desc"] = it }
+                    if (meta) {
+                        info!!.name?.let { e.fields["name"] = it }
+                        info.desc?.let { e.fields["desc"] = it }
+                        info.rating?.let { e.fields["rating"] = "%.2f".format(java.util.Locale.US, it) }
+                        info.releaseDate?.let { d -> e.fields["releasedate"] = toEsDate(d) }
+                        info.developer?.let { e.fields["developer"] = it }
+                        info.publisher?.let { e.fields["publisher"] = it }
+                        info.genre?.let { e.fields["genre"] = it }
+                        info.players?.let { e.fields["players"] = it }
+                        e.attrs["id"] = info.id
+                    }
                     imageRel?.let { e.fields["image"] = it }
-                    info.rating?.let { e.fields["rating"] = "%.2f".format(java.util.Locale.US, it) }
-                    info.releaseDate?.let { d -> e.fields["releasedate"] = toEsDate(d) }
-                    info.developer?.let { e.fields["developer"] = it }
-                    info.publisher?.let { e.fields["publisher"] = it }
-                    info.genre?.let { e.fields["genre"] = it }
-                    info.players?.let { e.fields["players"] = it }
-                    e.attrs["source"] = "ScreenScraper.fr"; e.attrs["id"] = info.id
+                    e.attrs["source"] = source
                 }
                 if (ScrapeState.done.get() % 25 == 0) runCatching { gl.save() }
             }
         }
-        return if (media != null || info.name != null) Result.FOUND else Result.NOT_FOUND
+        return if (imageRel != null || info?.name != null) Result.FOUND else Result.NOT_FOUND
     }
 
     /** "1991-07-23" / "1991" -> "19910723T000000" (EmulationStation format). */
@@ -215,17 +244,22 @@ object Scraper {
 
     /** Scrapes one game synchronously (game options menu). Returns a message for the UI. */
     fun scrapeOne(game: Game): String {
-        if (!ScreenScraper.hasDevCredentials()) return "Set a ScreenScraper developer ID first"
         val sys = io.github.marsinsanity.mainui.ui.scenes.Launch.gameSystem(game.systemId) ?: return "Unknown system"
-        if (sys.def.screenscraperId == null) return "${sys.name} is not on ScreenScraper"
+        val sources = MainUI.settings.artSources.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        val free = sources.filter { it != "ss" }
+        val api = if ("ss" in sources && ScreenScraper.hasDevCredentials() && sys.def.screenscraperId != null) ScreenScraper.fromSettings() else null
+        if (api == null && !FreeArt.supports(free, sys.id)) {
+            return if (!ScreenScraper.hasDevCredentials()) "Set a ScreenScraper developer ID first, or turn on the free box art sources"
+            else "No box art source covers ${sys.name}"
+        }
         val gamelists = ConcurrentHashMap<String, GameListXml>()
         val dats = ConcurrentHashMap<String, LogiqxDat>()
         return try {
-            val r = scrapeGame(ScreenScraper.fromSettings(), sys, game, gamelists, dats, RateLimiter(0))
+            val r = scrapeGame(api, FreeArt.Session(free, BoxArtMatch.regionPrefs(MainUI.settings.ssRegions)), sys, game, gamelists, dats, RateLimiter(0))
             gamelists.values.forEach { it.save() }
             dats.values.forEach { it.save() }
             MainUI.games.invalidate()
-            if (r == Result.FOUND) "Artwork updated" else "Game not found on ScreenScraper"
+            if (r == Result.FOUND) "Artwork updated" else "No box art found for this game"
         } catch (e: ScreenScraper.ApiException) {
             "ScreenScraper: ${describe(e)}"
         } catch (e: Exception) {

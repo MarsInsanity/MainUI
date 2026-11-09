@@ -257,3 +257,126 @@ class UpdaterTest {
         assertEquals("2026-11-10", all[1].published)
     }
 }
+
+class BoxArtTest {
+    private val db = io.github.marsinsanity.mainui.scraper.LibretroDb
+    private val m = io.github.marsinsanity.mainui.scraper.BoxArtMatch
+    private val id = io.github.marsinsanity.mainui.scraper.RomIdent
+
+    private val gbaDat = """
+        clrmamepro (
+        	name "Nintendo - Game Boy Advance"
+        )
+
+        game (
+        	name "007 - NightFire (USA, Europe) (En,Fr,De)"
+        	region "USA"
+        	serial "A7OE"
+        	rom ( name "007 - NightFire (USA, Europe) (En,Fr,De).gba" size 8388608 crc 56C83C16 md5 71 sha1 F4 serial "A7OE" )
+        )
+        game (
+        	name "Legend of Zelda, The - The Minish Cap (USA)"
+        	rom ( name "Legend of Zelda, The - The Minish Cap (USA).gba" size 16777216 crc B4BD50E4 serial "BZME" )
+        )
+    """.trimIndent()
+
+    private val arcadeDat = """
+        game (
+        	name "'88 Games"
+        	releaseyear "1988"
+        	rom ( name 88games.zip size 758474 crc C1544E79 md5 51 sha1 3d )
+        )
+    """.trimIndent()
+
+    @Test fun datIndexesCrcSerialAndFileName() {
+        val d = db.parse(gbaDat)
+        assertEquals(listOf("007 - NightFire (USA, Europe) (En,Fr,De)"), d.crc("56c83c16"))
+        assertEquals(listOf("Legend of Zelda, The - The Minish Cap (USA)"), d.serial("BZME"))
+        assertEquals(listOf("Legend of Zelda, The - The Minish Cap (USA)"), d.file("Legend of Zelda, The - The Minish Cap (USA).gba"))
+        assertEquals(2, d.names.size)
+        // FBNeo: unquoted zip names map short names to titles.
+        assertEquals(listOf("'88 Games"), db.parse(arcadeDat).file("88games"))
+    }
+
+    @Test fun serialKeysMatchWhatTheDiscsCarry() {
+        assertTrue("SLUS00594" in db.serialKeys("SLUS-00594"))
+        assertTrue("SLPM65002" in db.serialKeys("SLPM-65002-0"))
+        assertTrue("GW7P" in db.serialKeys("DL-DOL-GW7P-EUR"))
+        assertTrue("SP3E" in db.serialKeys("RVL-SP3E-USA-B0"))
+        assertTrue("CTRPAREE" in db.serialKeys("CTR-P-AREE"))
+        assertTrue("T4305G" in db.serialKeys("T-4305G"))
+    }
+
+    @Test fun titlesIgnoreCasePunctuationAndArticles() {
+        assertEquals(m.title("Legend of Zelda, The - A Link to the Past (USA)"), m.title("The Legend of Zelda: A Link to the Past"))
+        assertEquals(m.title("Pokemon - Fire Red Version (USA, Europe) (Rev 1)"), m.title("pokemon fire red version"))
+        assertTrue(m.title("Super Mario Bros. (World)") != m.title("Super Mario Bros. 3 (USA)"))
+        assertEquals("advance wars", m.title("Advance Wars [b1] (USA)"))
+    }
+
+    @Test fun picksExactlyIdentifiedArtFirst() {
+        val avail = setOf("Advance Wars (USA)", "Advance Wars (Europe)", "Advance Wars (USA) (Beta)")
+        assertEquals("Advance Wars (Europe)", m.pick(listOf("Advance Wars (Europe)"), "aw", avail, listOf("USA", "World", "Europe")))
+    }
+
+    @Test fun titleMatchPrefersOwnRegionThenPreferences() {
+        val avail = setOf("Advance Wars (USA)", "Advance Wars (Europe)", "Advance Wars (USA) (Beta)", "Advance Wars 2 - Black Hole Rising (USA)")
+        // The rom says Europe: its own region wins over the USA preference.
+        assertEquals("Advance Wars (Europe)", m.pick(emptyList(), "Advance Wars (Europe) (Rev 1)", avail, listOf("USA", "World", "Europe")))
+        // No region in the name: the preference order decides; betas never win.
+        assertEquals("Advance Wars (USA)", m.pick(emptyList(), "advance wars", avail, listOf("USA", "World", "Europe")))
+        assertEquals("Advance Wars (Europe)", m.pick(emptyList(), "advance wars", avail, listOf("Europe", "USA")))
+    }
+
+    @Test fun refusesToGuess() {
+        val avail = setOf("Super Mario Bros. (World)", "Super Mario Bros. 3 (USA)", "Mario Bros. (World)")
+        assertNull(m.pick(emptyList(), "Super Mario Bros. 2 (USA)", avail, listOf("USA")))
+        assertNull(m.pick(emptyList(), "Mario", avail, listOf("USA")))
+        // Only a beta exists: not used for the retail game.
+        assertNull(m.pick(emptyList(), "Secret Game (USA)", setOf("Secret Game (USA) (Beta)"), listOf("USA")))
+        // ...but a beta dump gets the beta's box.
+        assertEquals("Secret Game (USA) (Beta)", m.pick(emptyList(), "Secret Game (USA) (Beta)", setOf("Secret Game (USA) (Beta)"), listOf("USA")))
+    }
+
+    @Test fun multiDiscGamesKeepTheirDisc() {
+        val avail = setOf("Final Fantasy VII (USA) (Disc 1)", "Final Fantasy VII (USA) (Disc 2)")
+        assertEquals("Final Fantasy VII (USA) (Disc 2)", m.pick(emptyList(), "Final Fantasy VII (USA) (Disc 2)", avail, listOf("USA")))
+    }
+
+    @Test fun thumbnailNamesReplaceReservedCharacters() {
+        assertEquals("Sonic _ Knuckles (World)", m.thumbName("Sonic & Knuckles (World)"))
+        assertEquals("Ys I _ II (USA)", m.thumbName("Ys I & II (USA)"))
+    }
+
+    @Test fun readsSerialsFromHeaders() {
+        // N64 header in all three byte orders.
+        val z64 = ByteArray(0x40).also { it[0] = 0x80.toByte(); it[1] = 0x37; it[2] = 0x12; it[3] = 0x40; "NSME".toByteArray().copyInto(it, 0x3B) }
+        val v64 = z64.copyOf().also { for (i in 0 until 0x40 step 2) { val t = it[i]; it[i] = it[i + 1]; it[i + 1] = t } }
+        val n64 = z64.copyOf().also { for (i in 0 until 0x40 step 4) { val a = it[i]; val b = it[i + 1]; it[i] = it[i + 3]; it[i + 1] = it[i + 2]; it[i + 2] = b; it[i + 3] = a } }
+        assertEquals("NSME", id.n64Code(z64)); assertEquals("NSME", id.n64Code(v64)); assertEquals("NSME", id.n64Code(n64))
+        assertEquals("SCUS94163", id.bootSerial("BOOT = cdrom:\\SCUS_941.63;1\r\nTCB = 4\r\n"))
+        assertEquals("SLUS20312", id.bootSerial("BOOT2 = cdrom0:\\SLUS_203.12;1\nVER = 1.00\n"))
+        val saturn = ByteArray(0x100).also { "SEGA SEGASATURN SEGA ENTERPRISES".toByteArray().copyInto(it, 0); "T-4305G   ".toByteArray().copyInto(it, 0x20) }
+        assertEquals("T-4305G", id.segaProduct(saturn, "SEGA SEGASATURN", 0x20))
+    }
+
+    @Test fun readsGameCubeAndWiiDiscIds() {
+        val dir = java.nio.file.Files.createTempDirectory("discs").toFile()
+        try {
+            val iso = java.io.File(dir, "a.iso").apply { writeBytes("GALE01".toByteArray() + ByteArray(64)) }
+            val rvz = java.io.File(dir, "b.rvz").apply { writeBytes("RVZ\u0001".toByteArray() + ByteArray(0x54) + "RMGE01".toByteArray() + ByteArray(64)) }
+            val wbfs = java.io.File(dir, "c.wbfs").apply {
+                val b = ByteArray(0x200 + 16); "WBFS".toByteArray().copyInto(b, 0); b[8] = 9; "SB4P01".toByteArray().copyInto(b, 0x200); writeBytes(b)
+            }
+            assertEquals("GALE01", id.discId6(iso)); assertEquals("RMGE01", id.discId6(rvz)); assertEquals("SB4P01", id.discId6(wbfs))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun gameTdbRegionsFollowTheDiscId() {
+        val r = io.github.marsinsanity.mainui.scraper.FreeArt.GameTdb::regions
+        assertEquals("US", r("GALE01", emptyList()).first())
+        assertEquals("JA", r("GALJ01", emptyList()).first())
+        assertEquals("EN", r("RMGP01", emptyList()).first())
+        assertEquals("DE", r("RSPD01", emptyList()).first())
+    }
+}

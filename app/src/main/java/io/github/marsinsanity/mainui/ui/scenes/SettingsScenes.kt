@@ -40,7 +40,7 @@ class SettingsScene(host: SceneHost) : ListScene(host, "Settings") {
             action("Controls & in-game menu") { host.push(ControlSettingsScene(host)) },
             action("Library & storage") { host.push(LibrarySettingsScene(host)) },
             action("Emulators & cores") { host.push(EmulatorsScene(host)) },
-            action("Scraper (ScreenScraper)") { host.push(ScraperScene(host, null)) },
+            action("Scraper", "box art & game info") { host.push(ScraperScene(host, null)) },
             action("Process manager") { host.push(ProcessManagerScene(host)) },
             action("Permissions & setup") { host.push(SetupScene(host)) },
             action("Android settings") {

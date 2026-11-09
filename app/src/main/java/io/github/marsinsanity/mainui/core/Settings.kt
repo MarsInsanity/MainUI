@@ -109,6 +109,8 @@ class Settings(ctx: Context) {
     var ssPassword by str("ss_password", "")
     var ssDevId by str("ss_dev_id", "")
     var ssDevPassword by str("ss_dev_password", "")
+    /** Where box art comes from, in order: "ss" (ScreenScraper), "gametdb", "libretro". */
+    var artSources by str("art_sources", "ss,gametdb,libretro")
     var ssMedia by str("ss_media", "box-2D")
     var ssRegions by str("ss_regions", "us,wor,eu,ss,jp")
     var ssLanguage by str("ss_language", "en")
