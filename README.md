@@ -156,7 +156,7 @@ exposes:
 
 | Emulator | Systems (folder) | Save / Load from MainUI's in-game menu |
 |---|---|---|
-| RetroArch (all cores) | everything | Official Android builds: through RetroArch's own quick menu (*Save / Load (menu)*). Builds with network commands: **slots 0-9** while paused |
+| RetroArch (all cores) | everything | Official Android builds: **Save / Load** through RetroArch's keyboard hotkeys (F2 / F4, root), *Native Menu* = F1. Builds with network commands: **slots 0-9** while paused |
 | ARMSX2 | PS2 (`ps2`) | Hotkeys F1 / F3 (PCSX2's defaults) |
 | NetherSX2 / AetherSX2 | PS2 (`ps2`) | Hotkeys F1 / F3 |
 | ARMSX3 | PS3 (`ps3`: disc images, game folders, `.ps3` files holding a title ID) | No save states |
@@ -174,9 +174,14 @@ exposes:
 | Eden, Kenji-NX | Switch (`switch`) | No save states |
 
 **No Android emulator offers a remote save/load command.** RetroArch has one (network commands),
-but the official Android builds are compiled without it (checked in 1.22.2), and injected keyboard
-hotkeys did not reach it in testing. MainUI probes for it and otherwise opens RetroArch's quick menu,
-where Save State / Load State are. For the
+but the official Android builds are compiled without it (checked in 1.22.2). Keys injected the usual
+way (`input keyevent`, accessibility actions) don't reach it either: they come from Android's virtual
+keyboard device, which RetroArch ignores, and it only treats Back from player 1's controller as the
+menu key. So MainUI creates its own keyboard ("MainUI Keyboard", F keys only, through `/dev/uinput`
+by a small root helper) and presses RetroArch's keyboard hotkeys on it: **F1** menu, **F2** save
+state, **F4** load state (RetroArch's defaults; *Configure RetroArch* makes sure they are set and that
+no keyboard hotkey-enable key blocks them). The device only has F keys, so the on-screen keyboard is
+not affected. Without root, *Native Menu* sends Back. For the
 "hotkeys" emulators MainUI closes the menu, unpauses the game and injects the key with root. The key
 must be bound in that emulator. MainUI helps with that: open the emulator's hotkey settings, start
 binding "Save state", press Home and pick **Bind hotkeys... > Send save key**. MainUI sends the key to
@@ -362,7 +367,7 @@ with a different key can't update them.
   launches. The other recipes come from ES-DE's maintained rules, and the save/load hotkeys listed
   above are those emulators' defaults, not verified one by one. Use `MainUI/emulators.json` to fix one.
 - The RetroArch UDP command path (pause, slots, quit) is only used by builds that answer on the port;
-  the official Android builds don't.
+  the official Android builds don't. There, Save / Load use the current slot (RetroArch's own).
 - Retroid's Home button must arrive as a normal `KEYCODE_HOME` key for the overlay to catch it.
   Keys injected with `adb shell input` skip accessibility filters, so test with the real button.
 - ScreenScraper system IDs in `systems.json` were mapped by hand; a few rare systems may be wrong

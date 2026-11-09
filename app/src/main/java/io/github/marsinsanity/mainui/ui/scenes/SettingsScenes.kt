@@ -215,7 +215,7 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
         }, onSelect = { if (ra != null) host.push(CoresScene(host)) else CoreInstall.offer(host, "mgba") })
         if (ra != null) items += action("Configure RetroArch for MainUI") {
             host.push(DialogScene(host, "Configure RetroArch",
-                "Pause behind MainUI's menu, save every 10 s, save state on exit. RetroArch will be closed.") {
+                "Pause behind MainUI's menu, save every 10 s, save state on exit, keyboard hotkeys for Save / Load / Menu (F2 / F4 / F1). RetroArch will be closed.") {
                 host.toast("Configuring RetroArch...", 8000)
                 host.io({ em.configureRetroArch() }) { (ok, msg) ->
                     if (ok) host.toast(msg, 3000) else host.push(DialogScene(host, "Configure RetroArch", msg, "OK", null))

@@ -445,6 +445,14 @@ class EmulatorManager(
             "pause_nonactive" to "\"true\"",
             // Flush in-game saves (SRAM) every 10 s so a force stopped game keeps them
             "autosave_interval" to "\"10\"",
+            // Official builds have no network commands: MainUI presses these keyboard hotkeys
+            // (RetroArch's defaults) for Save / Load / Native Menu. A keyboard hotkey-enable key
+            // or merged hotkey devices would block them; a controller's hotkey button doesn't.
+            "input_menu_toggle" to "\"f1\"",
+            "input_save_state" to "\"f2\"",
+            "input_load_state" to "\"f4\"",
+            "input_enable_hotkey" to "\"nul\"",
+            "input_hotkey_device_merge" to "\"false\"",
         )
         if (settings.autoSaveOnExit) {
             wanted["savestate_auto_save"] = "\"true\""

@@ -99,7 +99,8 @@ class InGameMenuScene(
             items += UiItem("Native Menu", data = Action.NATIVE)
             items += UiItem("Game Switcher", data = Action.SWITCHER)
             items += UiItem("Exit Game", data = Action.EXIT)
-            if (controller.states == StateSupport.HOTKEY) items += UiItem("Bind hotkeys...", data = Action.BIND)
+            // RetroArch's hotkeys are its own defaults; only standalone emulators need binding.
+            if (controller.states == StateSupport.HOTKEY && controller is StandaloneController) items += UiItem("Bind hotkeys...", data = Action.BIND)
         }
         list.set(items, false)
     }
