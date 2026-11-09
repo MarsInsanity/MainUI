@@ -208,6 +208,20 @@ class InGameMenuScene(
             } else hotkeyAction("Load") { controller.load(0) }
             Action.STATES_MENU, Action.NATIVE -> leaveThen(250) { controller.openNativeMenu() }
             Action.SWITCHER -> {
+                if (saveByKey) {
+                    // OnionOS: leaving a game for the Game Switcher saves it (RetroArch: its auto
+                    // slot, loaded by itself when the game starts again).
+                    val ctx = host.hostContext
+                    leaveThen(500) {
+                        if (controller.save(0)) Thread.sleep(800)
+                        main.post {
+                            ctx.startActivity(Intent(ctx, MainActivity::class.java)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                                .putExtra(MainActivity.EXTRA_GAME_SWITCHER, true))
+                        }
+                    }
+                    return
+                }
                 resumeOnce()
                 closeMenu()
                 if (overlayMode) {
@@ -298,15 +312,35 @@ class InGameMenuScene(
         if (overlayMode) host.finishHost() else close()
     }
 
+    /** HOME was held after its press opened the menu: close it (game resumed) for the hold action. */
+    fun leave() {
+        resumeOnce()
+        closeMenu()
+    }
+
     override fun onExit() {
         // Safety net (overlay torn down some other way): never leave the game paused.
         resumeOnce()
     }
 
+    /** Auto save is on and this game saves with a hotkey: the key has to reach the running game. */
+    private val saveByKey get() = MainUI.settings.autoSaveOnExit && controller.states == StateSupport.HOTKEY
+
     private fun exitGame() {
+        val ctx = host.hostContext
+        if (saveByKey) {
+            // Close the menu and let the game run, save with its key, then stop it.
+            Toast.makeText(ctx, "Saving and exiting...", Toast.LENGTH_SHORT).show()
+            leaveThen(500) {
+                val ok = controller.quit(true)
+                MainUI.sessions.endActive()
+                main.post { ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                if (!ok) Log.w("MainUI.InGame", "exit: could not stop ${session.pkg}")
+            }
+            return
+        }
         busy = "Exiting..."
         invalidate()
-        val ctx = host.hostContext
         resumed = true // quitting: force stop also kills a frozen process
         host.io({
             val ok = controller.quit(MainUI.settings.autoSaveOnExit)

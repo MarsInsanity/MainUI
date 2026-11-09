@@ -51,7 +51,9 @@ internal object GameItems {
         })
         if (def != null && !g.isAndroid) {
             val cur = MainUI.emulators.choose(def, g)
-            items += UiItem("Core: ${cur?.name ?: "none"}", onSelect = { host.push(CoreSelectScene(host, def, g)) })
+            val own = MainUI.library.coreForGame(g.key) != null
+            items += UiItem("Core: ${if (own) cur?.name ?: "none" else "Default (${cur?.shortName ?: "none"})"}",
+                onSelect = { host.push(CoreSelectScene(host, def, g)) })
             items += UiItem("System core...", onSelect = { host.push(CoreSelectScene(host, def, null)) })
             items += UiItem("Scrape artwork", onSelect = {
                 host.toast("Scraping ${g.name}...")
@@ -255,6 +257,16 @@ class SearchResultsScene(host: SceneHost, private val query: String) : ListScene
 class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val game: Game?) :
     ListScene(host, if (game == null) "${def.short} core" else "Game core") {
 
+    private companion object { val DEFAULT = Any() }
+
+    /** Back to "Default": the game follows the system again / the system its recommended core. */
+    private fun reset() {
+        if (game != null) MainUI.library.setCoreForGame(game.key, null) else MainUI.library.setCoreForSystem(def.id, null)
+        val now = MainUI.emulators.choose(def, game)
+        host.toast("Default: ${now?.shortName ?: "none"}")
+        close()
+    }
+
     override var aLabel: String? = "SELECT"
     override val showPreview = false
     override val extraHints get() = listOf("X" to "RESET")
@@ -267,26 +279,27 @@ class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val g
 
     private fun build() {
         val current = if (game != null) MainUI.library.coreForGame(game.key) else MainUI.library.coreForSystem(def.id)
-        val effective = MainUI.emulators.choose(def, game)?.ref
+        // "Default": a game follows its system's core, a system the recommended (dArkOS) one.
+        val auto = if (game != null) MainUI.emulators.choose(def, game, gameOverride = false)
+            else MainUI.emulators.choose(def, null, systemOverride = false)
         val opts = MainUI.emulators.optionsFor(def)
-        var defaultMarked = false
-        list.set(opts.map { o ->
+        val items = mutableListOf(UiItem("Default (${auto?.shortName ?: "none"})", ItemType.TOGGLE,
+            value = if (current == null) 1 else 0, data = DEFAULT))
+        items += opts.map { o ->
             // Missing RetroArch cores download in place; missing emulators open their store page.
             val canGet = o.installed == false
             val status = when (o.installed) { true -> null; false -> if (canGet) "get" else "not installed"; null -> "?" }
-            val isDefault = !defaultMarked && o.installed != false && o.recommended
-            if (isDefault) defaultMarked = true
-            val label = o.name + if (isDefault) " (default)" else ""
-            UiItem(label, ItemType.TOGGLE, value = if (o.ref == effective) 1 else 0, sub = status,
+            UiItem(o.name, ItemType.TOGGLE, value = if (current != null && o.ref == current) 1 else 0, sub = status,
                 disabled = o.installed == false && !canGet, data = o)
-        }, false)
+        }
+        list.set(items, false)
         list.active = list.items.indexOfFirst { it.value == 1 }.coerceAtLeast(0)
-        if (current == null && game != null) title = "Game core (using system)"
     }
 
     override fun onResume() = build()
 
     override fun activate() {
+        if (list.current?.data === DEFAULT) { reset(); return }
         val o = list.current?.data as? io.github.marsinsanity.mainui.emu.EmuOption ?: return
         if (list.current?.disabled == true) return
         val select = {
@@ -304,10 +317,7 @@ class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val g
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
-        if (b == Btn.X && !repeat) {
-            if (game != null) MainUI.library.setCoreForGame(game.key, null) else MainUI.library.setCoreForSystem(def.id, null)
-            host.toast("Reset to default"); close(); return true
-        }
+        if (b == Btn.X && !repeat) { reset(); return true }
         if (b == Btn.LEFT || b == Btn.RIGHT) return false
         return super.onKey(b, repeat)
     }

@@ -556,8 +556,102 @@ class EmulatorUpdatesTest {
         assertEquals(true, u.isNewer("1.0.20250501", "1.0.20250425"))
     }
 
+    @Test fun buildNumberTagsAgainstTheInstalledBuild() {
+        // Vita3K: release "v12" is versionName "0.2.0-12", versionCode 12.
+        assertNull(u.isNewer("v12", "0.2.0-12"))
+        assertEquals(false, u.buildNumberNewer("v12", "0.2.0-12", 12))
+        assertEquals(true, u.buildNumberNewer("v13", "0.2.0-12", 12))
+        assertEquals(false, u.buildNumberNewer("v11", "0.2.0-12", 12))
+        assertEquals(false, u.buildNumberNewer("v40", "1.4", 40))         // same as the version code
+        assertNull(u.buildNumberNewer("v5", "1.2.3", 10203))               // different counters: by date
+        assertNull(u.buildNumberNewer("v1.2.4", "1.2.3", 10203))
+    }
+
     @Test fun refusesToCompareDifferentSchemes() {
         assertNull(u.isNewer("v20250425", "1.0"))        // a date tag against a version: decided by release date instead
         assertNull(u.isNewer("continuous", "1.0"))
+    }
+}
+
+class RunningAppsTest {
+    private val ps = listOf(
+        "  PID USER           RSS %CPU NAME",
+        "    1 root         10764  0.0 init",
+        "  612 system      312000  1.2 system_server",
+        " 1201 u0_a120     180000  0.5 com.android.systemui",
+        " 2210 u0_a170      90000  0.0 com.google.android.gms.persistent",
+        " 3001 u0_a201     500000 45.0 org.ppsspp.ppsspp",
+        " 3002 u0_a201      20000  1.5 org.ppsspp.ppsspp:remote",
+        " 3100 u0_a215     150000  0.3 com.android.chrome",
+        " 3105 u0_i12       60000  0.1 com.android.chrome:sandboxed_process0",
+        " 3200 u0_a230     300000  2.0 com.retroarch.aarch64",
+        " 3300 u10_a40      40000  0.0 com.example.work",
+    )
+    private val apps = setOf("org.ppsspp.ppsspp", "com.android.chrome", "com.retroarch.aarch64", "com.example.work")
+
+    @Test fun oneRowPerAppOnlyKillableOnes() {
+        val r = io.github.marsinsanity.mainui.data.RunningApps.parse(ps, { it in apps }, setOf("com.retroarch.aarch64"), "org.ppsspp.ppsspp")
+        assertEquals(listOf("org.ppsspp.ppsspp", "com.retroarch.aarch64", "com.android.chrome", "com.example.work"), r.map { it.pkg })
+        val ppsspp = r.first()
+        assertEquals(listOf(3001, 3002), ppsspp.pids)
+        assertEquals(520000L, ppsspp.rssKb)
+        assertEquals(46.5, ppsspp.cpu, 0.001)
+        assertTrue(ppsspp.isSession)
+        assertTrue(r[1].fromMainUI)
+        assertEquals(listOf(3100), r[2].pids)   // the isolated sandbox process (u0_i12) isn't an app process
+    }
+
+    @Test fun recentAppsFromDumpsys() {
+        val dump = """
+  * Recent #0: Task{4032e34 #117 visible=true type=standard A=10130:io.github.marsinsanity.mainui U=0 StackId=117 sz=1}
+    affinity=10130:io.github.marsinsanity.mainui
+  * Recent #1: Task{6eb97d0 #114 visible=false type=home I=com.android.launcher3/.uioverrides.QuickstepLauncher U=0 StackId=1 sz=1}
+  * Recent #4: Task{3a3efb4 #110 visible=false type=undefined A=10131:org.ppsspp.ppsspp U=0 StackId=110 sz=0}
+    realActivity={com.retroarch/com.retroarch.browser.retroactivity.RetroActivityFuture}
+    realActivity=com.google.android.apps.messaging/.ui.ConversationListActivity
+"""
+        val r = io.github.marsinsanity.mainui.data.RunningApps.recentPackages(dump)
+        assertTrue(r.containsAll(listOf("io.github.marsinsanity.mainui", "com.android.launcher3", "org.ppsspp.ppsspp",
+            "com.retroarch", "com.google.android.apps.messaging")))
+    }
+
+    @Test fun systemPartsAreProtected() {
+        val p = io.github.marsinsanity.mainui.data.RunningApps.PROTECTED
+        assertTrue("com.android.systemui" in p && "com.google.android.gms" in p && "com.android.phone" in p)
+        val r = io.github.marsinsanity.mainui.data.RunningApps.parse(ps, { it !in p }, emptySet(), null)
+        assertTrue(r.none { it.pkg in p })
+    }
+}
+
+class SafGrantsTest {
+    private val g = io.github.marsinsanity.mainui.core.SafGrants
+
+    @Test fun readsFolderGrantsOfOneAppFromDumpsys() {
+        val dump = """
+ACTIVITY MANAGER URI PERMISSIONS (dumpsys activity permissions)
+  * UID 10150 holds:
+    UriPermission{1a2b3c content://com.android.externalstorage.documents/tree/primary%3Aroms%2Fpsx [user 0] [prefix]}
+    UriPermission{4d5e6f content://com.android.externalstorage.documents/tree/1234-ABCD%3ARoms [user 0] [prefix]}
+    UriPermission{777777 content://com.android.externalstorage.documents/tree/primary%3Aroms/document/primary%3Aroms%2Fx.bin [user 0]}
+  * UID 10160 holds:
+    UriPermission{abcdef content://com.android.externalstorage.documents/tree/primary%3A [user 0] [prefix]}
+"""
+        assertEquals(listOf("primary:roms/psx", "1234-ABCD:Roms", "primary:roms"), g.fromDumpsys(dump, 10150))
+        assertEquals(listOf("primary:"), g.fromDumpsys(dump, 10160))
+        val xml = """<uri-grants><uri-grant sourceUserId="0" targetUserId="0" sourcePkg="com.android.externalstorage.documents" targetPkg="com.github.stenzek.duckstation" uri="content://com.android.externalstorage.documents/tree/primary%3ARoms" prefix="true" modeFlags="3" /></uri-grants>"""
+        assertEquals(listOf("primary:Roms"), g.fromXml(xml, "com.github.stenzek.duckstation"))
+        assertEquals(emptyList<String>(), g.fromXml(xml, "other.app"))
+    }
+
+    @Test fun linksThroughTheDeepestGrantedFolderHoldingTheGame() {
+        val doc = "primary:roms/psx/Final Fantasy VII (Disc 1).chd"
+        assertEquals("content://com.android.externalstorage.documents/tree/primary%3Aroms%2Fpsx/document/" +
+            "primary%3Aroms%2Fpsx%2FFinal%20Fantasy%20VII%20(Disc%201).chd",
+            g.documentUri(doc, listOf("primary:", "primary:roms/psx", "primary:roms/psp"), "primary:roms"))
+        // Nothing granted holds it: through the ROMs folder.
+        assertTrue(g.documentUri(doc, listOf("primary:roms/ps2", "primary:romsx"), "primary:roms")
+            .startsWith("content://com.android.externalstorage.documents/tree/primary%3Aroms/document/"))
+        assertTrue(g.contains("primary:", doc) && !g.contains("primary:rom", doc))
+        assertEquals("primary:roms/psx/a b", g.percentDecode("primary%3Aroms%2Fpsx%2Fa%20b"))
     }
 }

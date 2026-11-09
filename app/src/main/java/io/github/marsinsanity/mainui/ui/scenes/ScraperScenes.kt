@@ -83,6 +83,11 @@ class ScraperScene(host: SceneHost, private val systems: List<String>?) :
                 host.push(KeyboardScene(host, "ScreenScraper developer password", "", password = true) { v -> s.ssDevPassword = v; build() })
             }
         }
+        items += action("Software name", s.ssSoftName.ifBlank { ScreenScraper.DEFAULT_SOFTNAME }) {
+            host.push(KeyboardScene(host, "ScreenScraper software name", s.ssSoftName.ifBlank { ScreenScraper.DEFAULT_SOFTNAME }) { v ->
+                s.ssSoftName = v.trim().takeIf { it != ScreenScraper.DEFAULT_SOFTNAME } ?: ""; build()
+            })
+        }
         list.set(items)
     }
 }

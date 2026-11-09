@@ -124,17 +124,25 @@ class Storage(private val ctx: Context, private val settings: Settings) {
         return listOf(file) + vols.filter { it.dir != v.dir }.map { File(it.dir, rel) }
     }
 
-    /**
-     * Storage Access Framework document URI for a file, the format standalone
-     * emulators expect when they were granted folder access (same scheme ES-DE uses).
-     */
-    fun safUri(file: File): Uri {
+    /** The SAF document id of a file: "primary:roms/psx/Game.chd", "1234-ABCD:Roms/psx/Game.chd". */
+    fun documentId(file: File): String {
         val vol = volumes().firstOrNull { file.absolutePath.startsWith(it.dir.absolutePath + "/") }
         val volId = if (vol == null || !vol.removable) "primary" else (vol.uuid ?: vol.dir.name)
         val rel = if (vol != null) file.relativeTo(vol.dir).path else file.absolutePath.trimStart('/')
-        val treeDoc = Uri.encode("$volId:")
-        val doc = Uri.encode("$volId:$rel")
-        return Uri.parse("content://com.android.externalstorage.documents/tree/$treeDoc/document/$doc")
+        return "$volId:$rel"
+    }
+
+    /**
+     * Storage Access Framework document URI for a file, the format standalone emulators expect
+     * (%ROMSAF%, as in ES-DE). Android only lets the emulator open it through a folder it was
+     * given access to, so the link goes through the deepest of [granted] (the emulator's folders,
+     * see [SafGrants]) that holds the file; when none is known, through the ROMs folder holding it.
+     */
+    fun safUri(file: File, granted: List<String> = emptyList()): Uri {
+        val doc = documentId(file)
+        val romRoot = romRoots().firstOrNull { file.absolutePath.startsWith(it.absolutePath + "/") }
+        val fallback = romRoot?.let { documentId(it) } ?: (doc.substringBefore(':') + ":")
+        return Uri.parse(SafGrants.documentUri(doc, granted, fallback))
     }
 
     fun hasAllFilesAccess(): Boolean =

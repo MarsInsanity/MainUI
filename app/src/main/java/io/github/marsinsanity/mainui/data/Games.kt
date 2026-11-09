@@ -42,6 +42,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         systemsCache = null
         dirCache.clear()
         gamelists.clear()
+        listings.clear()
     }
 
     fun gamelist(dir: File): GameListXml {
@@ -234,13 +235,32 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         }
         val base = file.nameWithoutExtension
         val relDir = runCatching { file.parentFile!!.relativeTo(sysRoot).path }.getOrDefault("")
-        val candidates = ArrayList<File>(24)
+        // One listing per image folder instead of a file check per name: 7 folders x 4 suffixes x
+        // 4 types x every volume is over 200 checks per game, very slow on an SD card.
         for (folder in IMAGE_FOLDERS) {
             val d = if (relDir.isEmpty()) File(sysRoot, folder) else File(File(sysRoot, folder), relDir)
-            for (suffix in IMAGE_SUFFIXES) for (ext in IMAGE_EXTS) candidates += File(d, "$base$suffix.$ext")
+            for (m in storage.mirrors(d)) {
+                val names = folderNames(m) ?: continue
+                for (suffix in IMAGE_SUFFIXES) for (ext in IMAGE_EXTS) {
+                    // Android's shared storage and SD cards ignore case, so the lookup does too.
+                    names["$base$suffix.$ext".lowercase()]?.let { return File(m, it) }
+                }
+            }
         }
-        for (c in candidates) for (m in storage.mirrors(c)) if (m.isFile) return m
         return null
+    }
+
+    private class Listing(val at: Long, val names: Map<String, String>?)
+    private val listings = ConcurrentHashMap<String, Listing>()
+
+    /** Lowercase name -> file name in an image folder (null if it doesn't exist), remembered for a few seconds. */
+    private fun folderNames(dir: File): Map<String, String>? {
+        val now = System.currentTimeMillis()
+        listings[dir.path]?.let { if (now - it.at < 5000) return it.names }
+        val names = dir.list()?.associateBy { it.lowercase() }
+        if (listings.size > 2000) listings.clear()
+        listings[dir.path] = Listing(now, names)
+        return names
     }
 
     companion object {

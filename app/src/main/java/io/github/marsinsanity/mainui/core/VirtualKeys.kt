@@ -39,6 +39,28 @@ object VirtualKeys {
         return false
     }
 
+    /** Bumped for every new virtual keyboard (helper start). */
+    @Volatile private var deviceGen = 0
+    /** "<pkg>:<pid>:<deviceGen>" that has seen a key from the current keyboard. */
+    @Volatile private var primed: String? = null
+
+    /**
+     * RetroArch takes note of a keyboard on its first key and doesn't act on that key, so the
+     * first Save or Load did nothing. Before the first hotkey for a RetroArch process (and after
+     * every new virtual keyboard), tap Ctrl, which RetroArch doesn't use, and give it a moment.
+     */
+    fun primeFor(pkg: String?) {
+        if (pkg == null) return
+        val pid = Root.Shell.run("pidof $pkg", 3000).out.trim()
+        if (pid.isEmpty()) return
+        if (!ensureLocked()) return
+        val key = "$pkg:$pid:$deviceGen"
+        if (primed == key) return
+        if (press("CTRL", 80)) { primed = key; Thread.sleep(350) }
+    }
+
+    @Synchronized private fun ensureLocked() = ensure()
+
     /** Starts the helper in the background so the first key press doesn't wait for it. */
     fun warmUp() { Thread({ synchronized(this) { ensure() } }, "keys-warmup").apply { isDaemon = true }.start() }
 
@@ -67,6 +89,7 @@ object VirtualKeys {
             val l = replies.poll(500, TimeUnit.MILLISECONDS) ?: if (p.isAlive) continue else break
             if (l == "ready") {
                 proc = p; out = p.outputStream.bufferedWriter()
+                deviceGen++
                 Thread.sleep(400)
                 Log.i(TAG, "virtual keyboard ready")
                 return true

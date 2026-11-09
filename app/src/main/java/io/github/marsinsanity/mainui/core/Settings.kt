@@ -72,8 +72,10 @@ class Settings(ctx: Context) {
     var homePress by str("home_press", "menu")
     /** Same choices for holding Home. */
     var homeHold by str("home_hold", "gs")
-    /** How long Home must be held (ms). */
+    /** How long Home (or Back) must be held (ms). */
     var homeHoldMs by int("home_hold_ms", 500)
+    /** Holding Back anywhere: "processes" (process manager popup) or "none". Needs the overlay service. */
+    var backHold by str("back_hold", "processes")
     /** Extra in-game menu trigger read through root getevent: "off", "select_start", "l3_r3". */
     var comboTrigger by str("combo_trigger", "off")
     /** What HOME does while MainUI is in front: "menu_then_gs", "gs", "menu". */
@@ -109,6 +111,8 @@ class Settings(ctx: Context) {
     var ssPassword by str("ss_password", "")
     var ssDevId by str("ss_dev_id", "")
     var ssDevPassword by str("ss_dev_password", "")
+    /** The software name sent to ScreenScraper (softname); use the one your developer ID was registered for. */
+    var ssSoftName by str("ss_soft_name", "")
     /** Where box art comes from, in order: "ss" (ScreenScraper), "gametdb", "libretro", "launchbox". */
     var artSources by str("art_sources", "ss,gametdb,libretro,launchbox")
     var ssMedia by str("ss_media", "box-2D")

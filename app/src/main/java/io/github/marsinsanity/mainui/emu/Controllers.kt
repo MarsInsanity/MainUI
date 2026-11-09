@@ -231,7 +231,10 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     }
 
     /** Held long enough for RetroArch to see it on a frame (a tap can come and go between polls). */
-    private fun hotkey(key: String) = io.github.marsinsanity.mainui.core.VirtualKeys.press(key, 250)
+    private fun hotkey(key: String): Boolean {
+        io.github.marsinsanity.mainui.core.VirtualKeys.primeFor(pkg)
+        return io.github.marsinsanity.mainui.core.VirtualKeys.press(key, 250)
+    }
 
     override fun save(slot: Int): Boolean {
         if (!api) return keys && hotkey("F2")
@@ -267,7 +270,13 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
         return io.github.marsinsanity.mainui.service.OverlayService.instance?.globalBack() ?: false
     }
 
+    /**
+     * [autoSave] without network commands: F2 into the auto slot ("Configure RetroArch" sets
+     * state_slot -1 when auto save is on), which RetroArch loads by itself next time. The game
+     * must be in front and running (see InGameMenuScene.exitGame).
+     */
     override fun quit(autoSave: Boolean): Boolean {
+        if (!api && autoSave && keys && hotkey("F2")) Thread.sleep(1200)
         if (api) {
             // savestate_auto_save (set by "Configure RetroArch") writes the auto slot on QUIT.
             send("QUIT")
@@ -339,9 +348,10 @@ class StandaloneController(private val pkg: String, private val def: EmuDef?) : 
         }
     }
 
+    /** [autoSave]: the save key first; the game must be in front and running (see InGameMenuScene.exitGame). */
     override fun quit(autoSave: Boolean): Boolean {
         if (autoSave && states == StateSupport.HOTKEY && saveSpec != null) {
-            unpause(); Thread.sleep(400); keys(saveSpec); Thread.sleep(1200)
+            unpause(); keys(saveSpec); Thread.sleep(1200)
         }
         return Root.forceStop(pkg)
     }

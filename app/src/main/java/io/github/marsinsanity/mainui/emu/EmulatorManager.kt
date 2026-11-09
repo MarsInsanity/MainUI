@@ -8,6 +8,7 @@ import android.provider.Settings as AndroidSettings
 import androidx.core.content.FileProvider
 import io.github.marsinsanity.mainui.core.Root
 import io.github.marsinsanity.mainui.core.Settings
+import io.github.marsinsanity.mainui.core.SafGrants
 import io.github.marsinsanity.mainui.core.Storage
 import io.github.marsinsanity.mainui.data.Game
 import io.github.marsinsanity.mainui.data.Library
@@ -69,6 +70,12 @@ data class EmuOption(
 ) {
     val isRetroArch get() = ref.startsWith("ra:")
     val core get() = ref.removePrefix("ra:")
+
+    /** "Nintendo - Game Boy Advance (mGBA) (RetroArch)" -> "mGBA"; standalone names stay. */
+    val shortName: String get() {
+        if (!name.contains(" - ")) return name
+        return Regex("""\(([^()]+)\)""").find(name.substringAfter(" - "))?.groupValues?.get(1) ?: name
+    }
 }
 
 /**
@@ -326,10 +333,15 @@ class EmulatorManager(
         return out
     }
 
-    /** Per game choice > per system choice > first installed recommended emulator. */
-    fun choose(sys: SystemDef, game: Game?): EmuOption? {
+    /**
+     * Per game choice > per system choice > first installed recommended emulator.
+     * Without [gameOverride] / [systemOverride] that choice is skipped: what "Default" means
+     * in the game's / the system's core picker.
+     */
+    fun choose(sys: SystemDef, game: Game?, gameOverride: Boolean = true, systemOverride: Boolean = true): EmuOption? {
         val opts = optionsFor(sys)
-        val chosen = (game?.let { library.coreForGame(it.key) } ?: library.coreForSystem(sys.id))
+        val chosen = (game?.takeIf { gameOverride }?.let { library.coreForGame(it.key) }
+            ?: library.coreForSystem(sys.id)?.takeIf { systemOverride })
         chosen?.let { ref -> (opts.firstOrNull { it.ref == ref } ?: option(ref, false))?.let { return it } }
         // Automatic choice: recommended emulators, or other cores whose .info lists this
         // game's extension (a Game Boy core claims .gb, which the GBA folder also accepts,
@@ -370,6 +382,11 @@ class EmulatorManager(
                 .getOrNull()?.takeIf { it.isNotEmpty() } ?: rom.nameWithoutExtension
         }
         val rpcsxGame by lazy { Ps3Games.rpcsxPath(rom) }
+        // Through a folder the emulator was given access to, or Android refuses it the file.
+        val romSaf by lazy {
+            val uid = runCatching { ctx.packageManager.getApplicationInfo(pkg, 0).uid }.getOrNull()
+            storage.safUri(rom, if (uid != null) SafGrants.trees(pkg, uid) else emptyList()).toString()
+        }
         fun sub(t: String): String = t
             .replace("%FILECONTENT%", if (t.contains("%FILECONTENT%")) fileContent else "")
             .replace("%RPCSX_GAME%", if (t.contains("%RPCSX_GAME%")) rpcsxGame else "")
@@ -377,7 +394,7 @@ class EmulatorManager(
             .replace("%ROM%", rom.absolutePath)
             .replace("%ROMURI%", Uri.fromFile(rom).toString())
             .replace("%ROMPROVIDER%", providerUri(rom).toString())
-            .replace("%ROMSAF%", storage.safUri(rom).toString())
+            .replace("%ROMSAF%", if (t.contains("%ROMSAF%")) romSaf else "")
             .replace("%BASENAME%", rom.nameWithoutExtension)
             .replace("%PKG%", pkg)
             .replace("%CORE%", core ?: "")
@@ -390,7 +407,10 @@ class EmulatorManager(
         def.data?.let { d ->
             val uri = Uri.parse(sub(d))
             if (def.mime != null) intent.setDataAndType(uri, def.mime) else intent.data = uri
-            if (uri.scheme == "content") intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            // Only MainUI's own files can be shared this way. Granting a storage (SAF) link MainUI
+            // doesn't hold makes Android refuse to start the emulator; it has its own folder grant.
+            if (uri.scheme == "content" && uri.authority == "${ctx.packageName}.files")
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         }
         for ((k, v) in def.extras) {
             when {
@@ -420,6 +440,22 @@ class EmulatorManager(
         }
         return ctx.packageManager.getLaunchIntentForPackage(pkg)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+    }
+
+    private fun raConfigStamp() = "$RA_CONFIG_VERSION:${settings.autoSaveOnExit}"
+
+    /**
+     * Applies [configureRetroArch] by itself when this MainUI wants settings it hasn't written
+     * yet (new version, auto save switched), so nobody has to press "Configure RetroArch" again.
+     * Only while RetroArch isn't running: configuring stops it. Call off the main thread.
+     */
+    fun ensureRetroArchConfigured() {
+        if (settings.prefs.getString(RA_CONFIG_STAMP, null) == raConfigStamp()) return
+        val pkg = raPackage ?: return
+        if (!Root.knownAvailable() && !Root.available()) return
+        if (Root.exec("pidof $pkg").out.isNotBlank()) return
+        val (ok, msg) = configureRetroArch()
+        android.util.Log.i("MainUI.Emu", "RetroArch auto configure: $ok $msg")
     }
 
     /**
@@ -457,15 +493,27 @@ class EmulatorManager(
         if (settings.autoSaveOnExit) {
             wanted["savestate_auto_save"] = "\"true\""
             wanted["savestate_auto_load"] = "\"true\""
+            // Save / Load (F2 / F4) use the auto slot: what MainUI saves when you leave a game for
+            // the Game Switcher or exit it is what RetroArch loads by itself the next time.
+            wanted["state_slot"] = "\"-1\""
+        } else {
+            wanted["savestate_auto_save"] = "\"false\""
+            wanted["savestate_auto_load"] = "\"false\""
+            wanted["state_slot"] = "\"0\""
         }
         val merged = RetroArchCores.mergeConfig(cfg, wanted)
             ?: return false to "retroarch.cfg looks incomplete, so nothing was changed.\n\n$path"
         val w = Root.writeFile(path, merged, backup = true)
+        if (w.ok) settings.prefs.edit().putString(RA_CONFIG_STAMP, raConfigStamp()).apply()
         return if (w.ok) true to "RetroArch configured for MainUI"
         else false to "Could not save retroarch.cfg:\n${w.error}\n\n$path"
     }
 
     companion object {
+        /** Bump when [configureRetroArch] writes something new. */
+        const val RA_CONFIG_VERSION = 2
+        private const val RA_CONFIG_STAMP = "ra_config_stamp"
+
         /** Archive / disc image extensions that many unrelated cores accept. */
         val GENERIC_EXTENSIONS = setOf("zip", "7z", "rar", "gz", "bin", "iso", "img", "chd", "cue", "m3u", "ccd", "mds", "cso", "pbp", "toc", "ecm")
 
