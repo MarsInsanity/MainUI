@@ -39,7 +39,9 @@ class SettingsScene(host: SceneHost) : ListScene(host, "Settings") {
             action("User interface") { host.push(UiSettingsScene(host)) },
             action("Controls & in-game menu") { host.push(ControlSettingsScene(host)) },
             action("Library & storage") { host.push(LibrarySettingsScene(host)) },
-            action("Emulators & cores") { host.push(EmulatorsScene(host)) },
+            action("Emulators & cores", io.github.marsinsanity.mainui.store.EmulatorUpdates.known().size.let {
+                if (it > 0) "$it update${if (it > 1) "s" else ""}" else null
+            }) { host.push(EmulatorsScene(host)) },
             action("Scraper", "box art & game info") { host.push(ScraperScene(host, null)) },
             action("Process manager") { host.push(ProcessManagerScene(host)) },
             action("Permissions & setup") { host.push(SetupScene(host)) },
@@ -208,6 +210,12 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
         val ra = em.raPackage
         val cores = em.raCores
         items += UiItem("Get emulators...", sub = "F-Droid, GitHub, retroarch.com", onSelect = { host.push(EmulatorStoreScene(host)) })
+        val ups = io.github.marsinsanity.mainui.store.EmulatorUpdates.known().size
+        items += UiItem("Emulator updates", sub = when {
+            ups > 0 -> "$ups available"
+            io.github.marsinsanity.mainui.store.EmulatorUpdates.lastCheck() == 0L -> "check"
+            else -> "up to date"
+        }, onSelect = { host.push(EmulatorUpdatesScene(host)) })
         items += UiItem("RetroArch cores", sub = when {
             ra == null -> "RetroArch not installed"
             cores == null -> if (io.github.marsinsanity.mainui.core.Root.knownAvailable()) "? (can't read RetroArch's folder)" else "? (root needed)"

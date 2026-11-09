@@ -7,6 +7,7 @@ import io.github.marsinsanity.mainui.store.AppStore
 import io.github.marsinsanity.mainui.store.ThemeStore
 import io.github.marsinsanity.mainui.store.formatBytes
 import io.github.marsinsanity.mainui.ui.Btn
+import io.github.marsinsanity.mainui.ui.BusyScene
 import io.github.marsinsanity.mainui.ui.DialogScene
 import io.github.marsinsanity.mainui.ui.Gfx
 import io.github.marsinsanity.mainui.ui.Glyphs
@@ -459,4 +460,82 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean = if (busy != null) true else super.onKey(b, repeat)
+}
+
+/** Settings > Emulators & cores > Emulator updates: newer builds of the installed emulators. */
+class EmulatorUpdatesScene(host: SceneHost) : ListScene(host, "Emulator updates") {
+    override val showPreview = false
+    override val extraHints get() = listOf("Y" to "CHECK")
+    private var status: String? = null
+
+    override fun onEnter() {
+        build()
+        // Check right away when the last check is old or never happened.
+        if (System.currentTimeMillis() - io.github.marsinsanity.mainui.store.EmulatorUpdates.lastCheck() > 3_600_000L) check()
+    }
+    override fun onResume() = build()
+
+    private fun check() {
+        if (status != null) return
+        status = "Checking..."
+        build()
+        host.io({ runCatching { io.github.marsinsanity.mainui.store.EmulatorUpdates.check { status = it; host.invalidate() } } }) { r ->
+            status = r.exceptionOrNull()?.let { "Could not check: ${it.message}" }
+            build()
+        }
+    }
+
+    private fun build() {
+        val eu = io.github.marsinsanity.mainui.store.EmulatorUpdates
+        val ups = eu.known()
+        val items = mutableListOf<UiItem>()
+        status?.let { items += UiItem(it.take(70), disabled = true) }
+        if (status == null) {
+            val last = eu.lastCheck()
+            items += UiItem(when {
+                last == 0L -> "Not checked yet"
+                ups.isEmpty() -> "All emulators are up to date"
+                else -> "${ups.size} update${if (ups.size > 1) "s" else ""} available"
+            }, sub = if (last > 0) android.text.format.DateUtils.getRelativeTimeSpanString(last).toString() else null,
+                onSelect = { check() })
+        }
+        if (ups.size > 1 && status == null) items += UiItem("Update all", sub = ups.joinToString(", ") { it.name }.take(40),
+            onSelect = { installAll(ups) })
+        for (u in ups) items += UiItem("${u.name}: ${u.installed.ifEmpty { "?" }} > ${u.latest}", sub = when (u.source) {
+            io.github.marsinsanity.mainui.store.EmulatorUpdates.Source.FDROID -> "F-Droid repo"
+            io.github.marsinsanity.mainui.store.EmulatorUpdates.Source.GITHUB -> "GitHub"
+            io.github.marsinsanity.mainui.store.EmulatorUpdates.Source.RETROARCH -> "retroarch.com"
+        }, onSelect = { confirm(u) })
+        items += UiItem("Check automatically", ItemType.TOGGLE, value = if (eu.autoCheck) 1 else 0, sub = "daily",
+            onChange = { eu.autoCheck = it.value == 1 })
+        list.set(items)
+    }
+
+    private fun confirm(u: io.github.marsinsanity.mainui.store.EmulatorUpdates.Update) {
+        host.push(DialogScene(host, "Update ${u.name}", "${u.installed.ifEmpty { "?" }} > ${u.latest}\nfrom ${u.from}", "UPDATE", "CANCEL") {
+            installAll(listOf(u))
+        })
+    }
+
+    private fun installAll(ups: List<io.github.marsinsanity.mainui.store.EmulatorUpdates.Update>) {
+        val busy = BusyScene(host, "Updating...")
+        host.push(busy)
+        host.io({
+            ups.map { u ->
+                u.name + ": " + runCatching {
+                    io.github.marsinsanity.mainui.store.EmulatorUpdates.install(u) { busy.text = it; host.invalidate() }
+                }.getOrElse { it.message ?: "failed" }
+            }
+        }) { results ->
+            host.pop(busy)
+            build()
+            if (results.size == 1 && results[0].endsWith("Confirm the installation")) return@io
+            host.push(DialogScene(host, "Emulator updates", results.joinToString("\n").take(360), "OK", null))
+        }
+    }
+
+    override fun onKey(b: Btn, repeat: Boolean): Boolean {
+        if (b == Btn.Y && !repeat) { check(); return true }
+        return super.onKey(b, repeat)
+    }
 }

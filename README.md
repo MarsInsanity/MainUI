@@ -249,6 +249,22 @@ Sources live in `emulators.json` (`"get"`), so they can be fixed in `MainUI/emul
 an update. An app installed from one source can't be updated from another (Android checks the
 signature); MainUI says so instead of offering it.
 
+### Emulator updates
+
+Settings > Emulators & cores > **Emulator updates** lists newer builds of the installed emulators and
+installs them (one, or *Update all*): silently with root, otherwise through Android's installer. With
+*Check automatically* (on), the home screen checks once a day and says when there are updates;
+Settings shows the count. Where each update comes from:
+
+- an **F-Droid compatible repository** with the same package signed like the installed app: its build
+  number against the installed one (repositories are refreshed first; unchanged indexes cost nothing);
+- **retroarch.com**: the newest stable version against the installed one (`1.22.2_GIT` reads as 1.22.2);
+- the project's **GitHub releases**: the release's version against the installed one, ignoring git
+  hashes (`0.2.0-3600-g1f2e3d4` is 0.2.0 build 3600). When the two can't be compared (a date tag against
+  a version number), a release published after the app was installed counts as newer.
+
+Apps installed by Google Play are left to it.
+
 ## RetroArch cores
 
 Settings > Emulators & cores > **RetroArch cores** lists installed cores and every core MainUI

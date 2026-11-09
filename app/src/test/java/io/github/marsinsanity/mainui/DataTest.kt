@@ -536,3 +536,28 @@ class HotkeysTest {
         assertNull(h.virtualKeys("keys:KEYCODE_BACK"))   // not on the virtual keyboard: sent with `input` instead
     }
 }
+
+class EmulatorUpdatesTest {
+    private val u = io.github.marsinsanity.mainui.store.EmulatorUpdates
+
+    @Test fun comparesVersionsNotText() {
+        assertEquals(true, u.isNewer("v1.6.7", "1.6.6"))
+        assertEquals(false, u.isNewer("1.6.7", "1.6.7"))
+        assertEquals(true, u.isNewer("1.22.2", "1.9.9"))
+        assertEquals(true, u.isNewer("1.18", "1.17.1"))
+        assertEquals(false, u.isNewer("1.17", "1.17.0"))
+        assertEquals(true, u.isNewer("2125.0", "2124.1"))
+    }
+
+    @Test fun ignoresGitHashesButNotBuildNumbers() {
+        assertEquals(listOf(0L, 2, 0, 3600), u.numbers("0.2.0-3600-g1f2e3d4"))
+        assertEquals(true, u.isNewer("v0.2.0-3611", "0.2.0-3600-g1f2e3d4"))
+        assertEquals(listOf(1L, 0, 20250425), u.numbers("1.0.20250425"))
+        assertEquals(true, u.isNewer("1.0.20250501", "1.0.20250425"))
+    }
+
+    @Test fun refusesToCompareDifferentSchemes() {
+        assertNull(u.isNewer("v20250425", "1.0"))        // a date tag against a version: decided by release date instead
+        assertNull(u.isNewer("continuous", "1.0"))
+    }
+}
