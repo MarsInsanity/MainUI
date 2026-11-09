@@ -137,6 +137,14 @@ class Pen:
                     xa, ya = x0 + i * cell, y0 + j * cell
                     self.rr(xa + 0.3, ya + 0.3, xa + cell - 0.3, ya + cell - 0.3, r=0.4, fill=ch == "X", soft=ch == "o")
 
+    def hinge(self, y_top, y_bot, half_w, knuckle=7):
+        """Clamshell hinge joining two halves: a knuckle at each end and the axis between."""
+        mid = (y_top + y_bot) / 2
+        self.ln((-half_w + knuckle, mid), (half_w - knuckle, mid), w=2.2)
+        for sx in (-1, 1):
+            x0 = sx * half_w - (knuckle if sx > 0 else 0)
+            self.rr(x0, y_top - 3, x0 + knuckle, y_bot + 3, 2.5, fill=True)
+
     def stick(self, x, y0, y1, ball=4.0, w=None):
         """Joystick: shaft from (x, y0) up to (x, y1) with a ball on top."""
         self.ln((x, y0), (x, y1), w=w or self.w * 0.9)
@@ -333,26 +341,28 @@ def gba(p):
 
 @glyph("nds")
 def nds(p):
-    p.rr(-36, -42, 36, -4, 6)
-    p.screen(-20, -36, 20, -10, r=1.5)
+    p.rr(-36, -42, 36, -5, 6)
+    p.screen(-20, -36, 20, -11, r=1.5)
     p.grid_dots(-30, -28, -26, -20, 2, 3, 0.9)            # speakers
     p.grid_dots(26, -28, 30, -20, 2, 3, 0.9)
-    p.rr(-36, 2, 36, 42, 6)
-    p.screen(-16, 8, 16, 34, r=1.5)
-    p.dpad(-27, 20, 4.5)
-    p.diamond(27, 20, 4, 1.5)
+    p.hinge(-5, 3, 30)
+    p.rr(-36, 3, 36, 42, 6)
+    p.screen(-16, 9, 16, 35, r=1.5)
+    p.dpad(-27, 21, 4.5)
+    p.diamond(27, 21, 4, 1.5)
 
 
 @glyph("3ds")
 def three_ds(p):
-    p.rr(-38, -42, 38, -4, 6)
-    p.screen(-28, -36, 28, -10, r=1.5, color=True)        # wide 3D screen
+    p.rr(-38, -42, 38, -5, 6)
+    p.screen(-28, -36, 28, -11, r=1.5, color=True)        # wide 3D screen
     p.ci(0, -39, 1.3, fill=True)
-    p.rr(-38, 2, 38, 42, 6)
-    p.screen(-16, 8, 16, 34, r=1.5)
-    p.ci(-28, 13, 4.6, w=2.0)                             # circle pad
-    p.dpad(-28, 30, 3.6)
-    p.diamond(28, 20, 4, 1.5)
+    p.hinge(-5, 3, 32)
+    p.rr(-38, 3, 38, 42, 6)
+    p.screen(-16, 9, 16, 35, r=1.5)
+    p.ci(-28, 14, 4.6, w=2.0)                             # circle pad
+    p.dpad(-28, 31, 3.6)
+    p.diamond(28, 21, 4, 1.5)
 
 
 @glyph("virtualboy")
