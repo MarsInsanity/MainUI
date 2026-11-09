@@ -1,0 +1,67 @@
+# Builds RetroArch cores the libretro buildbot doesn't build for Android, from
+# their source, and keeps them in the "cores" release, where MainUI downloads
+# them from (Settings > Emulators & cores > RetroArch cores).
+#
+#   yabadabadoo  Sega Saturn, github.com/ProRapSuperstarOriginalMaster/Yabadabadoo
+#                (its own releases are Miyoo / Linux builds Android can't load)
+#
+# Runs when this file or cores/ changes, weekly to pick up new upstream commits,
+# and by hand (Actions > Extra cores > Run workflow).
+name: Extra cores
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/cores.yml', 'cores/**']
+  schedule:
+    - cron: '23 5 * * 1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: extra-cores
+  cancel-in-progress: false
+
+jobs:
+  yabadabadoo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ProRapSuperstarOriginalMaster/Yabadabadoo
+          path: upstream
+
+      - name: Build with the Android NDK
+        working-directory: upstream/yabause/src/libretro
+        run: |
+          "$ANDROID_NDK_LATEST_HOME/ndk-build" -j"$(nproc)" NDK_PROJECT_PATH="$PWD" \
+            APP_BUILD_SCRIPT="$PWD/jni/Android.mk" NDK_APPLICATION_MK="$PWD/jni/Application.mk" \
+            APP_ABI="arm64-v8a armeabi-v7a x86_64"
+
+      - name: Package
+        run: |
+          src=upstream/yabause/src/libretro/libs
+          commit=$(git -C upstream rev-parse --short HEAD)
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            rm -rf pkg && mkdir pkg
+            cp "$src/$abi/libretro.so" pkg/yabadabadoo_libretro_android.so
+            cp cores/yabadabadoo_libretro.info pkg/
+            (cd pkg && zip -q -9 "../yabadabadoo_libretro_android-$abi.zip" *)
+          done
+          echo "- yabadabadoo: ProRapSuperstarOriginalMaster/Yabadabadoo at $commit, built $(date -u +%F)" > notes.md
+          ls -la *.zip
+
+      - name: Publish to the "cores" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view cores >/dev/null 2>&1; then
+            gh release create cores --title "Extra RetroArch cores" --latest=false --target "$GITHUB_SHA" \
+              --notes "RetroArch cores MainUI downloads that the libretro buildbot doesn't build for Android. Built from source by .github/workflows/cores.yml."
+          fi
+          gh release upload cores yabadabadoo_libretro_android-*.zip --clobber
+          gh release edit cores --notes-file notes.md --latest=false
