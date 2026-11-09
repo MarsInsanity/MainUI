@@ -184,3 +184,21 @@ class CoreFailureSummaryTest {
         assertEquals("2 failed:\nmgba: HTTP 404\nfbneo: No space left on device", r)
     }
 }
+
+class PlayStoreCoresTest {
+    private val f = io.github.marsinsanity.mainui.emu.RetroArchCores::playModuleCore
+
+    @Test fun coreModulesAreRecognized() {
+        assertEquals("mgba", f("core_mgba"))
+        assertEquals("fbneo", f("core_fbneo"))
+        assertEquals("mupen64plus_next_gles3", f("core_mupen64plus_next_gles3"))
+        assertEquals("mesen-s", f("core_mesen_s"))
+    }
+
+    @Test fun otherSplitsAreIgnored() {
+        assertNull(f("config.arm64_v8a"))
+        assertNull(f("core_mgba.config.arm64_v8a"))
+        assertNull(f("config.xhdpi"))
+        assertNull(f("core_"))
+    }
+}

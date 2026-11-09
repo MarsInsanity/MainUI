@@ -207,7 +207,7 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
         items += UiItem("Get emulators...", sub = "F-Droid, GitHub, retroarch.com", onSelect = { host.push(EmulatorStoreScene(host)) })
         items += UiItem("RetroArch cores", sub = when {
             ra == null -> "RetroArch not installed"
-            cores == null -> "${cores?.size ?: "?"} (root needed)"
+            cores == null -> if (io.github.marsinsanity.mainui.core.Root.knownAvailable()) "? (can't read RetroArch's folder)" else "? (root needed)"
             else -> "${cores.size} installed"
         }, onSelect = { if (ra != null) host.push(CoresScene(host)) else CoreInstall.offer(host, "mgba") })
         if (ra != null) items += action("Configure RetroArch for MainUI") {
@@ -288,7 +288,7 @@ class CoresScene(host: SceneHost) : ListScene(host, "RetroArch cores") {
         for (c in missing) if (c !in local) items += UiItem(em.coreDisplayName(c), sub = "A: get", data = c,
             onSelect = { CoreInstall.offer(host, c) { rescan() } })
         list.set(items)
-        title = "RetroArch cores (${installed.size})"
+        title = "RetroArch cores (${if (em.raCores == null) "?" else installed.size})"
     }
 
     /** Default RetroArch core of every system that has games but nothing installed to run them. */
