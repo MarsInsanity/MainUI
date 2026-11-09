@@ -1,5 +1,6 @@
 package io.github.marsinsanity.mainui.emu
 
+import io.github.marsinsanity.mainui.core.allGroups
 import android.content.Context
 import android.os.Build
 import android.util.Log
@@ -174,7 +175,7 @@ object RetroArchCores {
     /** Rows of the buildbot's h5ai folder page: name, "date time", "12.3 MB". */
     fun parseListing(html: String): List<Remote> =
         Regex("""<td class="fb-n"><a href="[^"]*?([A-Za-z0-9_+.-]+)_libretro_android\.so\.zip">[^<]*</a></td><td class="fb-d">([^<]*)</td><td class="fb-s">([^<]*)</td>""")
-            .findAll(html).map { m -> Remote(m.groupValues[1], m.groupValues[2].substringBefore(' '), parseSize(m.groupValues[3])) }
+            .allGroups(html).map { g -> Remote(g[1], g[2].substringBefore(' '), parseSize(g[3])) }
             .distinctBy { it.core }.toList()
 
     /** Lines of `.index-extended`: "2026-11-08 657995de mednafen_psx_hw_libretro_android.so.zip". */

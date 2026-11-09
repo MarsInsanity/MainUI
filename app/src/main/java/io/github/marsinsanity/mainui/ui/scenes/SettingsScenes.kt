@@ -76,6 +76,8 @@ class UiSettingsScene(host: SceneHost) : ListScene(host, "User interface") {
             multi("Background fit", listOf("cover" to "Crop", "stretch" to "Stretch", "fit" to "Fit"), { s.backgroundFit }) { s.backgroundFit = it },
             toggle("Smooth scaling", { s.smoothScaling }) { s.smoothScaling = it },
             toggle("Show clock", { s.showClock }) { s.showClock = it },
+            multi("Clock format", listOf("24" to "24-hour", "12" to "12-hour", "system" to "Like Android"),
+                { s.clockFormat }) { s.clockFormat = it },
             toggle("Menu sounds", { s.uiSounds }) { s.uiSounds = it; MainUI.themes.reloadSounds() },
             toggle("Theme background music", { s.bgm }) { s.bgm = it; MainUI.themes.reloadSounds() },
         ))

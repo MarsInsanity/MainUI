@@ -127,6 +127,10 @@ object Scraper {
                 if (!FreeArt.ensureLaunchBox({ st.message = it }, { cancel.get() })) { st.addLog("LaunchBox database unavailable"); fileLog("LaunchBox database unavailable") }
                 if (cancel.get()) { st.message = "Cancelled"; return }
             }
+            if (FreeArt.THEGAMESDB in free && jobs.any { TheGamesDb.supports(it.first.id) }) {
+                if (!FreeArt.ensureTheGamesDb({ st.message = it }, { cancel.get() })) { st.addLog("TheGamesDB unavailable"); fileLog("TheGamesDB unavailable") }
+                if (cancel.get()) { st.message = "Cancelled"; return }
+            }
             st.total = jobs.size
             if (jobs.isEmpty()) { st.message = "Nothing to scrape"; return }
 

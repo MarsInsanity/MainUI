@@ -263,7 +263,12 @@ class Gfx {
         if (title != null) text(title, theme.title, W / 2, 29f, Align.CENTER, maxW = W - 220f)
         if (showBattery) battery(W - 44f, 30f)
         if (MainUI.settings.showClock) {
-            val t = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            val h24 = when (MainUI.settings.clockFormat) {
+                "12" -> false
+                "system" -> android.text.format.DateFormat.is24HourFormat(MainUI.app)
+                else -> true
+            }
+            val t = SimpleDateFormat(if (h24) "HH:mm" else "h:mm a", Locale.getDefault()).format(Date())
             text(t, theme.battery.let { FontStyle(it.typeface, 22f, it.color) }, W - 84f, 30f, Align.RIGHT)
         }
     }
