@@ -42,7 +42,7 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
 | 1 | **OnionOS theme support** | Reads Onion `config.json` (title / hint / list / grid / currentpage / total / batteryPercentage / hideLabels / frame), with the same defaults and fallback rules as Onion's `theme_loadFromPath()`. Uses `skin/*.png`, `skin/extra/*`, `icons/*.png`, `icons/sel/*.png`, `icons/app/*.png`, `sound/change.wav`, `sound/bgm.mp3` and `preview.png`. Anything a theme lacks is drawn by MainUI so partial themes still look complete. |
 | 2 | **OnionOS layout** | Header and footer bars, 1x4 main menu that slides one tile at a time instead of paging (so no half-empty last page; one dot per tile), 4x2 games grid, 60 px small / 90 px large lists anchored like Onion's, `A SELECT  B BACK` hints, `n/total` status. Optional **row view**: the grid's own cells in one scrolling row, for the games screen and/or as the home screen. |
 | 3 | **dArkOS folder structure** | `roms/<system>/` with dArkOS folder names for 120+ systems (generated from the dArkOS wiki), plus `ps2`, `ps3`, `psvita`, `switch`, `xbox`, `wii`. **Create dArkOS folders** asks for Internal storage or SD card and only adds missing folders: existing rom folders are used as they are. Rom folders anywhere can be added with a folder browser. Artwork from `gamelist.xml`, `images/`, `media/images/`, `Imgs/` (Onion) and more, on either volume. Full `gamelist.xml` parser and writer, and **Logiqx DAT** (`.dat`, Skraper's generic profile) as an alternative or addition (Settings > Library > Game metadata). Folders without playable files (e.g. RetroArch's per-core save folders) are hidden. |
-| 4 | **Scraper** | ScreenScraper (multi-threaded: uses the `maxthreads` your account allows, honours per-minute limits, CRC/MD5/SHA1 matching, region and language priority, 8 media types) plus box art without an account from **GameTDB** and **libretro thumbnails**, matched exactly by CRC or the serial in the cartridge / disc header, then by strict title only. Saves images to the **SD card or internal storage** and updates `gamelist.xml`. Runs as a foreground service. |
+| 4 | **Scraper** | ScreenScraper (multi-threaded: uses the `maxthreads` your account allows, honours per-minute limits, CRC/MD5/SHA1 matching, region and language priority, 8 media types) plus box art without an account from **GameTDB**, **libretro thumbnails** and the **LaunchBox Games DB**, matched exactly by game id, CRC or the serial in the cartridge / disc header, then by strict title only. Saves images to the **SD card or internal storage** and updates `gamelist.xml`. Runs as a foreground service. |
 | 5 | **Emulator / core detection** | Detects RetroArch and its cores wherever they are: the `libretro_directory` from `retroarch.cfg`, `/data/data/<pkg>/cores`, the app's native libraries and split APKs (Play Store builds), re-checked when you come back to MainUI and before every launch. 25+ standalone emulators (ES-DE's launch rules). Per-system and per-game core selection like Onion (`SELECT` on a game > Core). **Missing cores are downloaded** from the libretro buildbot (same files as RetroArch's Online Updater) when you launch a game or pick one; *Get cores for my games* fetches one for every system that has roms but no core. Custom builds go in `MainUI/cores`. |
 | 6 | **Rom search** | Search tile in the games grid (or `Y` on most screens): on-screen keyboard (A types, B deletes, START or OK confirms, SELECT or CANCEL leaves without changes), results across every system and Android games. |
 | 7 | **Game Switcher** | Onion's GameSwitcher: full screen screenshots of recent games, `LEFT/RIGHT` browse, `A` resume, `X` remove, `Y` view mode, `SELECT` play time, `UP/DOWN` brightness, `gs-top-bar` / `gs-bottom-bar` / `gs-legend` / `lum0-10` theme art. |
@@ -272,32 +272,46 @@ Settings > **Scraper** fetches box art (and, from ScreenScraper, game informatio
 **All** (ScreenScraper first, then the free sources for whatever it lacks), **Free only** (no account
 needed) or **ScreenScraper**.
 
-### Free sources: GameTDB and libretro thumbnails
+### Free sources: GameTDB, libretro thumbnails, LaunchBox
 
-They need no account, and matching is built to be exact rather than to guess:
+*Box art sources* switches each source on or off; they are tried in this order: ScreenScraper,
+GameTDB, libretro, LaunchBox. The free ones need no account, and matching is built to be exact
+rather than to guess:
 
-1. **The dump is identified**, using libretro-database's No-Intro / Redump / FBNeo DATs (downloaded
-   once per system and refreshed monthly):
+1. **GameTDB** covers GameCube, Wii, DS, 3DS and PS3 by the game id in the disc or cartridge header
+   (GameCube / Wii .iso .rvz .wia .wbfs .ciso, DS game codes, 3DS product codes, PS3 title ids). For
+   GameCube / Wii the front is cut from the full HQ cover (483x680, three times the small cover's
+   resolution; the URLs Dolphin uses); DS / 3DS / PS3 get the HQ or medium cover.
+2. **libretro thumbnails**: the dump is identified with libretro-database's No-Intro / Redump / FBNeo
+   DATs (downloaded once per system, refreshed monthly):
    - by **CRC32**: of the file, or of the files inside a zip, read from the zip's index without unpacking;
    - by **serial / game id** read from the cartridge header or disc, which works on images far too
      big to checksum: GBA and DS game codes, N64 codes (any byte order), 3DS product codes,
-     GameCube / Wii disc ids (.iso, .rvz, .wia, .wbfs, .ciso), PS1 / PS2 `SYSTEM.CNF`, PSP
-     `UMD_DATA.BIN` / `PARAM.SFO`, PS1 EBOOT.PBP, PS3 title ids, Saturn / Dreamcast / Mega-CD headers;
+     GameCube / Wii disc ids, PS1 / PS2 `SYSTEM.CNF`, PSP `UMD_DATA.BIN` / `PARAM.SFO`, PS1 EBOOT.PBP,
+     PS3 title ids, Saturn / Dreamcast / Mega-CD headers;
    - arcade zips by their short name (`sf2.zip`) through the FBNeo DAT.
-   The canonical name is exactly what libretro's thumbnails are filed under.
-2. **Only if nothing identifies it**, the file name is matched by title, strictly: the same title
-   once case, punctuation and articles are ignored ("Legend of Zelda, The - A Link to the Past" =
-   "The Legend of Zelda: A Link to the Past"), never a neighbour ("Super Mario Bros. 2" never gets
-   "Super Mario Bros. 3"). Among same-title boxes the dump's own region wins, then *Region priority*.
-   Betas, demos, kiosk, prototype and hack boxes only go to dumps tagged the same way. No match means
-   no art, never a guess.
-3. **GameTDB** covers GameCube and Wii discs by disc id (the URL Dolphin uses).
+   The canonical name is exactly what libretro's thumbnails are filed under. Only if nothing
+   identifies the dump is its file name matched by title, strictly (below).
+3. **LaunchBox Games Database**: MainUI downloads its public `Metadata.zip` (about 110 MB, once a
+   month, skipped when unchanged) and keeps a small index per system (about 10 MB in all, front boxes
+   only); images come from images.launchbox-app.com (typically 800 px wide). A game is looked up by
+   title, using the canonical name when the dump was identified, against LaunchBox's names *and*
+   alternate names, so European and Japanese titles find their game ("4x4 World Trophy" is LaunchBox's
+   "Test Drive: Off-Road 3"). When two LaunchBox games share a title on one system (NES "Tetris"),
+   neither is used. The box is the dump's own region, then its continent (a French dump gets the
+   European box), then *Region priority*.
 
-Tested against libretro's real data: of the 3,498 GBA games and 10,086 PS1 discs in the DATs, an
-identified dump gets its exact box 87% / 86% of the time; the rest are boxes libretro doesn't have.
+Title matching ignores case, punctuation, accents and articles ("Legend of Zelda, The - A Link to the
+Past" = "The Legend of Zelda: A Link to the Past", "Pokémon" = "Pokemon"), and never takes a
+neighbour ("Super Mario Bros. 2" never gets "Super Mario Bros. 3"). Among same-title boxes the dump's
+own region wins; betas, demos, kiosk, prototype and hack boxes only go to dumps tagged the same way.
+No match means no art, never a guess.
 
-Images are written to `roms/<system>/images/<rom>.png` (*Save images to* picks SD card or internal
-storage), scaled to *Image size*, and the image path goes into `gamelist.xml`.
+Tested against real data: identified GBA / PS1 dumps get their exact libretro box 87% / 86% of the
+time; LaunchBox matches 93% of No-Intro's retail GBA titles and 85% of Redump's PS1 discs, all of the
+sampled matches being the right game.
+
+The Cover Project isn't a source: its site refuses automated clients.
 
 ### ScreenScraper
 

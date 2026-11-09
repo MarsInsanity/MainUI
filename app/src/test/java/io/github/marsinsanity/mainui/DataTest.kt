@@ -373,10 +373,142 @@ class BoxArtTest {
     }
 
     @Test fun gameTdbRegionsFollowTheDiscId() {
-        val r = io.github.marsinsanity.mainui.scraper.FreeArt.GameTdb::regions
+        val r = { id: String, prefs: List<String> -> io.github.marsinsanity.mainui.scraper.FreeArt.GameTdb.regions(id, prefs) }
         assertEquals("US", r("GALE01", emptyList()).first())
         assertEquals("JA", r("GALJ01", emptyList()).first())
         assertEquals("EN", r("RMGP01", emptyList()).first())
         assertEquals("DE", r("RSPD01", emptyList()).first())
+    }
+}
+
+class LaunchBoxTest {
+    private val lb = io.github.marsinsanity.mainui.scraper.LaunchBoxDb
+
+    private val xml = """<?xml version="1.0" standalone="yes"?>
+<LaunchBox>
+  <Game>
+    <Name>Legend of Zelda: The Minish Cap</Name>
+    <Overview>A line
+    <Name>is escaped in real files, so this can't happen</Name> but even so it is ignored after Name was set
+More text &amp; more.</Overview>
+    <DatabaseID>10</DatabaseID>
+    <Platform>Nintendo Game Boy Advance</Platform>
+  </Game>
+  <Game>
+    <Name>Tetris</Name>
+    <DatabaseID>20</DatabaseID>
+    <Platform>Nintendo Entertainment System</Platform>
+  </Game>
+  <Game>
+    <Name>Tetris</Name>
+    <DatabaseID>21</DatabaseID>
+    <Platform>Nintendo Entertainment System</Platform>
+  </Game>
+  <Game>
+    <Name>Test Drive: Off-Road 3</Name>
+    <DatabaseID>30</DatabaseID>
+    <Platform>Sony Playstation</Platform>
+  </Game>
+  <Game>
+    <Name>Some PC Game</Name>
+    <DatabaseID>40</DatabaseID>
+    <Platform>Windows</Platform>
+  </Game>
+  <Platform>
+    <Name>Nintendo Game Boy Advance</Name>
+  </Platform>
+  <GameAlternateName>
+    <AlternateName>4x4 World Trophy</AlternateName>
+    <DatabaseID>30</DatabaseID>
+  </GameAlternateName>
+  <GameImage>
+    <DatabaseID>10</DatabaseID>
+    <FileName>zelda-us.jpg</FileName>
+    <Type>Box - Front</Type>
+    <Region>North America</Region>
+  </GameImage>
+  <GameImage>
+    <DatabaseID>10</DatabaseID>
+    <FileName>zelda-eu.jpg</FileName>
+    <Type>Box - Front</Type>
+    <Region>Europe</Region>
+  </GameImage>
+  <GameImage>
+    <DatabaseID>10</DatabaseID>
+    <FileName>zelda-shot.jpg</FileName>
+    <Type>Screenshot - Gameplay</Type>
+  </GameImage>
+  <GameImage>
+    <DatabaseID>20</DatabaseID>
+    <FileName>tetris-a.jpg</FileName>
+    <Type>Box - Front</Type>
+  </GameImage>
+  <GameImage>
+    <DatabaseID>21</DatabaseID>
+    <FileName>tetris-b.jpg</FileName>
+    <Type>Box - Front</Type>
+  </GameImage>
+  <GameImage>
+    <DatabaseID>30</DatabaseID>
+    <FileName>td-eu.jpg</FileName>
+    <Type>Box - Front</Type>
+    <Region>Europe</Region>
+  </GameImage>
+  <GameImage>
+    <DatabaseID>30</DatabaseID>
+    <FileName>td-us.jpg</FileName>
+    <Type>Box - Front</Type>
+    <Region>North America</Region>
+  </GameImage>
+</LaunchBox>
+"""
+
+    private fun build(): Map<String, io.github.marsinsanity.mainui.scraper.LaunchBoxDb.Lookup> {
+        val dir = java.nio.file.Files.createTempDirectory("lb").toFile()
+        try {
+            val counts = lb.buildIndex(xml.reader().buffered(), setOf("Nintendo Game Boy Advance", "Nintendo Entertainment System", "Sony Playstation"), dir)
+            assertEquals(mapOf("Nintendo Game Boy Advance" to 1, "Nintendo Entertainment System" to 2, "Sony Playstation" to 1), counts)
+            return counts.keys.associateWith { p -> io.github.marsinsanity.mainui.scraper.LaunchBoxDb.Lookup(lb.parseIndex(java.io.File(dir, lb.fileName(p)).readLines().asSequence())) }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun matchesByTitleAndAlternateName() {
+        val l = build()
+        val zelda = l.getValue("Nintendo Game Boy Advance").find("Legend of Zelda, The - The Minish Cap (USA)")!!
+        assertEquals("10", zelda.id)
+        assertEquals(listOf("North America" to "zelda-us.jpg", "Europe" to "zelda-eu.jpg"), zelda.boxes)   // screenshots dropped
+        // The European name of the same game is a LaunchBox alternate name.
+        assertEquals("30", l.getValue("Sony Playstation").find("4x4 World Trophy (Europe) (En,Fr,De,Es,It)")?.id)
+    }
+
+    @Test fun twoGamesWithOneTitleAreNotGuessed() {
+        assertNull(build().getValue("Nintendo Entertainment System").find("Tetris (USA)"))
+    }
+
+    @Test fun picksTheDumpsRegionThenItsContinentThenPreferences() {
+        val g = build().getValue("Sony Playstation").find("4x4 World Trophy")!!
+        assertEquals("td-eu.jpg", lb.pickBox(g, "4x4 World Trophy (Europe)", listOf("USA")))
+        assertEquals("td-eu.jpg", lb.pickBox(g, "4x4 World Trophy (France)", listOf("USA")))   // France -> Europe before USA
+        assertEquals("td-us.jpg", lb.pickBox(g, "4x4 World Trophy", listOf("USA", "Europe")))
+    }
+
+    @Test fun decodesEntities() {
+        assertEquals("Ratchet & Clank <3 \"Q\" 'A' é", lb.unescape("Ratchet &amp; Clank &lt;3 &quot;Q&quot; &apos;A&apos; &#233;"))
+    }
+
+    @Test fun accentsDontMatter() {
+        val m = io.github.marsinsanity.mainui.scraper.BoxArtMatch
+        assertEquals(m.title("Pokémon Snap"), m.title("Pokemon Snap (USA)"))
+    }
+
+    @Test fun gameTdbUrlsPerPlatform() {
+        val t = io.github.marsinsanity.mainui.scraper.FreeArt.GameTdb
+        val wii = t.urls("B", "wii", "RMGE01", 640, emptyList())
+        assertEquals("B/wii/coverfullHQ/US/RMGE01.png" to true, wii.first())
+        assertTrue(wii.contains("B/wii/cover/US/RMGE01.png" to false))
+        assertEquals("B/ds/coverHQ/US/AMCE.jpg" to false, t.urls("B", "nds", "AMCE", 640, emptyList()).first())
+        assertEquals("B/ds/coverM/EN/AMCP.jpg" to false, t.urls("B", "nds", "AMCP", 320, emptyList()).first())
+        assertEquals("B/ps3/coverHQ/EN/BLES00687.jpg" to false, t.urls("B", "ps3", "BLES00687", 0, emptyList()).first())
+        assertEquals("JA", t.regions("BLJM60001", emptyList(), ps3 = true).first())
     }
 }

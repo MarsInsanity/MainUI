@@ -9,6 +9,7 @@ import io.github.marsinsanity.mainui.service.ScraperService
 import io.github.marsinsanity.mainui.ui.Align
 import io.github.marsinsanity.mainui.ui.Btn
 import io.github.marsinsanity.mainui.ui.Gfx
+import io.github.marsinsanity.mainui.ui.ItemType
 import io.github.marsinsanity.mainui.ui.KeyboardScene
 import io.github.marsinsanity.mainui.ui.ListScene
 import io.github.marsinsanity.mainui.ui.Scene
@@ -31,8 +32,10 @@ class ScraperScene(host: SceneHost, private val systems: List<String>?) :
         val items = mutableListOf(
             UiItem(if (ScrapeState.running) "Show progress" else "Start scraping", onSelect = {
                 if (!ScrapeState.running) {
-                    if (s.artSources == "ss" && !ScreenScraper.hasDevCredentials()) {
-                        host.toast("Enter a ScreenScraper developer ID first, or choose free box art sources", 3000); return@UiItem
+                    val sources = s.artSources.split(',').filter { it.isNotBlank() }
+                    if (sources.isEmpty()) { host.toast("Turn on a box art source first", 2500); return@UiItem }
+                    if (sources == listOf("ss") && !ScreenScraper.hasDevCredentials()) {
+                        host.toast("Enter a ScreenScraper developer ID first, or turn on a free box art source", 3000); return@UiItem
                     }
                     ScraperService.start(host.hostContext, systems)
                 }
@@ -42,11 +45,7 @@ class ScraperScene(host: SceneHost, private val systems: List<String>?) :
         if (ScrapeState.running) items += UiItem(if (Scraper.stopping) "Stopping..." else "Stop scraping",
             disabled = Scraper.stopping, onSelect = { ScraperProgressScene.confirmStop(host) { build() } })
         items += listOf(
-            multi("Box art sources", listOf(
-                "ss,gametdb,libretro" to "All",
-                "gametdb,libretro" to "Free only",
-                "ss" to "ScreenScraper",
-            ), { s.artSources }) { s.artSources = it },
+            action("Box art sources", ArtSourcesScene.summary()) { host.push(ArtSourcesScene(host)) },
             action("Username", s.ssUser.ifBlank { "(anonymous: 1 thread)" }) {
                 host.push(KeyboardScene(host, "ScreenScraper username", s.ssUser) { v -> s.ssUser = v.trim(); build() })
             },
@@ -140,5 +139,45 @@ class ScraperProgressScene(host: SceneHost) : Scene(host) {
                 then()
             })
         }
+    }
+}
+
+/** Scraper > Box art sources: each source on or off; they are tried in this order. */
+class ArtSourcesScene(host: SceneHost) : ListScene(host, "Box art sources") {
+    override val showPreview = false
+
+    companion object {
+        private val ORDER = listOf("ss", "gametdb", "libretro", "launchbox")
+        private val NAMES = mapOf("ss" to "ScreenScraper", "gametdb" to "GameTDB", "libretro" to "libretro", "launchbox" to "LaunchBox")
+
+        fun summary(): String = MainUI.settings.artSources.split(',').mapNotNull { NAMES[it.trim()] }.joinToString(", ").ifEmpty { "none" }
+    }
+
+    override fun onEnter() = build()
+    override fun onResume() = build()
+
+    private fun enabled() = MainUI.settings.artSources.split(',').map { it.trim() }.toSet()
+
+    private fun set(id: String, on: Boolean) {
+        val now = enabled().let { if (on) it + id else it - id }
+        MainUI.settings.artSources = ORDER.filter { it in now }.joinToString(",")
+    }
+
+    private fun build() {
+        val ssReady = ScreenScraper.hasDevCredentials()
+        list.set(listOf(
+            UiItem("ScreenScraper", ItemType.TOGGLE, value = if ("ss" in enabled()) 1 else 0,
+                sub = if (ssReady) "art + game info" else "needs developer ID",
+                onChange = { set("ss", it.value == 1) }),
+            UiItem("GameTDB", ItemType.TOGGLE, value = if ("gametdb" in enabled()) 1 else 0,
+                sub = "by game ID",
+                onChange = { set("gametdb", it.value == 1) }),
+            UiItem("libretro thumbnails", ItemType.TOGGLE, value = if ("libretro" in enabled()) 1 else 0,
+                sub = "by checksum",
+                onChange = { set("libretro", it.value == 1) }),
+            UiItem("LaunchBox Games DB", ItemType.TOGGLE, value = if ("launchbox" in enabled()) 1 else 0,
+                sub = "by title, 110 MB",
+                onChange = { set("launchbox", it.value == 1) }),
+        ))
     }
 }

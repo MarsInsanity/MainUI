@@ -14,15 +14,19 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Box art from sources that need no account:
- *  - GameTDB (GameCube / Wii): the cover for the disc id read from the image, the same
- *    URL Dolphin uses.
+ *  - GameTDB (GameCube, Wii, DS, 3DS, PS3): the cover for the game id read from the disc /
+ *    cartridge header (or PS3 title id). GameCube / Wii use the front of the full cover
+ *    (3x the small cover's resolution), the URLs Dolphin uses.
  *  - libretro thumbnails: the dump is identified exactly through libretro-database
  *    (CRC, serial or dump name -> canonical No-Intro / Redump / FBNeo name), and only
  *    when nothing identifies it, matched by title with [BoxArtMatch]'s strict rules.
+ *  - LaunchBox Games Database: matched by title (the canonical name when the dump was
+ *    identified) against names and alternate names; ambiguous titles are skipped.
  */
 object FreeArt {
     const val GAMETDB = "gametdb"
     const val LIBRETRO = "libretro"
+    const val LAUNCHBOX = "launchbox"
     private const val TAG = "MainUI.FreeArt"
     private const val DAT_MAX_AGE = 30L * 24 * 3600 * 1000
     private const val INDEX_MAX_AGE = 7L * 24 * 3600 * 1000
@@ -44,15 +48,20 @@ object FreeArt {
         ?: "https://thumbnails.libretro.com/${enc(set)}/Named_Boxarts/"
     private fun thumbGithub(set: String, name: String) =
         "https://raw.githubusercontent.com/libretro-thumbnails/${set.replace(' ', '_')}/HEAD/Named_Boxarts/${enc(name)}.png"
-    private fun gametdb(region: String, id: String) = (testBase?.let { "$it/gametdb" } ?: "https://art.gametdb.com") + "/wii/cover/$region/$id.png"
+    private val gametdbBase get() = testBase?.let { "$it/gametdb" } ?: "https://art.gametdb.com"
+    private fun launchBoxImage(file: String) = testBase?.let { "$it/launchbox-images/$file" } ?: "https://images.launchbox-app.com/$file"
+    private val launchBoxMetadata get() = testBase?.let { "$it/launchbox/Metadata.zip" } ?: "https://gamesdb.launchbox-app.com/Metadata.zip"
 
     fun supports(sources: List<String>, systemId: String) =
-        (GAMETDB in sources && GameTdb.supports(systemId)) || (LIBRETRO in sources && LibretroDb.supports(systemId))
+        (GAMETDB in sources && GameTdb.supports(systemId)) || (LIBRETRO in sources && LibretroDb.supports(systemId)) ||
+            (LAUNCHBOX in sources && LaunchBoxDb.supports(systemId))
 
-    /** Per scraping run: DATs and thumbnail lists are loaded once per system. */
+    /** Per scraping run: DATs, thumbnail lists and LaunchBox indexes are loaded once per system. */
     class Session(val sources: List<String>, val prefs: List<String>) {
         internal val dats = ConcurrentHashMap<String, Any>()
         internal val indexes = ConcurrentHashMap<String, Any>()
+        internal val lookups = ConcurrentHashMap<String, Any>()
+        internal val identified = ConcurrentHashMap<String, List<String>>()
     }
 
     private object None
@@ -62,22 +71,95 @@ object FreeArt {
      * Returns the source's name, or null when no source has this game.
      */
     fun find(s: Session, systemId: String, file: File, dest: File, maxWidth: Int, crc: String? = null): String? {
+        // Canonical names, once per file (libretro and LaunchBox both use them).
+        fun identified(): List<String> = s.identified.computeIfAbsent(file.path) {
+            LibretroDb.SYSTEMS[systemId]?.let { identify(s, it, systemId, file, crc) } ?: emptyList()
+        }
         for (src in s.sources) {
             when (src) {
                 GAMETDB -> if (GameTdb.supports(systemId)) {
-                    val id = runCatching { RomIdent.discId6(file) }.getOrNull() ?: continue
-                    for (region in GameTdb.regions(id, s.prefs)) if (saveImage(gametdb(region, id), dest, maxWidth)) return "GameTDB"
+                    val id = runCatching { GameTdb.id(file, systemId) }.getOrNull() ?: continue
+                    for ((url, wrap) in GameTdb.urls(gametdbBase, systemId, id, maxWidth, s.prefs))
+                        if (saveImage(url, dest, maxWidth, frontOfWrap = wrap)) return "GameTDB"
                 }
                 LIBRETRO -> {
                     val lsrc = LibretroDb.SYSTEMS[systemId] ?: continue
-                    val identified = identify(s, lsrc, systemId, file, crc)
-                    val name = BoxArtMatch.pick(identified, file.nameWithoutExtension, index(s, lsrc.thumbs), s.prefs) ?: continue
+                    val name = BoxArtMatch.pick(identified(), file.nameWithoutExtension, index(s, lsrc.thumbs), s.prefs) ?: continue
                     if (saveImage(thumbDir(lsrc.thumbs) + enc(name) + ".png", dest, maxWidth) ||
                         (testBase == null && saveImage(thumbGithub(lsrc.thumbs, name), dest, maxWidth))) return "libretro"
+                }
+                LAUNCHBOX -> {
+                    val lookup = launchBoxLookup(s, systemId) ?: continue
+                    // The identified (canonical) name says exactly which game; else the file name.
+                    val source = identified().firstOrNull() ?: file.nameWithoutExtension
+                    val game = lookup.find(source) ?: (if (source != file.nameWithoutExtension) lookup.find(file.nameWithoutExtension) else null)
+                        ?: continue
+                    val box = LaunchBoxDb.pickBox(game, source, s.prefs) ?: continue
+                    if (saveImage(launchBoxImage(box), dest, maxWidth)) return "LaunchBox"
                 }
             }
         }
         return null
+    }
+
+    // ---- LaunchBox -----------------------------------------------------------------------------
+
+    private const val LAUNCHBOX_MAX_AGE = 30L * 24 * 3600 * 1000
+    private val launchBoxDir get() = MainUI.storage.dataDir("cache/launchbox")
+
+    /** The platform indexes for [systemId] as one lookup; null when there is no index (yet). */
+    private fun launchBoxLookup(s: Session, systemId: String): LaunchBoxDb.Lookup? = s.lookups.computeIfAbsent(systemId) {
+        val dir = File(launchBoxDir, "index")
+        val games = LaunchBoxDb.PLATFORMS[systemId].orEmpty().flatMap { p ->
+            val f = File(dir, LaunchBoxDb.fileName(p))
+            if (f.isFile) f.bufferedReader().useLines { LaunchBoxDb.parseIndex(it) } else emptyList()
+        }
+        if (games.isEmpty()) None else LaunchBoxDb.Lookup(games)
+    } as? LaunchBoxDb.Lookup
+
+    /**
+     * Makes sure the LaunchBox indexes exist and are at most a month old: downloads
+     * Metadata.zip (about 110 MB; skipped when unchanged) and reads it into per-platform
+     * indexes, then deletes it. [progress] gets messages for the UI. False when it failed
+     * (or was [cancelled]) and there is no older index to use.
+     */
+    fun ensureLaunchBox(progress: (String) -> Unit, cancelled: () -> Boolean): Boolean {
+        val dir = launchBoxDir
+        val index = File(dir, "index")
+        val stamp = File(dir, "metadata.lastmodified")
+        val have = index.isDirectory && (index.list()?.isNotEmpty() == true)
+        if (have && System.currentTimeMillis() - stamp.lastModified() < LAUNCHBOX_MAX_AGE) return true
+        val zip = File(dir, "Metadata.zip")
+        return try {
+            progress("Downloading the LaunchBox database...")
+            val info = Http.downloadFast(launchBoxMetadata, zip,
+                ifModifiedSince = if (have) stamp.takeIf { it.isFile }?.readText()?.trim()?.ifEmpty { null } else null) { done, total ->
+                progress("Downloading the LaunchBox database: ${done shr 20} / ${if (total > 0) total shr 20 else "?"} MB")
+            }
+            if (info.notModified) { stamp.setLastModified(System.currentTimeMillis()); return true }
+            if (cancelled()) return have
+            val tmp = File(dir, "index.new").apply { deleteRecursively() }
+            java.util.zip.ZipFile(zip).use { z ->
+                val e = z.getEntry("Metadata.xml") ?: throw java.io.IOException("Metadata.xml missing")
+                val size = e.size.coerceAtLeast(1)
+                java.io.BufferedReader(java.io.InputStreamReader(z.getInputStream(e), Charsets.UTF_8), 1 shl 16).use { r ->
+                    val counts = LaunchBoxDb.buildIndex(r, LaunchBoxDb.PLATFORMS.values.flatten().toSet(), tmp) { read ->
+                        progress("Reading the LaunchBox database: ${(read * 100 / size).coerceAtMost(99)}%")
+                    }
+                    Log.i(TAG, "LaunchBox index: ${counts.values.sum()} games on ${counts.size} platforms")
+                }
+            }
+            index.deleteRecursively()
+            if (!tmp.renameTo(index)) { tmp.copyRecursively(index, true); tmp.deleteRecursively() }
+            stamp.writeText(info.lastModified ?: "")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "LaunchBox database: ${e.message}")
+            have
+        } finally {
+            zip.delete()
+            File(dir, "Metadata.zip.part").delete()
+        }
     }
 
     /** Canonical names for the dump: by CRC, then serial, then its file name in the DAT. */
@@ -129,8 +211,12 @@ object FreeArt {
             .map { it.removePrefix("Named_Boxarts/").removeSuffix(".png") }.toHashSet()
     }
 
-    /** Downloads an image and saves it as PNG, scaled down to [maxWidth]. False when it isn't there. */
-    private fun saveImage(url: String, dest: File, maxWidth: Int, depth: Int = 0): Boolean {
+    /**
+     * Downloads an image and saves it as PNG, scaled down to [maxWidth]. False when it isn't there.
+     * [frontOfWrap]: the image is a full cover (back, spine, front): keep the front, the right
+     * part as wide as a case front is for that height (135 x 190 mm).
+     */
+    private fun saveImage(url: String, dest: File, maxWidth: Int, depth: Int = 0, frontOfWrap: Boolean = false): Boolean {
         val tmp = File(dest.parentFile, dest.name + ".dl")
         return try {
             dest.parentFile?.mkdirs()
@@ -143,8 +229,13 @@ object FreeArt {
                 return depth < 2 && link.endsWith(".png", true) && '\n' !in link &&
                     saveImage(java.net.URL(java.net.URL(url), link.split('/').joinToString("/") { enc(it) }).toString(), dest, maxWidth, depth + 1)
             }
-            if (maxWidth in 1 until bounds.outWidth || !url.endsWith(".png", true)) {
-                val bmp = BitmapFactory.decodeFile(tmp.path) ?: return false
+            if (frontOfWrap && bounds.outWidth < bounds.outHeight * 1.2) return false   // not a full cover
+            if (frontOfWrap || maxWidth in 1 until bounds.outWidth || !url.endsWith(".png", true)) {
+                var bmp = BitmapFactory.decodeFile(tmp.path) ?: return false
+                if (frontOfWrap) {
+                    val fw = (bmp.height * 135 / 190).coerceAtMost(bmp.width)
+                    bmp = Bitmap.createBitmap(bmp, bmp.width - fw, 0, fw, bmp.height)
+                }
                 val out = if (maxWidth in 1 until bmp.width)
                     Bitmap.createScaledBitmap(bmp, maxWidth, (bmp.height.toLong() * maxWidth / bmp.width).toInt().coerceAtLeast(1), true)
                 else bmp
@@ -160,20 +251,49 @@ object FreeArt {
         }
     }
 
-    /** GameTDB covers for GameCube and Wii discs, by disc id. */
+    /** GameTDB covers by game id: GameCube / Wii discs, DS / 3DS cartridges, PS3 title ids. */
     object GameTdb {
-        fun supports(systemId: String) = systemId == "gc" || systemId == "wii"
+        fun supports(systemId: String) = systemId in setOf("gc", "wii", "nds", "3ds", "ps3")
+
+        /** GameTDB's id for the game: 6 character disc id, 4 character game code, or PS3 title id. */
+        fun id(file: File, systemId: String): String? = when (systemId) {
+            "gc", "wii" -> RomIdent.discId6(file)
+            "nds" -> RomIdent.serials(file, "nds").firstOrNull()
+            "3ds" -> RomIdent.serials(file, "3ds").firstOrNull()?.takeLast(4)
+            "ps3" -> io.github.marsinsanity.mainui.emu.Ps3Games.titleId(file)
+            else -> null
+        }
 
         /**
-         * Cover regions to try for a disc id: the one its 4th character means (as Dolphin
-         * picks it: E -> US, J -> JA, W -> ZH, K -> KO, PAL letters -> their language),
-         * then English, US and Japanese covers.
+         * Image URLs to try, best first, with whether each is a full cover to cut the front from.
+         * GameCube / Wii: the full HQ cover (1024x680; its front is 483x680), then the 160x224 front.
+         * DS / 3DS / PS3: coverHQ (about 800 px) when a large image is wanted, coverM (about 400), cover (160).
          */
-        fun regions(id: String, prefs: List<String>): List<String> {
-            val own = when (id.getOrNull(3)) {
+        fun urls(base: String, systemId: String, id: String, maxWidth: Int, prefs: List<String>): List<Pair<String, Boolean>> {
+            val regions = regions(id, prefs, ps3 = systemId == "ps3")
+            return when (systemId) {
+                "gc", "wii" -> regions.map { "$base/wii/coverfullHQ/$it/$id.png" to true } + regions.map { "$base/wii/cover/$it/$id.png" to false }
+                else -> {
+                    val platform = when (systemId) { "nds" -> "ds"; else -> systemId }
+                    val types = if (maxWidth in 1..400) listOf("coverM", "coverHQ", "cover") else listOf("coverHQ", "coverM", "cover")
+                    types.flatMap { t -> regions.map { r -> "$base/$platform/$t/$r/$id.jpg" to false } }
+                }
+            }
+        }
+
+        /**
+         * Cover regions to try for an id: the one it means (as Dolphin picks it for discs:
+         * E -> US, J -> JA, W -> ZH, K -> KO, PAL letters -> their language; for PS3 the third
+         * letter: BLUS -> US, BLES -> EN, BLJM -> JA...), then English, US and Japanese covers.
+         */
+        fun regions(id: String, prefs: List<String>, ps3: Boolean = false): List<String> {
+            val own = if (ps3) when (id.getOrNull(2)) {
+                'U' -> "US"; 'E' -> "EN"; 'J', 'P' -> "JA"; 'K' -> "KO"; 'A', 'H', 'C' -> "ZH"
+                else -> null
+            } else when (id.getOrNull(3)) {
                 'E', 'N' -> "US"
                 'J' -> "JA"
-                'W' -> "ZH"
+                'W', 'C' -> "ZH"
                 'K', 'Q', 'T' -> "KO"
                 'D' -> "DE"; 'F' -> "FR"; 'S' -> "ES"; 'I' -> "IT"; 'H' -> "NL"
                 'P', 'X', 'Y', 'Z', 'U', 'V' -> "EN"
