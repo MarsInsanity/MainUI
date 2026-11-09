@@ -254,11 +254,12 @@ root, recognizes the installed modules.
 arm64, roughly 0.9 GB to download): it shows the count and size first, warns if storage looks too
 small, installs three at a time, and B stops it after the cores in progress.
 
-Cores that aren't on the buildbot can be installed from **`MainUI/cores`**: drop
-`<name>_libretro_android.so` (or a `.zip` of it, optionally with `<name>_libretro.info`) there and it
-appears in the list. Example: **Yabadabadoo** (a Saturn core tuned for the Miyoo Mini) is listed for
-Saturn; its releases are Miyoo (Linux) builds that Android can't load, but its source builds for
-Android with the NDK (`yabause/src/libretro`, `ndk-build`).
+**Yabadabadoo** (a Saturn core tuned for the Miyoo Mini) isn't on the buildbot, and its own releases are
+Miyoo (Linux) builds Android can't load, so MainUI's GitHub Actions build it for Android from its source
+(`.github/workflows/cores.yml`, weekly and on demand) into this repository's **`cores`** release; MainUI
+downloads it from there like any other core. Other cores that aren't on the buildbot can be installed
+from **`MainUI/cores`**: drop `<name>_libretro_android.so` (or a `.zip` of it, optionally with
+`<name>_libretro.info`) there and it appears in the list.
 
 ## Scraper
 

@@ -144,7 +144,17 @@ object RetroArchCores {
         }
     }
 
-    fun downloadUrl(abi: String, core: String) = "$buildbot/$abi/$core$SUFFIX.zip"
+    /**
+     * Cores the libretro buildbot doesn't build for Android. MainUI's GitHub Actions build them
+     * from source (.github/workflows/cores.yml) into the "cores" release of MainUI's repository.
+     */
+    val EXTRA_CORES = mapOf("yabadabadoo" to "ProRapSuperstarOriginalMaster/Yabadabadoo")
+
+    fun downloadUrl(abi: String, core: String) = when {
+        core !in EXTRA_CORES -> "$buildbot/$abi/$core$SUFFIX.zip"
+        buildbot != BUILDBOT -> "$buildbot/extra/$core${SUFFIX}-$abi.zip"      // debug mirror
+        else -> "https://github.com/${BuildConfig.UPDATE_REPO}/releases/download/cores/$core${SUFFIX}-$abi.zip"
+    }
 
     /** A core the buildbot offers: name, build date and download size (0 = unknown). */
     data class Remote(val core: String, val date: String, val bytes: Long)
@@ -156,11 +166,9 @@ object RetroArchCores {
      */
     fun listRemote(abi: String): List<Remote> {
         val page = runCatching { Http.text("$buildbot/$abi/") }.getOrNull()
-        if (page != null) {
-            val rows = parseListing(page)
-            if (rows.isNotEmpty()) return rows
-        }
-        return parseIndexExtended(Http.text("$buildbot/$abi/.index-extended"))
+        val rows = page?.let { parseListing(it) }?.takeIf { it.isNotEmpty() }
+            ?: parseIndexExtended(Http.text("$buildbot/$abi/.index-extended"))
+        return rows + EXTRA_CORES.keys.filter { c -> rows.none { it.core == c } }.map { Remote(it, "", 0) }
     }
 
     /** Rows of the buildbot's h5ai folder page: name, "date time", "12.3 MB". */
@@ -186,7 +194,8 @@ object RetroArchCores {
 
     /**
      * Downloads [core] from the libretro buildbot (the same files RetroArch's
-     * Online Updater installs) and installs it. Needs root. Returns the installed path.
+     * Online Updater installs), or from MainUI's "cores" release for [EXTRA_CORES],
+     * and installs it. Needs root. Returns the installed path.
      */
     fun install(ctx: Context, pkg: String, coreDir: String, core: String, progress: (String) -> Unit): String {
         requireRoot()

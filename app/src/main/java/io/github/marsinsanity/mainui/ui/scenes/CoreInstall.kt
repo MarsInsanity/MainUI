@@ -33,18 +33,15 @@ object CoreInstall {
                 local != null -> host.push(DialogScene(host, "Install core",
                     "$name is not installed in RetroArch.\nInstall it from ${local.name} in MainUI/cores?",
                     "INSTALL", "CANCEL") { install(host, listOf(core), then) })
-                core in NOT_ON_BUILDBOT -> host.push(DialogScene(host, "Core not installed",
-                    "$name is not on the libretro buildbot. Put its Android build ($core${io.github.marsinsanity.mainui.emu.RetroArchCores.SUFFIX}, or a .zip of it) in MainUI/cores, then try again.",
-                    "OK", null))
+                core in io.github.marsinsanity.mainui.emu.RetroArchCores.EXTRA_CORES -> host.push(DialogScene(host, "Core not installed",
+                    "$name is not installed in RetroArch.\nDownload MainUI's Android build of it (made from its source on GitHub)?",
+                    "DOWNLOAD", "CANCEL") { install(host, listOf(core), then) })
                 else -> host.push(DialogScene(host, "Core not installed",
                     "$name is not installed in RetroArch.\nDownload it now from the libretro buildbot (the same source as RetroArch's Online Updater)?",
                     "DOWNLOAD", "CANCEL") { install(host, listOf(core), then) })
             }
         }
     }
-
-    /** Cores MainUI knows about that the libretro buildbot doesn't build for Android. */
-    val NOT_ON_BUILDBOT = setOf("yabadabadoo")
 
     /** Downloads [cores] one after another with a progress panel. */
     fun install(host: SceneHost, cores: List<String>, then: (() -> Unit)? = null) {
