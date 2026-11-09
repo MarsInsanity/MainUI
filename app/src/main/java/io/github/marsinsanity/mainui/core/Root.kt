@@ -173,20 +173,119 @@ object Root {
 
     fun listDir(path: String): List<String> = exec("ls -1 ${q(path)} 2>/dev/null").lines
 
-    fun readFile(path: String): String? = exec("cat ${q(path)}").takeIf { it.ok }?.out
+    /**
+     * The same file seen without Android's storage layers: /storage/emulated/N/x is
+     * /data/media/N/x, and an SD card /storage/XXXX-XXXX/x is /mnt/media_rw/XXXX-XXXX/x.
+     * Root can always reach these, whatever mount namespace `su` puts it in and
+     * however the shared-storage (FUSE) layer treats other apps' Android/data folders.
+     */
+    fun lowerPaths(path: String): List<String> {
+        val out = mutableListOf(path)
+        Regex("^/(?:storage|sdcard)/emulated/(\\d+)/(.*)$").find(path)?.let { m ->
+            out += "/data/media/${m.groupValues[1]}/${m.groupValues[2]}"
+        }
+        if (path.startsWith("/sdcard/")) out += "/data/media/0/" + path.removePrefix("/sdcard/")
+        Regex("^/storage/([0-9A-Fa-f]{4}-[0-9A-Fa-f]{4})/(.*)$").find(path)?.let { m ->
+            out += "/mnt/media_rw/${m.groupValues[1]}/${m.groupValues[2]}"
+        }
+        return out.distinct()
+    }
+
+    /** Runs [cmd] as root and returns its exit code and raw stdout bytes. */
+    fun execBytes(cmd: String, timeoutSec: Long = 20): Pair<Int, ByteArray> {
+        return try {
+            val p = ProcessBuilder(*rootArgv(cmd)).start()
+            var bytes = ByteArray(0)
+            val tOut = Thread { bytes = runCatching { p.inputStream.readBytes() }.getOrDefault(ByteArray(0)) }
+            val tErr = Thread { runCatching { p.errorStream.readBytes() } } // drain so it can't block
+            tOut.start(); tErr.start()
+            if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
+                p.destroyForcibly()
+                Pair(-2, ByteArray(0))
+            } else {
+                tOut.join(2000)
+                Pair(p.exitValue(), bytes)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "execBytes failed", e)
+            Pair(-1, ByteArray(0))
+        }
+    }
 
     /**
-     * Writes [content] to [path] as root. The data goes through a temp file in
-     * MainUI's cache (root can read it) rather than the command line, which
-     * Linux limits to 128 KB per argument (RetroArch's config is bigger).
-     * `cat >` keeps the target's owner and permissions.
+     * Reads a file as root, byte for byte, trying [lowerPaths] if the normal path
+     * can't be read. It is read in 32 KB pieces and the total is checked against
+     * the file's size, so a cut-off read can never be mistaken for the whole file
+     * (and written back, losing the rest).
      */
-    fun writeFile(path: String, content: String): Boolean {
-        val tmp = File(io.github.marsinsanity.mainui.MainUI.app.cacheDir, "root-write-${System.nanoTime()}")
-        return try {
+    fun readBytes(path: String): ByteArray? {
+        for (p in lowerPaths(path)) {
+            val size = exec("wc -c < ${q(p)}").takeIf { it.ok }?.out?.trim()?.toLongOrNull() ?: continue
+            repeat(2) {
+                val buf = java.io.ByteArrayOutputStream()
+                var i = 0L
+                while (buf.size() < size) {
+                    val (code, chunk) = execBytes("dd if=${q(p)} bs=32768 skip=$i count=1 2>/dev/null")
+                    if (code != 0 || chunk.isEmpty()) break
+                    buf.write(chunk); i++
+                }
+                if (buf.size().toLong() == size) return buf.toByteArray()
+                Log.w(TAG, "read $p: got ${buf.size()} of $size bytes")
+            }
+        }
+        return null
+    }
+
+    /** [readBytes] as UTF-8 text. */
+    fun readFile(path: String): String? = readBytes(path)?.toString(Charsets.UTF_8)
+
+    data class WriteResult(val ok: Boolean, val error: String = "", val writtenTo: String? = null)
+
+    /**
+     * Writes [content] to [path] as root and keeps the file's owner and permissions
+     * (`cat >` over the existing file), so the owning app can still change it.
+     *
+     * MainUI writes the new content to its own folder on shared storage; root then
+     * copies it over the target in one short command. Both ends are tried at every
+     * equivalent path ([lowerPaths]): depending on how `su` is set up (mount
+     * namespace, storage isolation, SELinux), the normal /storage path of another
+     * app's Android/data folder may not be writable or MainUI's files may not be
+     * visible, but the underlying /data/media path always is.
+     */
+    fun writeFile(path: String, content: String, backup: Boolean = false): WriteResult {
+        val app = io.github.marsinsanity.mainui.MainUI.app
+        val dir = (app.externalCacheDir ?: app.cacheDir).apply { mkdirs() }
+        val tmp = File(dir, "root-write-${System.nanoTime()}")
+        try {
             tmp.writeText(content)
             tmp.setReadable(true, false)
-            exec("cat ${q(tmp.absolutePath)} > ${q(path)}").ok
+            val size = tmp.length()
+            val sources = lowerPaths(tmp.absolutePath) +
+                listOfNotNull(tmp.absolutePath.takeIf { it.startsWith("/data/user/0/") }?.replaceFirst("/data/user/0/", "/data/data/"))
+            val script = buildString {
+                append("src=''; for s in ${sources.joinToString(" ") { q(it) }}; do if [ -r \"\$s\" ]; then src=\"\$s\"; break; fi; done\n")
+                append("if [ -z \"\$src\" ]; then echo 'root cannot read MainUI temporary file' >&2; exit 3; fi\n")
+                append("err=''\n")
+                append("for t in ${lowerPaths(path).joinToString(" ") { q(it) }}; do\n")
+                // First change only: keep the original next to it (same owner and mode).
+                if (backup) append("  [ -f \"\$t\" ] && [ ! -e \"\$t.mainui.bak\" ] && cp -p \"\$t\" \"\$t.mainui.bak\" 2>/dev/null\n")
+                append("  if out=\$(cat \"\$src\" 2>&1 > \"\$t\") && [ \"\$(wc -c < \"\$t\" | tr -d ' ')\" = '$size' ]; then echo \"OK \$t\"; exit 0; fi\n")
+                append("  err=\"\$out\"\n")
+                append("done\n")
+                append("echo \"\${err:-write failed}\" >&2; exit 4\n")
+            }
+            val r = exec(script, timeoutSec = 30)
+            val ok = r.ok && r.out.contains("OK ")
+            if (ok) {
+                val to = r.out.lines().firstOrNull { it.startsWith("OK ") }?.removePrefix("OK ")?.trim()
+                if (to != path) Log.i(TAG, "wrote $path via $to")
+                return WriteResult(true, writtenTo = to)
+            }
+            val why = (r.err.ifBlank { r.out }).trim().lines().lastOrNull { it.isNotBlank() } ?: "exit ${r.code}"
+            Log.w(TAG, "write $path failed: $why")
+            return WriteResult(false, why.take(160))
+        } catch (e: java.io.IOException) {
+            return WriteResult(false, "temporary file: ${e.message}")
         } finally {
             tmp.delete()
         }
