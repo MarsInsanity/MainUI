@@ -229,7 +229,8 @@ class KeyboardScene(
 
     private val rowsLower = listOf("1234567890-", "qwertyuiop'", "asdfghjkl:/", "zxcvbnm,._@")
     private val rowsUpper = listOf("!#$%&*()=+?", "QWERTYUIOP\"", "ASDFGHJKL;\\", "ZXCVBNM<>!~")
-    private val specials = listOf("SHIFT", "SPACE", "DEL", "OK")
+    private val specials = listOf("SHIFT", "SPACE", "DEL", "CANCEL", "OK")
+    private val specialWidths = listOf(2f, 3.5f, 1.75f, 2f, 1.75f)   // in key widths
 
     private fun rows() = if (shift) rowsUpper else rowsLower
     private val rowCount get() = rows().size + 1
@@ -237,30 +238,34 @@ class KeyboardScene(
     private fun colsIn(r: Int) = if (r < rows().size) rows()[r].length else specials.size
 
     override fun draw(g: Gfx) {
-        g.dim(170)
-        val panelTop = g.H - 60f - 5 * 58f - 90f
-        g.text(title, g.theme.title, g.W / 2, panelTop - 30f, Align.CENTER, maxW = g.W - 40f)
+        // A screen of its own: the one below must not show through the keys or the hints.
+        g.background()
+        g.dim(60)
+        g.header(title)
         // input box
+        val inTop = Gfx.HEADER + 14f
         val inBg = g.skin("bg-input")
         val bx = 40f; val bw = g.W - 80f
-        if (inBg != null) g.bmp(inBg, bx, panelTop, bw, 60f) else g.fillRect(bx, panelTop, bw, 60f, Color.argb(220, 255, 255, 255), 10f)
+        if (inBg != null) g.bmp(inBg, bx, inTop, bw, 60f) else g.fillRect(bx, inTop, bw, 60f, Color.argb(235, 255, 255, 255), 10f)
         val shown = if (password) "•".repeat(sb.length) else sb.toString()
         val before = shown.substring(0, cursor.coerceAtMost(shown.length))
         val textColor = if (inBg != null) g.theme.list.color else Color.BLACK
         val tw = g.textWidth(before, g.theme.list)
         val scrollX = maxOf(0f, tw - (bw - 40f))
-        g.c.save(); g.c.clipRect(bx + 10, panelTop, bx + bw - 10, panelTop + 60f)
-        g.text(shown, g.theme.list, bx + 20f - scrollX, panelTop + 30f, color = textColor)
-        if ((g.now / 500) % 2 == 0L) g.fillRect(bx + 20f + tw - scrollX, panelTop + 14f, 3f, 32f, textColor)
+        g.c.save(); g.c.clipRect(bx + 10, inTop, bx + bw - 10, inTop + 60f)
+        g.text(shown, g.theme.list, bx + 20f - scrollX, inTop + 30f, color = textColor)
+        if ((g.now / 500) % 2 == 0L) g.fillRect(bx + 20f + tw - scrollX, inTop + 14f, 3f, 32f, textColor)
         g.c.restore()
         g.redrawAfter(500 - g.now % 500) // cursor blink
 
-        val keyW = 52f; val keyH = 52f; val gap = 6f
+        val keyW = 52f; val gap = 6f
+        // Five rows fill the space between the input box and the footer.
+        var y = inTop + 60f + 16f
+        val keyH = ((g.H - Gfx.FOOTER - 12f - y) - gap * (rowCount - 1)) / rowCount
         keyRects.clear()
-        var y = panelTop + 80f
         for (r in 0 until rowCount) {
             val n = colsIn(r)
-            val widths = if (r < rows().size) List(n) { keyW } else listOf(keyW * 2.5f, keyW * 4f, keyW * 2f, keyW * 2f)
+            val widths = if (r < rows().size) List(n) { keyW } else specialWidths.map { it * keyW }
             val total = widths.sum() + gap * (n - 1)
             var x = (g.W - total) / 2
             for (cI in 0 until n) {
@@ -271,12 +276,12 @@ class KeyboardScene(
                 keyRects += Triple(android.graphics.RectF(x, y, x + widths[cI], y + keyH), r, cI)
                 val label = if (r < rows().size) rows()[r][cI].toString() else specials[cI]
                 g.text(label, g.theme.list, x + widths[cI] / 2, y + keyH / 2, Align.CENTER,
-                    size = if (label.length > 1) 20f else 26f, color = Color.WHITE)
+                    size = if (label.length > 1) 19f else 26f, color = Color.WHITE)
                 x += widths[cI] + gap
             }
             y += keyH + gap
         }
-        g.footer("TYPE", "DEL", listOf("START" to "OK", "Y" to "SHIFT"), covering = true)
+        g.footer("TYPE", "DEL", listOf("START" to "OK", "SELECT" to "CANCEL", "Y" to "SHIFT"), covering = true)
     }
 
     private val keyRects = ArrayList<Triple<android.graphics.RectF, Int, Int>>()
@@ -296,6 +301,7 @@ class KeyboardScene(
             "SHIFT" -> shift = !shift
             "SPACE" -> type(" ")
             "DEL" -> delete()
+            "CANCEL" -> close()
             "OK" -> done()
         }
     }

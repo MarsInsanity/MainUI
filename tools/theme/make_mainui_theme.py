@@ -587,6 +587,7 @@ def main():
     put("icon-x", button_icon("X", (34, 92, 196)))
     put("icon-y", button_icon("Y", (34, 92, 196)))
     put("icon-START", pill_icon("START"))
+    put("icon-SELECT", pill_icon("SELECT", 112))
     put("ic-MENU", pill_icon("MENU", 65, 48))
     put("icon-left-arrow-24", arrow("left"))
     put("icon-right-arrow-24", arrow("right"))
