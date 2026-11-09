@@ -10,7 +10,9 @@ import android.util.Log
 import android.widget.Toast
 import io.github.marsinsanity.mainui.MainActivity
 import io.github.marsinsanity.mainui.MainUI
+import io.github.marsinsanity.mainui.core.Root
 import io.github.marsinsanity.mainui.emu.GameController
+import io.github.marsinsanity.mainui.emu.Hotkeys
 import io.github.marsinsanity.mainui.emu.Session
 import io.github.marsinsanity.mainui.emu.StandaloneController
 import io.github.marsinsanity.mainui.emu.StateSupport
@@ -64,7 +66,11 @@ class InGameMenuScene(
         const val ROW_H = 56f
     }
 
-    private enum class Action { CONTINUE, SAVE, LOAD, STATES_MENU, NATIVE, SWITCHER, EXIT, BIND, BIND_SAVE, BIND_LOAD, BIND_BACK }
+    private enum class Action { CONTINUE, SAVE, LOAD, STATES_MENU, NATIVE, SWITCHER, EXIT, BIND, BIND_SAVE, BIND_LOAD, BIND_BACK,
+        KEY_SAVE, KEY_LOAD, KEY_RESET }
+
+    /** Standalone emulator (not an Android game): its save / load keys can be set here. */
+    private val standalone get() = (controller as? StandaloneController)?.takeIf { it.emuId != null }
 
     override fun onEnter() {
         buildItems()
@@ -82,9 +88,15 @@ class InGameMenuScene(
 
     private fun buildItems() {
         val items = mutableListOf<UiItem>()
-        if (bindMode) {
-            items += UiItem("Send save key (${controller.saveKeyName})", data = Action.BIND_SAVE)
-            items += UiItem("Send load key (${controller.loadKeyName})", data = Action.BIND_LOAD)
+        val sa = standalone
+        if (bindMode && sa != null) {
+            items += UiItem("Save key: ${Hotkeys.label(sa.saveSpec)}", data = Action.KEY_SAVE)
+            items += UiItem("Load key: ${Hotkeys.label(sa.loadSpec)}", data = Action.KEY_LOAD)
+            if (sa.saveSpec != null) items += UiItem("Send save key", data = Action.BIND_SAVE)
+            if (sa.loadSpec != null) items += UiItem("Send load key", data = Action.BIND_LOAD)
+            if (Hotkeys.get(sa.emuId!!) != (null to null)) items += UiItem(
+                if (sa.defaultSave != null) "Use defaults (${Hotkeys.label(sa.defaultSave)} / ${Hotkeys.label(sa.defaultLoad)})" else "Clear keys",
+                data = Action.KEY_RESET)
             items += UiItem("Back", data = Action.BIND_BACK)
         } else {
             items += UiItem("Continue", data = Action.CONTINUE)
@@ -99,8 +111,8 @@ class InGameMenuScene(
             items += UiItem("Native Menu", data = Action.NATIVE)
             items += UiItem("Game Switcher", data = Action.SWITCHER)
             items += UiItem("Exit Game", data = Action.EXIT)
-            // RetroArch's hotkeys are its own defaults; only standalone emulators need binding.
-            if (controller.states == StateSupport.HOTKEY && controller is StandaloneController) items += UiItem("Bind hotkeys...", data = Action.BIND)
+            // RetroArch's hotkeys are its own defaults; standalone emulators get theirs set here (root presses them).
+            if (sa != null && Root.knownAvailable()) items += UiItem("Save / load keys...", data = Action.BIND)
         }
         list.set(items, false)
     }
@@ -124,14 +136,16 @@ class InGameMenuScene(
             if (sel && controller.hasSlots && (it.data == Action.SAVE || it.data == Action.LOAD)) {
                 g.arrow(false, panelW, y + rowH / 2)
             }
+            if (sel && (it.data == Action.KEY_SAVE || it.data == Action.KEY_LOAD)) g.arrow(false, panelW, y + rowH / 2)
         }
         val cur = list.current?.data
         if (bindMode) {
             val bx = panelW + 40f
             g.fillRect(bx - 12f, top + 14f, g.W - bx - 6f, 270f, g.theme.panel, 10f)
-            g.paragraph("In $emuName, open its controller / hotkey settings and start binding \"Save state\" " +
-                "(or \"Load state\"). Press HOME, then choose Send save / load key: MainUI sends that key to the " +
-                "waiting emulator.", g.theme.list, bx, top + 26f, g.W - bx - 24f, size = 20f, maxLines = 10)
+            g.paragraph("Left / right picks the keys MainUI presses for Save and Load in $emuName. " +
+                "They must be the same in $emuName: open its hotkey settings, start binding \"Save state\" " +
+                "(or \"Load state\"), press HOME and choose Send save / load key.", g.theme.list, bx, top + 26f,
+                g.W - bx - 24f, size = 20f, maxLines = 11)
         } else if (controller.hasSlots && (cur == Action.SAVE || cur == Action.LOAD)) {
             // Slot preview on the right while Save/Load is highlighted
             val f = MainUI.sessions.slotThumb(session.gameKey, slot)
@@ -159,7 +173,8 @@ class InGameMenuScene(
             Btn.DOWN -> list.down(repeat)
             Btn.LEFT, Btn.RIGHT -> {
                 val cur = list.current?.data
-                if (controller.hasSlots && (cur == Action.SAVE || cur == Action.LOAD)) {
+                if (cur == Action.KEY_SAVE || cur == Action.KEY_LOAD) changeKey(cur == Action.KEY_SAVE, b == Btn.RIGHT)
+                else if (controller.hasSlots && (cur == Action.SAVE || cur == Action.LOAD)) {
                     slot = (slot + if (b == Btn.RIGHT) 1 else -1).coerceIn(0, 9)
                     MainUI.settings.prefs.edit().putInt("slot:${session.gameKey}", slot).apply()
                     buildItems(); list.active = list.items.indexOfFirst { it.data == cur }.coerceAtLeast(0)
@@ -204,9 +219,26 @@ class InGameMenuScene(
             Action.EXIT -> exitGame()
             Action.BIND -> { bindMode = true; buildItems() }
             Action.BIND_BACK -> { bindMode = false; buildItems() }
+            Action.KEY_SAVE, Action.KEY_LOAD -> changeKey(a == Action.KEY_SAVE, true)
+            Action.KEY_RESET -> { standalone?.emuId?.let { Hotkeys.set(it, null, null) }; buildItems() }
             Action.BIND_SAVE -> leaveThen(700) { (controller as? StandaloneController)?.save(0) }
             Action.BIND_LOAD -> leaveThen(700) { (controller as? StandaloneController)?.load(0) }
         }
+    }
+
+    /** Steps the save or load key to the next / previous choice and keeps it for this emulator. */
+    private fun changeKey(save: Boolean, forward: Boolean) {
+        val sa = standalone ?: return
+        val id = sa.emuId ?: return
+        val (s0, l0) = Hotkeys.get(id)
+        val cur = if (save) sa.saveSpec else sa.loadSpec
+        val next = Hotkeys.step(cur, forward)
+        // The other key keeps what is in effect now, so changing one doesn't drop the default of the other.
+        if (save) Hotkeys.set(id, next, l0 ?: sa.loadSpec) else Hotkeys.set(id, s0 ?: sa.saveSpec, next)
+        val keep = list.active
+        buildItems()
+        list.active = keep.coerceIn(0, list.size - 1)
+        invalidate()
     }
 
     /** RetroArch: run while paused, then return to the game like the Miyoo menu does. */

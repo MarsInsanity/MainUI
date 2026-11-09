@@ -289,14 +289,26 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
  * you bind hotkeys.
  */
 class StandaloneController(private val pkg: String, private val def: EmuDef?) : GameController {
-    override val states: StateSupport = when {
+    /** The emulator's id in emulators.json (null for Android games). */
+    val emuId: String? get() = def?.id
+
+    /** Save / load keys: the user's choice (in-game menu > Save / load keys), else emulators.json's. */
+    val saveSpec: String? get() = def?.let { Hotkeys.get(it.id).first ?: it.save }
+    val loadSpec: String? get() = def?.let { Hotkeys.get(it.id).second ?: it.load }
+    val defaultSave: String? get() = def?.save
+    val defaultLoad: String? get() = def?.load
+
+    override val states: StateSupport get() = when {
         def == null -> StateSupport.MENU // Android games: their own UI
-        def.states == StateSupport.HOTKEY && !Root.knownAvailable() -> StateSupport.MENU
+        // Keys set for it (by emulators.json or the user): MainUI presses them, which needs root.
+        saveSpec != null && loadSpec != null && (def.states == StateSupport.HOTKEY || Hotkeys.get(def.id) != (null to null)) ->
+            if (Root.knownAvailable()) StateSupport.HOTKEY else StateSupport.MENU
+        def.states == StateSupport.HOTKEY -> StateSupport.MENU
         else -> def.states
     }
     override val hasSlots = false
-    override val saveKeyName get() = def?.save?.let { keyLabel(it) }
-    override val loadKeyName get() = def?.load?.let { keyLabel(it) }
+    override val saveKeyName get() = saveSpec?.let { Hotkeys.label(it) }
+    override val loadKeyName get() = loadSpec?.let { Hotkeys.label(it) }
     private var frozen = false
 
     private var frozenGen = -1
@@ -314,8 +326,8 @@ class StandaloneController(private val pkg: String, private val def: EmuDef?) : 
         frozen = false
     }
 
-    override fun save(slot: Int) = keys(def?.save)
-    override fun load(slot: Int) = keys(def?.load)
+    override fun save(slot: Int) = keys(saveSpec)
+    override fun load(slot: Int) = keys(loadSpec)
 
     override fun openNativeMenu(): Boolean {
         val m = def?.menu ?: "back"
@@ -328,21 +340,25 @@ class StandaloneController(private val pkg: String, private val def: EmuDef?) : 
     }
 
     override fun quit(autoSave: Boolean): Boolean {
-        if (autoSave && states == StateSupport.HOTKEY && def?.save != null) {
-            unpause(); Thread.sleep(400); keys(def.save); Thread.sleep(1200)
+        if (autoSave && states == StateSupport.HOTKEY && saveSpec != null) {
+            unpause(); Thread.sleep(400); keys(saveSpec); Thread.sleep(1200)
         }
         return Root.forceStop(pkg)
     }
 
-    /** Sends a hotkey spec ("keys:KEYCODE_F1" or "keys:KEYCODE_SHIFT_LEFT+KEYCODE_F7"). */
+    /**
+     * Sends a hotkey spec ("keys:KEYCODE_F1" or "keys:KEYCODE_SHIFT_LEFT+KEYCODE_F7"): on MainUI's
+     * virtual keyboard when it has those keys (a real device, which every app accepts and which
+     * emulators that bind keys per device see the same way every time), else with `input`.
+     */
     fun keys(spec: String?): Boolean {
         if (spec == null) return false
+        Hotkeys.virtualKeys(spec)?.let { if (io.github.marsinsanity.mainui.core.VirtualKeys.press(it, 250)) return true }
         val ks = spec.removePrefix("keys:").removePrefix("key:").split('+').map { it.trim() }.filter { it.isNotEmpty() }
         return Root.keyEvent(*ks.toTypedArray())
     }
 
     companion object {
-        fun keyLabel(spec: String) = spec.removePrefix("keys:").removePrefix("key:")
-            .split('+').joinToString("+") { it.removePrefix("KEYCODE_") }
+        fun keyLabel(spec: String) = Hotkeys.label(spec)
     }
 }
