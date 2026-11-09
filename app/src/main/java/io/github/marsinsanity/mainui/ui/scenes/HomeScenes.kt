@@ -154,26 +154,53 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
     private var tiles = HomeScenes.menuTiles(host)
     private var index = MainUI.settings.mainMenuIndex.coerceIn(0, tiles.size - 1)
 
+    /**
+     * The tiles sit in one continuous row and a window of [VISIBLE] slides along it
+     * to keep the selection in view (instead of OnionOS's pages of four, which left
+     * a mostly empty last page). [first] is the leftmost visible tile; [scroll]
+     * follows it smoothly, in tiles.
+     */
+    private var first = 0
+    private var scroll = Float.NaN
+    private var lastFrame = 0L
+
+    private fun follow() {
+        if (index < first) first = index
+        if (index >= first + VISIBLE) first = index - VISIBLE + 1
+        first = first.coerceIn(0, max(0, tiles.size - VISIBLE))
+    }
+
+    init { follow() }
+
     override fun onResume() {
         tiles = HomeScenes.menuTiles(host)
         index = index.coerceIn(0, tiles.size - 1)
+        follow()
     }
 
     override fun draw(g: Gfx) {
         g.background()
         g.header(null, logo = true)
-        val perPage = 4
-        val page = index / perPage
-        val pages = (tiles.size + perPage - 1) / perPage
-        val tileW = 156f; val tileH = 278f
+        val tileW = TILE_W; val tileH = 278f
         val y = 90f + g.cy0
-        val x0 = g.cx0 + 8f
-        for (i in 0 until perPage) {
-            val idx = page * perPage + i
-            if (idx >= tiles.size) break
+        // Fewer tiles than the window: center them.
+        val x0 = g.cx0 + 8f + if (tiles.size < VISIBLE) (VISIBLE - tiles.size) * tileW / 2 else 0f
+
+        // Ease towards the target window (about 120 ms), then stop redrawing.
+        if (scroll.isNaN()) scroll = first.toFloat()
+        val dt = if (lastFrame == 0L) 16L else (g.now - lastFrame).coerceIn(1L, 50L)
+        lastFrame = g.now
+        val target = first.toFloat()
+        scroll += (target - scroll) * (1f - Math.pow(0.001, dt / 120.0).toFloat())
+        if (kotlin.math.abs(target - scroll) < 0.01f) { scroll = target; lastFrame = 0L } else g.redrawAfter(16)
+
+        val from = kotlin.math.floor(scroll).toInt().coerceAtLeast(0)
+        val to = min(tiles.size - 1, kotlin.math.ceil(scroll).toInt() + VISIBLE - 1)
+        for (idx in from..to) {
             val t = tiles[idx]
             val sel = idx == index
-            val x = x0 + i * tileW
+            val x = x0 + (idx - scroll) * tileW
+            if (x + tileW < 0f || x > g.W) continue
             val img = t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
             if (img != null) g.bmp(img, x, y, tileW, tileH) else g.menuTile(t.glyph, x, y, tileW, tileH, sel)
             if (!g.theme.hideIconLabels) {
@@ -183,7 +210,8 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
                     color = if (sel) gs.selectedColor else gs.color)
             }
         }
-        g.dots(pages, page, 396f + g.cy0)
+        // One dot per tile, so it's clear more tiles are to the side.
+        if (tiles.size > VISIBLE) g.dots(tiles.size, index, 396f + g.cy0)
         g.footer("SELECT", null)
     }
 
@@ -191,13 +219,14 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
         when (b) {
             Btn.LEFT -> if (index > 0) index-- else if (!repeat) index = tiles.size - 1 else return false
             Btn.RIGHT -> if (index < tiles.size - 1) index++ else if (!repeat) index = 0 else return false
-            Btn.L1 -> index = max(0, index - 4)
-            Btn.R1 -> index = min(tiles.size - 1, index + 4)
+            Btn.L1 -> index = max(0, index - VISIBLE)
+            Btn.R1 -> index = min(tiles.size - 1, index + VISIBLE)
             Btn.A -> if (!repeat) tiles[index].open()
             Btn.SELECT, Btn.MENU -> if (!repeat) host.push(GameSwitcherScene(host))
             Btn.Y -> if (!repeat) SearchFlow.start(host)
             else -> return false
         }
+        follow()
         MainUI.settings.mainMenuIndex = index
         return true
     }
@@ -210,12 +239,18 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
 
     override fun onTap(x: Float, y: Float): Boolean {
         val w = host.logicalWidth
-        val col = ((x - (w - 640f) / 2f - 8f) / 156f).toInt()
-        if (col !in 0..3) return false
-        val idx = (index / 4) * 4 + col
-        if (idx >= tiles.size) return false
-        if (idx == index) tiles[idx].open() else index = idx
+        val x0 = (w - 640f) / 2f + 8f + if (tiles.size < VISIBLE) (VISIBLE - tiles.size) * TILE_W / 2 else 0f
+        val col = kotlin.math.floor((x - x0) / TILE_W).toInt()
+        if (col !in 0 until VISIBLE) return false
+        val idx = first + col
+        if (idx !in tiles.indices) return false
+        if (idx == index) tiles[idx].open() else { index = idx; follow(); MainUI.settings.mainMenuIndex = index }
         return true
+    }
+
+    companion object {
+        const val VISIBLE = 4
+        const val TILE_W = 156f
     }
 }
 
