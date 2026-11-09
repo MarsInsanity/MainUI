@@ -54,6 +54,23 @@ object RetroArchCores {
         ?.substringAfter('=')?.trim()?.trim('"')
         ?.takeIf { it.isNotEmpty() && it != "default" }
 
+    /**
+     * Sets [wanted] keys in a retroarch.cfg text (replacing existing lines, appending
+     * missing ones) and returns the new text, or null when the input doesn't look
+     * like a complete RetroArch config, so a partial read is never written back.
+     */
+    fun mergeConfig(cfg: String, wanted: Map<String, String>): String? {
+        val lines = cfg.lines().dropLastWhile { it.isBlank() }.toMutableList()
+        val settings = lines.count { Regex("^\\s*[A-Za-z0-9_]+\\s*=").containsMatchIn(it) }
+        // A real config has hundreds of settings (thousands on current versions).
+        if (settings < 100) return null
+        for ((k, v) in wanted) {
+            val i = lines.indexOfFirst { it.trimStart().startsWith("$k ") || it.trimStart().startsWith("$k=") }
+            if (i >= 0) lines[i] = "$k = $v" else lines += "$k = $v"
+        }
+        return lines.joinToString("\n") + "\n"
+    }
+
     fun scan(ctx: Context, pkg: String, cfg: String?): Scan {
         val dataDir = "/data/data/$pkg"
         // Cores can't be loaded from shared storage (noexec), so only a /data folder counts.

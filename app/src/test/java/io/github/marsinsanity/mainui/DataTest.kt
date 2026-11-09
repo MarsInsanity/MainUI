@@ -110,3 +110,37 @@ class EmulatorStoreTest {
         assertEquals("azahar-2125.0-android-vanilla.apk", flavours.maxByOrNull { es.scoreApk(it, "arm64-v8a") })
     }
 }
+
+class RootPathsTest {
+    @Test
+    fun lowerPathsReachTheBackingStorage() {
+        val r = io.github.marsinsanity.mainui.core.Root
+        assertEquals(listOf("/storage/emulated/0/Android/data/com.retroarch.aarch64/files/retroarch.cfg",
+            "/data/media/0/Android/data/com.retroarch.aarch64/files/retroarch.cfg"),
+            r.lowerPaths("/storage/emulated/0/Android/data/com.retroarch.aarch64/files/retroarch.cfg"))
+        assertEquals(listOf("/storage/1A2B-3C4D/roms/gba", "/mnt/media_rw/1A2B-3C4D/roms/gba"), r.lowerPaths("/storage/1A2B-3C4D/roms/gba"))
+        assertEquals(listOf("/data/data/com.retroarch/cores/x.so"), r.lowerPaths("/data/data/com.retroarch/cores/x.so"))
+    }
+}
+
+class RetroArchConfigTest {
+    private val c = io.github.marsinsanity.mainui.emu.RetroArchCores
+
+    private fun cfg(n: Int) = (0 until n).joinToString("\n") { "setting_$it = \"$it\"" } + "\npause_nonactive = \"false\"\n"
+
+    @Test
+    fun replacesExistingAndAppendsMissingKeys() {
+        val out = c.mergeConfig(cfg(300), mapOf("pause_nonactive" to "\"true\"", "autosave_interval" to "\"10\""))!!
+        assertEquals(302, out.lines().count { it.isNotBlank() })
+        assertEquals(true, out.contains("pause_nonactive = \"true\"\n"))
+        assertEquals(false, out.contains("pause_nonactive = \"false\""))
+        assertEquals(true, out.endsWith("autosave_interval = \"10\"\n"))
+        assertEquals(true, out.contains("setting_299 = \"299\""))
+    }
+
+    @Test
+    fun refusesSomethingThatIsNotAWholeConfig() {
+        assertNull(c.mergeConfig("", mapOf("a" to "b")))
+        assertNull(c.mergeConfig(cfg(20), mapOf("a" to "b")))
+    }
+}

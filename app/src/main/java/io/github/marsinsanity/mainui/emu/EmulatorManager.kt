@@ -414,11 +414,14 @@ class EmulatorManager(
      * interface (needed for pause/save/load/quit) and auto save/load states.
      * Needs root because RetroArch's config lives in its private app storage.
      */
-    fun configureRetroArch(): String {
-        val pkg = raPackage ?: return "RetroArch is not installed"
-        if (!Root.available()) return "Root access is required"
+    fun configureRetroArch(): Pair<Boolean, String> {
+        val pkg = raPackage ?: return false to "RetroArch is not installed"
+        if (!Root.available()) return false to "Root access is required"
         val path = raConfigPath(pkg)
-        val cfg = Root.readFile(path) ?: return "Could not read $path (start RetroArch once first)"
+        // Stop it first: RetroArch rewrites its config when it exits normally.
+        Root.forceStop(pkg)
+        val cfg = Root.readFile(path)
+            ?: return false to "Could not read retroarch.cfg completely, so nothing was changed. Start RetroArch once, then try again.\n\n$path"
         val wanted = linkedMapOf(
             "network_cmd_enable" to "\"true\"",
             "network_cmd_port" to "\"$raCommandPort\"",
@@ -434,13 +437,11 @@ class EmulatorManager(
             wanted["savestate_auto_save"] = "\"true\""
             wanted["savestate_auto_load"] = "\"true\""
         }
-        val lines = cfg.lines().toMutableList()
-        for ((k, v) in wanted) {
-            val i = lines.indexOfFirst { it.trimStart().startsWith("$k ") || it.trimStart().startsWith("$k=") }
-            if (i >= 0) lines[i] = "$k = $v" else lines += "$k = $v"
-        }
-        Root.forceStop(pkg)
-        return if (Root.writeFile(path, lines.joinToString("\n"))) "RetroArch configured for MainUI" else "Failed to write $path"
+        val merged = RetroArchCores.mergeConfig(cfg, wanted)
+            ?: return false to "retroarch.cfg looks incomplete, so nothing was changed.\n\n$path"
+        val w = Root.writeFile(path, merged, backup = true)
+        return if (w.ok) true to "RetroArch configured for MainUI"
+        else false to "Could not save retroarch.cfg:\n${w.error}\n\n$path"
     }
 
     companion object {
