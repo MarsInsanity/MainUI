@@ -167,3 +167,20 @@ class BuildbotListTest {
         assertEquals(0L, rows[0].bytes)
     }
 }
+
+class CoreFailureSummaryTest {
+    private val sum = io.github.marsinsanity.mainui.ui.scenes.CoreInstall::failureSummary
+
+    @Test fun sameReasonIsShownOnce() {
+        val r = sum(listOf("pokemini", "fbneo", "mgba", "snes9x", "a5200").map {
+            it to "Could not copy ${it}_libretro_android.so: stat: '/data/data/com.retroarch': No such file or directory"
+        })
+        assertEquals("5 failed (pokemini, fbneo, mgba, snes9x, ...):\n" +
+            "Could not copy pokemini_libretro_android.so: stat: '/data/data/com.retroarch': No such file or directory", r)
+    }
+
+    @Test fun differentReasonsAreListed() {
+        val r = sum(listOf("mgba" to "HTTP 404", "fbneo" to "No space left on device"))
+        assertEquals("2 failed:\nmgba: HTTP 404\nfbneo: No space left on device", r)
+    }
+}

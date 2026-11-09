@@ -85,7 +85,9 @@ object RetroArchCores {
             val q = Root::q
             val r = Root.exec(
                 "for d in ${q(coreDir)} ${q("$dataDir/cores")}; do ls -1d \"\$d\"/*$SUFFIX 2>/dev/null; done; " +
-                    "find ${q("$dataDir/files")} -maxdepth 7 -name '*$SUFFIX' 2>/dev/null; echo __scan_ok__")
+                    "find ${q("$dataDir/files")} -maxdepth 7 -name '*$SUFFIX' 2>/dev/null; " +
+                    // Only a complete scan if RetroArch's data folder is actually visible to root.
+                    "[ -d ${q(dataDir)} ] && echo __scan_ok__")
             if (r.out.contains("__scan_ok__")) complete = true
             for (l in r.lines) {
                 val p = l.trim()

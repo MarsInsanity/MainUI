@@ -115,7 +115,7 @@ object CoreInstall {
         host.push(busy)
         val queue = java.util.concurrent.ConcurrentLinkedQueue(missing.sortedBy { it.bytes })   // small ones first
         val ok = java.util.concurrent.atomic.AtomicInteger()
-        val failed = java.util.Collections.synchronizedList(ArrayList<String>())
+        val failed = java.util.Collections.synchronizedList(ArrayList<Pair<String, String>>())
         val current = java.util.concurrent.ConcurrentHashMap<String, String>()
         val total = missing.size
         fun show() {
@@ -133,7 +133,7 @@ object CoreInstall {
                         show()
                         em.installCore(c.core, rescan = false) { msg -> current[c.core] = msg; show() }
                             .onSuccess { ok.incrementAndGet() }
-                            .onFailure { failed += "${c.core}: ${it.message}" }
+                            .onFailure { failed += c.core to (it.message ?: "failed") }
                         current.remove(c.core)
                         show()
                     }
@@ -147,11 +147,21 @@ object CoreInstall {
             val summary = buildString {
                 append("${ok.get()} cores installed.")
                 if (skipped > 0) append(" $skipped not downloaded (stopped).")
-                if (failed.isNotEmpty()) append("\n${failed.size} failed:\n" + failed.take(4).joinToString("\n").take(260))
+                if (failed.isNotEmpty()) append("\n" + failureSummary(failed))
             }
             host.push(DialogScene(host, "Download all cores", summary, "OK", null))
             done()
         }
+    }
+
+    /** "3 failed (a, b, c):\nreason" when they share a reason, otherwise one line per core. */
+    internal fun failureSummary(failed: List<Pair<String, String>>): String {
+        val reasons = failed.map { (core, msg) -> msg.replace(core, "\u0000") }.distinct()
+        if (reasons.size == 1) {
+            val names = failed.take(4).joinToString(", ") { it.first } + if (failed.size > 4) ", ..." else ""
+            return "${failed.size} failed ($names):\n${failed[0].second}".take(300)
+        }
+        return "${failed.size} failed:\n" + failed.take(4).joinToString("\n") { "${it.first}: ${it.second}" }.take(260)
     }
 
     private fun openRetroArch(host: SceneHost) {
