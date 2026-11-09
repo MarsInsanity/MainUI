@@ -196,6 +196,8 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
     override val extraHints get() = listOf("Y" to "RESCAN")
 
     override fun onEnter() = build()
+    // Coming back from the cores list or an emulator page: counts and "get" marks may have changed.
+    override fun onResume() = build()
 
     private fun build() {
         val em = MainUI.emulators

@@ -33,16 +33,57 @@ object Root {
         }.getOrNull()
     }
 
-    /** argv that runs [cmd] as root. */
-    fun rootArgv(cmd: String): Array<String> {
-        val port = testRootPort ?: return arrayOf("su", "-c", cmd)
-        return arrayOf("sh", "-c", "printf '%s\\nexit\\n' ${q(cmd)} | nc -q 60 127.0.0.1 $port")
+    /**
+     * How root commands reach the system-wide view of the file system.
+     *
+     * Android 11+ gives every app its own view of /data/data (and of other apps'
+     * Android/data folders) that only contains the app itself. Magisk's `su`
+     * runs in the view of the app that called it by default, so root commands
+     * from MainUI couldn't see RetroArch's folder ("stat '/data/data/com.retroarch':
+     * No such file or directory"). MainUI therefore runs root commands in init's
+     * mount namespace: with `nsenter -t 1 -m` (any root solution), or with su's
+     * own --mount-master option when nsenter isn't available.
+     */
+    private enum class Ns { UNKNOWN, NSENTER, MOUNT_MASTER, PLAIN }
+
+    @Volatile private var ns = Ns.UNKNOWN
+
+    private fun wrap(cmd: String): String = when (ns) {
+        Ns.NSENTER -> "nsenter -t 1 -m -- sh -c ${q(cmd)}"
+        else -> cmd
     }
 
-    /** argv for an interactive root shell that reads commands from stdin. */
+    /** argv that runs [cmd] as root, in the system-wide view once [detectNamespace] ran. */
+    fun rootArgv(cmd: String): Array<String> {
+        val port = testRootPort
+        if (port != null) return arrayOf("sh", "-c", "printf '%s\\nexit\\n' ${q(wrap(cmd))} | nc -q 60 127.0.0.1 $port")
+        return if (ns == Ns.MOUNT_MASTER) arrayOf("su", "--mount-master", "-c", cmd) else arrayOf("su", "-c", wrap(cmd))
+    }
+
+    /** argv for an interactive root shell that reads commands from stdin (see [Shell]). */
     private fun shellArgv(): Array<String> {
-        val port = testRootPort ?: return arrayOf("su")
-        return arrayOf("sh", "-c", "nc 127.0.0.1 $port")
+        val port = testRootPort
+        if (port != null) return arrayOf("sh", "-c", "nc 127.0.0.1 $port")
+        return if (ns == Ns.MOUNT_MASTER) arrayOf("su", "--mount-master") else arrayOf("su")
+    }
+
+    /** First line sent to a new interactive root shell. */
+    private fun shellPrelude(): String? = if (ns == Ns.NSENTER) "exec nsenter -t 1 -m -- sh" else null
+
+    /** Picks how to reach the system-wide view; runs once, after root was granted. */
+    @Synchronized
+    private fun detectNamespace() {
+        if (ns != Ns.UNKNOWN) return
+        fun su(cmd: String) = if (testRootPort != null) rootArgv(cmd) else arrayOf("su", "-c", cmd)
+        var found = Ns.PLAIN
+        if (run(su("nsenter -t 1 -m -- sh -c 'echo mainui-ns-ok'"), 15).out.contains("mainui-ns-ok")) {
+            found = Ns.NSENTER
+        } else if (testRootPort == null &&
+            run(arrayOf("su", "--mount-master", "-c", "echo mainui-ns-ok"), 15).out.contains("mainui-ns-ok")) {
+            found = Ns.MOUNT_MASTER
+        }
+        ns = found
+        Log.i(TAG, "root namespace: $ns")
     }
 
     /**
@@ -82,10 +123,12 @@ object Root {
         }
 
         private fun start(): Process? = runCatching {
+            ready()
             lines.clear()
             val p = ProcessBuilder(*shellArgv()).redirectErrorStream(true).start()
             proc = p
             stdin = p.outputStream.bufferedWriter()
+            shellPrelude()?.let { stdin!!.write("$it\n"); stdin!!.flush() }
             Thread({ runCatching { p.inputStream.bufferedReader().forEachLine { lines.put(it) } } }, "root-shell")
                 .apply { isDaemon = true }.start()
             p
@@ -111,11 +154,14 @@ object Root {
             cached = false
             return false
         }
-        val r = exec("id", timeoutSec = 15)
+        val r = run(rootArgv("id"), 15)
         val ok = r.ok && r.out.contains("uid=0")
         // Only cache positive results; the user may still be looking at the
         // Magisk prompt the first time.
-        if (ok) cached = true
+        if (ok) {
+            detectNamespace()
+            cached = true
+        }
         return ok
     }
 
@@ -123,7 +169,10 @@ object Root {
     fun knownAvailable(): Boolean = cached == true
 
 
-    fun exec(cmd: String, timeoutSec: Long = 20): Result = run(rootArgv(cmd), timeoutSec)
+    /** Makes sure the namespace is known before a root command runs. */
+    private fun ready() { if (ns == Ns.UNKNOWN) available() }
+
+    fun exec(cmd: String, timeoutSec: Long = 20): Result { ready(); return run(rootArgv(cmd), timeoutSec) }
 
     /** Runs a shell command as the app user (no root). */
     fun sh(cmd: String, timeoutSec: Long = 20): Result = run(arrayOf("sh", "-c", cmd), timeoutSec)
@@ -193,6 +242,7 @@ object Root {
 
     /** Runs [cmd] as root and returns its exit code and raw stdout bytes. */
     fun execBytes(cmd: String, timeoutSec: Long = 20): Pair<Int, ByteArray> {
+        ready()
         return try {
             val p = ProcessBuilder(*rootArgv(cmd)).start()
             var bytes = ByteArray(0)

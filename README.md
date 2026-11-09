@@ -243,6 +243,9 @@ Settings > Emulators & cores > **RetroArch cores** lists installed cores and eve
 recommends. `A` on a missing core downloads it from `buildbot.libretro.com/nightly/android/latest/<abi>/`
 and installs it into RetroArch's core folder with RetroArch's owner and SELinux label (root).
 Launching a game whose core is missing offers the same download instead of failing.
+Android 11+ hides every other app's `/data/data` folder from an app, and Magisk's `su` starts in the
+app's view by default, so MainUI runs its root commands in the system-wide view (`nsenter -t 1 -m`,
+or `su --mount-master` if `nsenter` is missing). Without that, RetroArch's core folder looks empty.
 **Download all cores** fetches every core the buildbot has that isn't installed yet (about 250 for
 arm64, roughly 0.9 GB to download): it shows the count and size first, warns if storage looks too
 small, installs three at a time, and B stops it after the cores in progress.
