@@ -47,6 +47,15 @@ class Gfx {
 
     fun redrawAfter(ms: Long) { if (redrawIn == 0L || ms < redrawIn) redrawIn = ms }
 
+    /** Footer hint areas of the last frame, so touch users can tap "(B) BACK". */
+    private val hints = ArrayList<Pair<RectF, Btn>>()
+    private val pendingHints = ArrayList<Pair<RectF, Btn>>()
+
+    /** Button whose footer hint is at (x, y) in logical coordinates, if any. */
+    fun hintAt(x: Float, y: Float): Btn? = synchronized(hints) {
+        hints.firstOrNull { it.first.contains(x, y) }?.second
+    }
+
     val theme: Theme get() = MainUI.themes.current
     private val smooth get() = MainUI.settings.smoothScaling
 
@@ -80,12 +89,17 @@ class Gfx {
         now = System.currentTimeMillis()
         wantsFrame = false
         redrawIn = 0L
+        hintsEndX = 0f
+        pendingHints.clear()
         bmpPaint.isFilterBitmap = smooth
         c.save()
         c.scale(scale, scale)
     }
 
-    fun end() = c.restore()
+    fun end() {
+        c.restore()
+        synchronized(hints) { hints.clear(); hints.addAll(pendingHints) }
+    }
 
     // ---- primitives --------------------------------------------------------------------
 
@@ -315,12 +329,23 @@ class Gfx {
         val hideLabels = theme.hideHintLabels
         fun hintPair(btn: String, label: String?) {
             if (label == null) return
+            val startX = x
             x += buttonIcon(btn, x, cy) + 5
             if (!hideLabels) x += text(label, theme.hint, x, cy - 1) + 30 else x += 25
+            btnFor(btn)?.let { pendingHints += RectF(startX - 10, y, x - 10, H) to it }
         }
         hintPair("A", aLabel)
         hintPair("B", bLabel)
         for ((b, l) in extra) hintPair(b, l)
+        hintsEndX = x - 30f
+    }
+
+    /** Right edge of the footer hints drawn this frame (footerStatus avoids overlapping them). */
+    private var hintsEndX = 0f
+
+    private fun btnFor(label: String): Btn? = when (label) {
+        "A" -> Btn.A; "B" -> Btn.B; "X" -> Btn.X; "Y" -> Btn.Y
+        "START" -> Btn.START; "SELECT" -> Btn.SELECT; "MENU" -> Btn.MENU; else -> null
     }
 
     /** Draws a button glyph (icon-A-54 / icon-B-54 / icon-x / icon-y from the skin). Returns its width. */
@@ -345,6 +370,8 @@ class Gfx {
     fun footerStatus(current: Int, total: Int) {
         val cur = if (total == 0) 0 else current
         val cy = H - 31f
+        val width = textWidth("$total", theme.total) + textWidth("$cur/", theme.currentPage)
+        if (W - 20f - width < hintsEndX + 12f) return // no room next to the hints
         val tw = text("$total", theme.total, W - 20f, cy, Align.RIGHT)
         text("$cur/", theme.currentPage, W - 20f - tw, cy, Align.RIGHT)
     }

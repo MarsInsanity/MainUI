@@ -25,7 +25,7 @@ data class Game(
  */
 class GameRepository(private val registry: SystemRegistry, private val storage: Storage) {
 
-    private class DirCache(val mtime: Long, val gamelistMtime: Long, val games: List<Game>)
+    private class DirCache(val mtime: Long, val metaStamp: Long, val games: List<Game>)
 
     private val dirCache = ConcurrentHashMap<String, DirCache>()
     private val gamelists = ConcurrentHashMap<String, GameListXml>()
@@ -56,6 +56,35 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
     }
 
     private val cachedMtime = ConcurrentHashMap<String, Long>()
+    private val dats = ConcurrentHashMap<String, LogiqxDat>()
+
+    /** The Logiqx DAT of a system folder, reloaded when it changes. */
+    fun dat(dir: File): LogiqxDat? {
+        val f = LogiqxDat.locate(dir) ?: run { dats.remove(dir.absolutePath); return null }
+        val cached = dats[dir.absolutePath]
+        if (cached != null && cached.file == f && cached.stamp() == f.lastModified() && cachedDatMtime[dir.absolutePath] == f.lastModified()) return cached
+        val d = LogiqxDat(f).load()
+        dats[dir.absolutePath] = d
+        cachedDatMtime[dir.absolutePath] = f.lastModified()
+        return d
+    }
+    private val cachedDatMtime = ConcurrentHashMap<String, Long>()
+
+    /**
+     * Metadata for a system folder according to Settings > Library > Metadata:
+     * gamelist.xml, a Logiqx DAT, or both (gamelist.xml wins, the DAT fills gaps).
+     */
+    fun meta(dir: File): MetaLookup {
+        return when (MainUIRef.metadataSource()) {
+            "gamelist" -> gamelist(dir)
+            "logiqx" -> dat(dir) ?: EmptyLookup
+            else -> {
+                val gl = gamelist(dir)
+                val d = dat(dir)
+                if (d == null) gl else if (!gl.file.isFile) d else CombinedLookup(gl, d)
+            }
+        }
+    }
 
     /**
      * Lists one directory of a system. [dir] null = the system's root folders
@@ -71,16 +100,17 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
     private fun sortKey(name: String): String = name.lowercase().removePrefix("the ")
 
     private fun listDir(system: GameSystem, dir: File): List<Game> {
-        val glFile = File(dir, "gamelist.xml")
+        val gl = meta(systemRootFor(system, dir))
+        val stamp = gl.stamp() * 7 + MainUIRef.metadataSource().hashCode()
         val cached = dirCache[dir.absolutePath]
-        if (cached != null && cached.mtime == dir.lastModified() && cached.gamelistMtime == glFile.lastModified()) return cached.games
+        if (cached != null && cached.mtime == dir.lastModified() && cached.metaStamp == stamp) return cached.games
         val files = dir.listFiles() ?: return emptyList()
-        val gl = gamelist(systemRootFor(system, dir))
         val hiddenByCue = discFilesToHide(files)
         val out = ArrayList<Game>(files.size)
         for (f in files) {
             val n = f.name
-            if (n.startsWith(".") || n == "gamelist.xml" || n.endsWith(".bak") || n.endsWith(".tmp")) continue
+            if (n.startsWith(".") || n == "gamelist.xml" || n.endsWith(".bak") || n.endsWith(".tmp") ||
+                n.endsWith(".dat", true)) continue
             if (f.isDirectory) {
                 if (n.lowercase() in SystemRegistry.IGNORED_FOLDERS || n.lowercase() in MEDIA_FOLDERS) continue
                 val entry = gl.get(f)
@@ -100,7 +130,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             out += Game(system.id, f, entry?.name?.takeIf { it.isNotBlank() } ?: cleanName(f.nameWithoutExtension),
                 imagePath = entry?.image ?: entry?.thumbnail, desc = entry?.desc)
         }
-        dirCache[dir.absolutePath] = DirCache(dir.lastModified(), glFile.lastModified(), out)
+        dirCache[dir.absolutePath] = DirCache(dir.lastModified(), stamp, out)
         return out
     }
 
@@ -135,7 +165,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
 
     fun countGames(system: GameSystem): Int {
         var n = 0
-        fun walk(d: File, depth: Int, gl: GameListXml) {
+        fun walk(d: File, depth: Int, gl: MetaLookup) {
             val files = d.listFiles() ?: return
             val hidden = discFilesToHide(files)
             for (f in files) {
@@ -144,11 +174,11 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
                     if (depth < 3 && f.name.lowercase() !in MEDIA_FOLDERS && f.name.lowercase() !in SystemRegistry.IGNORED_FOLDERS) {
                         if (f.extension.isNotEmpty() && system.def.accepts(f)) n++ else walk(f, depth + 1, gl)
                     }
-                } else if (system.def.accepts(f) && f.name != "gamelist.xml" && f.name.lowercase() !in hidden &&
+                } else if (system.def.accepts(f) && f.name != "gamelist.xml" && !f.name.endsWith(".dat", true) && f.name.lowercase() !in hidden &&
                     gl.get(f)?.hidden != true) n++
             }
         }
-        system.dirs.forEach { walk(it, 0, gamelist(it)) }
+        system.dirs.forEach { walk(it, 0, meta(it)) }
         system.gameCount = n
         return n
     }
@@ -183,7 +213,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val file = game.file ?: return null
         val sysRoot = if (system != null) systemRootFor(system, file.parentFile ?: file) else file.parentFile ?: return null
         game.imagePath?.let { p ->
-            val gl = gamelist(sysRoot)
+            val gl = meta(sysRoot)
             val f = gl.resolve(p)
             if (f != null) storage.mirrors(f).firstOrNull { it.isFile }?.let { return it }
         }
@@ -214,4 +244,16 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             return if (c.isEmpty()) s else c
         }
     }
+}
+
+/** Used when the chosen metadata file does not exist: plain file names. */
+object EmptyLookup : MetaLookup {
+    override fun get(romFile: File): GameListXml.Entry? = null
+    override fun resolve(value: String?): File? = null
+    override fun stamp(): Long = 0L
+}
+
+/** Indirection so this file stays free of Android singletons in unit tests. */
+object MainUIRef {
+    @Volatile var metadataSource: () -> String = { "both" }
 }

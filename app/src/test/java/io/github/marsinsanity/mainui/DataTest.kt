@@ -41,3 +41,18 @@ class DataTest {
         assertNull(Hashes.of(File("/does/not/exist")))
     }
 }
+
+class EmulatorConfigTest {
+    @Test fun stateSupportParsesEveryMode() {
+        assertEquals(io.github.marsinsanity.mainui.emu.StateSupport.HOTKEY, io.github.marsinsanity.mainui.emu.StateSupport.parse("hotkey"))
+        assertEquals(io.github.marsinsanity.mainui.emu.StateSupport.NONE, io.github.marsinsanity.mainui.emu.StateSupport.parse("none"))
+        assertEquals(io.github.marsinsanity.mainui.emu.StateSupport.API, io.github.marsinsanity.mainui.emu.StateSupport.parse("API"))
+        // anything unknown falls back to the emulator's own menu
+        assertEquals(io.github.marsinsanity.mainui.emu.StateSupport.MENU, io.github.marsinsanity.mainui.emu.StateSupport.parse(null))
+    }
+
+    @Test fun hotkeyLabelsAreReadable() {
+        assertEquals("F2", io.github.marsinsanity.mainui.emu.StandaloneController.keyLabel("keys:KEYCODE_F2"))
+        assertEquals("SHIFT_LEFT+F7", io.github.marsinsanity.mainui.emu.StandaloneController.keyLabel("keys:KEYCODE_SHIFT_LEFT+KEYCODE_F7"))
+    }
+}

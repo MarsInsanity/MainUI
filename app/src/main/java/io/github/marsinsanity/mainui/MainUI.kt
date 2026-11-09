@@ -50,6 +50,7 @@ class App : Application() {
         MainUI.storage = Storage(this, s)
         MainUI.systems = SystemRegistry(this, MainUI.storage)
         MainUI.games = GameRepository(MainUI.systems, MainUI.storage)
+        io.github.marsinsanity.mainui.data.MainUIRef.metadataSource = { s.metadataSource }
         MainUI.library = Library(MainUI.storage).apply { load() }
         MainUI.apps = Apps(this, MainUI.library, s)
         MainUI.emulators = EmulatorManager(this, MainUI.storage, s, MainUI.library)
@@ -57,6 +58,7 @@ class App : Application() {
         MainUI.themes = ThemeManager(this, MainUI.storage, s)
         MainUI.themes.reloadSounds()
 
+        io.github.marsinsanity.mainui.emu.Freezer.thawAll()
         MainUI.worker.execute {
             MainUI.emulators.refresh()
             MainUI.apps.reconcileNewInstalls(MainUI.emulators)

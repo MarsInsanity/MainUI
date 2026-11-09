@@ -43,6 +43,43 @@ open class ListScene(
 
     open fun back() = close()
 
+    // ---- touch scrolling: drag moves the list a row at a time, fling keeps going ----
+    private var dragAcc = 0f
+    private val itemH get() = if (list.large) 90f else 60f
+
+    /** Scrolls the visible window by [rows], keeping the selection inside it. */
+    fun scrollBy(rows: Int): Boolean {
+        if (list.size <= list.visible || rows == 0) return false
+        val old = list.scroll
+        list.scroll = (list.scroll + rows).coerceIn(0, list.size - list.visible)
+        list.active = list.active.coerceIn(list.scroll, list.scroll + list.visible - 1)
+        return list.scroll != old
+    }
+
+    override fun onDrag(dx: Float, dy: Float): Boolean {
+        if (dragAcc == 0f && kotlin.math.abs(dx) > kotlin.math.abs(dy)) return false
+        dragAcc += dy
+        var moved = false
+        while (dragAcc <= -itemH) { moved = scrollBy(1) || moved; dragAcc += itemH }
+        while (dragAcc >= itemH) { moved = scrollBy(-1) || moved; dragAcc -= itemH }
+        return true
+    }
+
+    override fun onDragEnd() { dragAcc = 0f }
+
+    override fun onFling(vx: Float, vy: Float): Boolean {
+        // ~0.3 s of travel at the fling speed
+        val rows = (-vy * 0.3f / itemH).toInt()
+        dragAcc = 0f
+        return scrollBy(rows)
+    }
+
+    override fun onSwipe(direction: Btn): Boolean = when (direction) {
+        Btn.UP -> scrollBy(-list.visible) || list.pageUp()
+        Btn.DOWN -> scrollBy(list.visible) || list.pageDown()
+        else -> false
+    }
+
     open fun activate() {
         val it = list.current ?: return
         if (it.disabled) return
@@ -120,6 +157,7 @@ class PopMenuScene(
             g.text(title, g.theme.title, g.W / 2, top - 25f, Align.CENTER, maxW = w - 20f, size = g.theme.title.size * 0.8f)
         }
         g.popPanel(rows, x, top, w, h)
+        panel = android.graphics.RectF(x, top, x + w, top + h)
         g.list(list, top + 5f, top + h - 5f, x, x + w, showPreview = false, dividers = false, stretch = true)
         g.footer("SELECT", "BACK")
     }
@@ -138,6 +176,19 @@ class PopMenuScene(
         Btn.B, Btn.SELECT, Btn.MENU -> { if (!repeat) close(); true }
         else -> false
     }
+
+    private var panel = android.graphics.RectF()
+
+    override fun onTap(x: Float, y: Float): Boolean {
+        if (!panel.contains(x, y)) { close(); return true }
+        val rows = minOf(list.size, 6)
+        val idx = list.scroll + ((y - panel.top - 5f) / ((panel.height() - 10f) / rows)).toInt()
+        if (idx !in 0 until list.size) return false
+        list.active = idx
+        return onKey(Btn.A, false)
+    }
+
+    override fun onDrag(dx: Float, dy: Float) = false
 }
 
 /**
@@ -188,6 +239,7 @@ class KeyboardScene(
         g.redrawAfter(500 - g.now % 500) // cursor blink
 
         val keyW = 52f; val keyH = 52f; val gap = 6f
+        keyRects.clear()
         var y = panelTop + 80f
         for (r in 0 until rowCount) {
             val n = colsIn(r)
@@ -199,6 +251,7 @@ class KeyboardScene(
                 val kb = g.skin(if (sel) "btn-bg-f" else "btn-bg-n")
                 if (kb != null) g.bmp(kb, x, y, widths[cI], keyH)
                 else g.fillRect(x, y, widths[cI], keyH, if (sel) g.theme.accent else Color.argb(90, 255, 255, 255), 8f)
+                keyRects += Triple(android.graphics.RectF(x, y, x + widths[cI], y + keyH), r, cI)
                 val label = if (r < rows().size) rows()[r][cI].toString() else specials[cI]
                 g.text(label, g.theme.list, x + widths[cI] / 2, y + keyH / 2, Align.CENTER,
                     size = if (label.length > 1) 20f else 26f, color = Color.WHITE)
@@ -207,6 +260,15 @@ class KeyboardScene(
             y += keyH + gap
         }
         g.footer("TYPE", "DEL", listOf("START" to "OK", "Y" to "SHIFT"))
+    }
+
+    private val keyRects = ArrayList<Triple<android.graphics.RectF, Int, Int>>()
+
+    override fun onTap(x: Float, y: Float): Boolean {
+        val hit = keyRects.firstOrNull { it.first.contains(x, y) } ?: return false
+        row = hit.second; col = hit.third
+        press()
+        return true
     }
 
     private fun type(ch: String) { sb.insert(cursor, ch); cursor += ch.length }

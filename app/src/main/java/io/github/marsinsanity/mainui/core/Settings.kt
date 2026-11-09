@@ -44,9 +44,9 @@ class Settings(ctx: Context) {
     // ---- look & feel ---------------------------------------------------------------
     /** Absolute path of the active theme directory, empty = built-in theme. */
     var themePath by str("theme_path", "")
-    /** "menu" = OnionOS 1x4 main menu, "carousel" = P60 style system carousel as home. */
+    /** "menu" = OnionOS 1x4 main menu, "row" = systems in one row of grid cells as home. */
     var homeLayout by str("home_layout", "menu")
-    /** "grid" = OnionOS games grid, "carousel" = P60 style carousel. */
+    /** "grid" = OnionOS 4x2 games grid, "row" = the same cells in one scrolling row. */
     var systemsLayout by str("systems_layout", "grid")
     /** "cover", "stretch" or "fit" for 640x480 theme backgrounds on non 4:3 screens. */
     var backgroundFit by str("background_fit", "cover")
@@ -65,18 +65,29 @@ class Settings(ctx: Context) {
 
     // ---- input ---------------------------------------------------------------------
     var swapAB by bool("swap_ab", false)
-    /** "home" (accessibility HOME intercept), "select_start", "l3_r3" (root input listener) or "off". */
-    var ingameTrigger by str("ingame_trigger", "home")
+    /**
+     * What a short Home press does while a game launched from MainUI is in front:
+     * "menu" (in-game menu), "gs" (Game Switcher), "home" (go to MainUI like Android does), "none".
+     */
+    var homePress by str("home_press", "menu")
+    /** Same choices for holding Home. */
+    var homeHold by str("home_hold", "gs")
+    /** How long Home must be held (ms). */
+    var homeHoldMs by int("home_hold_ms", 500)
+    /** Extra in-game menu trigger read through root getevent: "off", "select_start", "l3_r3". */
+    var comboTrigger by str("combo_trigger", "off")
     /** What HOME does while MainUI is in front: "menu_then_gs", "gs", "menu". */
     var homeInMainUI by str("home_in_mainui", "menu_then_gs")
-    /** Long press HOME in-game opens Game Switcher instead of the in-game menu. */
-    var longHomeGameSwitcher by bool("long_home_gs", true)
+    /** Holding HOME while MainUI is in front: "gs" (Game Switcher) or "none". Needs the overlay service. */
+    var homeHoldInMainUI by str("home_hold_in_mainui", "gs")
 
     // ---- library -------------------------------------------------------------------
     var autoSortAndroidGames by bool("auto_sort_android_games", true)
     var lastPackageReconcile by long("last_pkg_reconcile", 0L)
     /** Extra rom roots, one absolute path per line. */
     var extraRomRoots by str("extra_rom_roots", "")
+    /** Game metadata source: "gamelist" (gamelist.xml), "logiqx" (Logiqx DAT) or "both". */
+    var metadataSource by str("metadata_source", "both")
     /** "auto", "sd" or "internal": where MainUI keeps Themes / config / screenshots. */
     var dataLocation by str("data_location", "auto")
 
@@ -84,6 +95,8 @@ class Settings(ctx: Context) {
     var raPackageOverride by str("ra_package", "")
     var autoSaveOnExit by bool("auto_save_on_exit", true)
     var pauseOnMenu by bool("pause_on_menu", true)
+    /** Pause standalone emulators by freezing their process (SIGSTOP, needs root). */
+    var freezeStandalone by bool("freeze_standalone", true)
 
     // ---- scraper -------------------------------------------------------------------
     var ssUser by str("ss_user", "")
@@ -96,7 +109,8 @@ class Settings(ctx: Context) {
     /** "sd" or "internal" */
     var ssImageStorage by str("ss_image_storage", "sd")
     var ssOnlyMissing by bool("ss_only_missing", true)
-    var ssWriteGamelist by bool("ss_write_gamelist", true)
+    /** Where the scraper writes metadata: "gamelist", "logiqx", "both" or "none". */
+    var ssMetaFormat by str("ss_meta_format", "gamelist")
     var ssThreadsOverride by int("ss_threads_override", 0)
     var ssMaxImageWidth by int("ss_max_width", 640)
 

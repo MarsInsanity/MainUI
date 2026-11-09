@@ -19,6 +19,7 @@ import android.view.accessibility.AccessibilityEvent
 import io.github.marsinsanity.mainui.MainActivity
 import io.github.marsinsanity.mainui.MainUI
 import io.github.marsinsanity.mainui.core.Root
+import io.github.marsinsanity.mainui.emu.Freezer
 import io.github.marsinsanity.mainui.ui.MainUIView
 import io.github.marsinsanity.mainui.ui.scenes.InGameMenuScene
 import java.io.File
@@ -40,19 +41,22 @@ class OverlayService : AccessibilityService() {
     private var overlay: MainUIView? = null
     @Volatile var foregroundPackage: String? = null
         private set
-    private var homeDownAt = 0L
     private var longFired = false
+    @Volatile private var opening = false
     private var hotkeys: HotkeyListener? = null
     private val shotExecutor = Executors.newSingleThreadExecutor()
+    private val worker = Executors.newSingleThreadExecutor()
 
     private val longPress = Runnable {
         longFired = true
-        openGameSwitcher()
+        Log.d(TAG, "HOME held -> ${MainUI.settings.homeHold}")
+        perform(MainUI.settings.homeHold)
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        Freezer.thawAll()
         updateHotkeyListener()
     }
 
@@ -60,6 +64,8 @@ class OverlayService : AccessibilityService() {
         instance = null
         hotkeys?.stop()
         removeOverlay()
+        // Never leave a game frozen behind a dead overlay.
+        Freezer.frozen()?.let { pkg -> Thread { Freezer.thaw(pkg) }.start() }
         super.onDestroy()
     }
 
@@ -68,7 +74,12 @@ class OverlayService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName || pkg == "com.android.systemui" || pkg.contains("inputmethod")) return
+        if (pkg == packageName) {
+            // MainUI's own activity counts as "in front"; its overlay windows don't.
+            if (event.className?.toString() == MainActivity::class.java.name) foregroundPackage = pkg
+            return
+        }
+        if (pkg == "com.android.systemui" || pkg.contains("inputmethod")) return
         if (pkg != foregroundPackage) Log.d(TAG, "foreground: $pkg")
         foregroundPackage = pkg
     }
@@ -78,37 +89,100 @@ class OverlayService : AccessibilityService() {
         return foregroundPackage == s.pkg
     }
 
+    /**
+     * HOME inside a game launched from MainUI. A short press and a hold each run
+     * the action chosen in Settings > Controls (default: press = in-game menu,
+     * hold = Game Switcher). Everywhere else HOME behaves normally.
+     */
     override fun onKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode != KeyEvent.KEYCODE_HOME) return false
-        if (overlay != null) {
+        if (overlay != null || opening) {
             // HOME while the menu is up closes it (Continue)
-            if (event.action == KeyEvent.ACTION_UP) overlay?.dispatch(io.github.marsinsanity.mainui.ui.Btn.B, false)
+            if (event.action == KeyEvent.ACTION_UP && overlay != null) overlay?.dispatch(io.github.marsinsanity.mainui.ui.Btn.B, false)
             return true
         }
-        if (MainUI.settings.ingameTrigger != "home" || !gameInFront()) {
+        if (foregroundPackage == packageName) return homeInMainUI(event)
+        val press = MainUI.settings.homePress
+        val hold = MainUI.settings.homeHold
+        if (!gameInFront() || (press == "home" && hold == "home")) {
             if (event.action == KeyEvent.ACTION_DOWN) Log.d(TAG, "HOME passed through (fg=$foregroundPackage, session=${MainUI.sessions.active?.pkg})")
             return false
         }
+        // No separate hold action: act on the press itself, no waiting for release.
+        val instant = hold == "none" || hold == press
         when (event.action) {
             KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) {
-                homeDownAt = event.eventTime
                 longFired = false
-                if (MainUI.settings.longHomeGameSwitcher) main.postDelayed(longPress, LONG_PRESS_MS)
+                main.removeCallbacks(longPress)
+                if (instant) { longFired = true; Log.d(TAG, "HOME pressed -> $press"); perform(press) }
+                else main.postDelayed(longPress, MainUI.settings.homeHoldMs.toLong().coerceIn(200, 3000))
             }
             KeyEvent.ACTION_UP -> {
                 main.removeCallbacks(longPress)
-                if (!longFired) showMenu()
+                if (!longFired) { Log.d(TAG, "HOME pressed -> $press"); perform(press) }
             }
         }
         return true
     }
 
-    /** Captures the game frame then shows the in-game menu above it. */
+    private val mainUiHold = Runnable {
+        longFired = true
+        Log.d(TAG, "HOME held in MainUI -> Game Switcher")
+        MainActivity.instance?.showGameSwitcher()
+    }
+
+    /**
+     * HOME while MainUI itself is in front: holding it opens the Game Switcher,
+     * a short press is passed on as a normal HOME (back to the main menu, see
+     * Settings > Controls > Home inside MainUI).
+     */
+    private fun homeInMainUI(event: KeyEvent): Boolean {
+        if (MainUI.settings.homeHoldInMainUI != "gs") return false
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) {
+                longFired = false
+                main.removeCallbacks(mainUiHold)
+                main.postDelayed(mainUiHold, MainUI.settings.homeHoldMs.toLong().coerceIn(200, 3000))
+            }
+            KeyEvent.ACTION_UP -> {
+                main.removeCallbacks(mainUiHold)
+                if (!longFired) performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+        }
+        return true
+    }
+
+    /** Runs one of the configurable HOME actions. */
+    fun perform(action: String) {
+        when (action) {
+            "menu" -> showMenu()
+            "gs" -> openGameSwitcher()
+            "home" -> performGlobalAction(GLOBAL_ACTION_HOME)
+            else -> {}
+        }
+    }
+
+    /**
+     * Pauses the game, captures the paused frame, then shows the in-game menu
+     * above it. The pause happens first so the game never runs behind the menu.
+     */
     fun showMenu() {
         val s = MainUI.sessions.active ?: return
-        if (overlay != null) return
+        if (overlay != null || opening) return
+        opening = true
         Log.d(TAG, "showing in-game menu for ${s.name}")
-        capture { bmp -> main.post { addOverlay { view -> InGameMenuScene(view, s, bmp, overlayMode = true) } } }
+        worker.execute {
+            val controller = MainUI.sessions.controllerFor(s)
+            val paused = MainUI.settings.pauseOnMenu && runCatching { controller.pause() }.getOrDefault(false)
+            Log.d(TAG, "paused=$paused (${controller.javaClass.simpleName})")
+            capture { bmp ->
+                main.post {
+                    opening = false
+                    addOverlay { view -> InGameMenuScene(view, s, bmp, overlayMode = true, controller = controller, paused = paused) }
+                    if (overlay == null) worker.execute { controller.unpause() } // could not show: never leave it paused
+                }
+            }
+        }
     }
 
     private fun capture(done: (Bitmap?) -> Unit) {
@@ -176,7 +250,7 @@ class OverlayService : AccessibilityService() {
         v.destroy()
     }
 
-    private fun openGameSwitcher() {
+    fun openGameSwitcher() {
         // Remember the current frame for the switcher, then bring MainUI forward.
         val s = MainUI.sessions.active
         capture { bmp ->
@@ -194,7 +268,7 @@ class OverlayService : AccessibilityService() {
     /** Starts / stops the root key-combo listener according to settings. */
     fun updateHotkeyListener() {
         hotkeys?.stop(); hotkeys = null
-        val combo = when (MainUI.settings.ingameTrigger) {
+        val combo = when (MainUI.settings.comboTrigger) {
             "select_start" -> setOf("BTN_SELECT", "BTN_START")
             "l3_r3" -> setOf("BTN_THUMBL", "BTN_THUMBR")
             else -> return
@@ -207,7 +281,6 @@ class OverlayService : AccessibilityService() {
 
     companion object {
         private const val TAG = "MainUI.Overlay"
-        private const val LONG_PRESS_MS = 600L
 
         @Volatile var instance: OverlayService? = null
             private set
@@ -231,7 +304,7 @@ class HotkeyListener(private val combo: Set<String>, private val onCombo: () -> 
     fun start() {
         Thread {
             try {
-                val p = ProcessBuilder("su", "-c", "getevent -ql").redirectErrorStream(true).start()
+                val p = ProcessBuilder(*Root.rootArgv("getevent -ql")).redirectErrorStream(true).start()
                 process = p
                 val down = HashSet<String>()
                 p.inputStream.bufferedReader().useLines { lines ->

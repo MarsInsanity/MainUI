@@ -40,7 +40,8 @@ fun plural(n: Int, word: String) = if (n == 1) "1 $word" else "$n ${word}s"
 
 object HomeScenes {
     fun root(host: SceneHost): Scene =
-        if (MainUI.settings.homeLayout == "carousel") CarouselScene(host, null, home = true) else MainMenuScene(host)
+        if (MainUI.settings.homeLayout == "row" || MainUI.settings.homeLayout == "carousel") RowScene(host, null, home = true)
+        else MainMenuScene(host)
 
     /** OnionOS main menu entries (Recents and Expert can be hidden in settings). */
     fun menuTiles(host: SceneHost): List<Tile> {
@@ -56,7 +57,8 @@ object HomeScenes {
     }
 
     fun openSystems(host: SceneHost) {
-        if (MainUI.settings.systemsLayout == "carousel") host.push(CarouselScene(host, "Games", home = false))
+        val l = MainUI.settings.systemsLayout
+        if (l == "row" || l == "carousel") host.push(RowScene(host, "Games", home = false))
         else host.push(SystemsGridScene(host))
     }
 
@@ -67,7 +69,7 @@ object HomeScenes {
         if (err != null) host.toast(err)
     }
 
-    /** Tiles for the systems grid / carousel: Search, every system with games, Android. */
+    /** Tiles for the systems grid / row: Search, every system with games, Android. */
     fun systemTiles(host: SceneHost, systems: List<GameSystem>, includeSearch: Boolean): List<Tile> {
         val s = MainUI.settings
         val out = mutableListOf<Tile>()
@@ -112,6 +114,36 @@ object HomeScenes {
 
     /** Theme artwork for a tile, or null (caller draws the built-in replacement). */
     fun tileIcon(g: Gfx, t: Tile, selected: Boolean): Bitmap? = g.theme.icon(t.icons, selected)
+
+    /** Size of one cell of OnionOS' games grid (bg-game-item-f/n). */
+    const val CELL_W = 155f
+    const val CELL_H = 170f
+
+    /**
+     * One cell of the games grid: bg-game-item-f / -n, the system icon and its
+     * grid3x4 label. Shared by the grid and the row view.
+     */
+    fun drawCell(g: Gfx, t: Tile, x: Float, y: Float, sel: Boolean) {
+        val cellW = CELL_W; val cellH = CELL_H
+        val gs = g.theme.grid
+        val bg = g.skin(if (sel) "bg-game-item-f" else "bg-game-item-n")
+        if (bg != null) g.bmp(bg, x, y, cellW, cellH)
+        else if (sel) g.fillRect(x + 4, y + 4, cellW - 8, cellH - 8, Color.argb(70, 255, 255, 255), 14f)
+        val iconBoxH = if (g.theme.hideIconLabels) cellH - 20 else cellH - 46
+        // System icon, or for main menu entries the theme's ic-*-n/f tile scaled down
+        val icon = tileIcon(g, t, sel) ?: t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
+        if (icon != null) g.bmpFit(icon, x + 10, y + 8, cellW - 20, iconBoxH)
+        else if (t.glyph == "game") g.systemTile(t.short, x + 22, y + 18, cellW - 44, iconBoxH - 20, sel)
+        else {
+            g.systemTile("", x + 22, y + 18, cellW - 44, iconBoxH - 20, sel)
+            g.glyph(t.glyph, x + cellW / 2, y + 18 + (iconBoxH - 20) / 2, 30f, Color.WHITE)
+        }
+        if (!g.theme.hideIconLabels) {
+            val style = io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size3x4, gs.color)
+            g.text(t.label, style, x + cellW / 2, y + cellH - 22f, Align.CENTER, maxW = cellW - 8f,
+                color = if (sel) gs.selectedColor else gs.color, marquee = sel)
+        }
+    }
 }
 
 /**
@@ -170,6 +202,12 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
         return true
     }
 
+    override fun onSwipe(direction: Btn): Boolean = when (direction) {
+        Btn.RIGHT -> onKey(Btn.R1, false)
+        Btn.LEFT -> onKey(Btn.L1, false)
+        else -> false
+    }
+
     override fun onTap(x: Float, y: Float): Boolean {
         val w = host.logicalWidth
         val col = ((x - (w - 640f) / 2f - 8f) / 156f).toInt()
@@ -214,32 +252,14 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
         val perPage = cols * rows
         val page = index / perPage
         val pages = (tiles.size + perPage - 1) / perPage
-        val cellW = 155f; val cellH = 170f
+        val cellW = HomeScenes.CELL_W; val cellH = HomeScenes.CELL_H
         val x0 = g.cx0 + (640f - cols * cellW) / 2
         val areaTop = Gfx.HEADER; val areaH = g.H - Gfx.HEADER - Gfx.FOOTER - 30f
         val y0 = areaTop + (areaH - rows * cellH) / 2
-        val gs = g.theme.grid
-        val labelStyle = io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size3x4, gs.color)
-        val focus = g.skin("bg-game-item-f"); val normal = g.skin("bg-game-item-n")
         for (i in 0 until perPage) {
             val idx = page * perPage + i
             if (idx >= tiles.size) break
-            val t = tiles[idx]
-            val sel = idx == index
-            val x = x0 + (i % cols) * cellW
-            val y = y0 + (i / cols) * cellH
-            val bg = if (sel) focus else normal
-            if (bg != null) g.bmp(bg, x, y, cellW, cellH)
-            else if (sel) g.fillRect(x + 4, y + 4, cellW - 8, cellH - 8, Color.argb(70, 255, 255, 255), 14f)
-            val icon = HomeScenes.tileIcon(g, t, sel)
-            val iconBoxH = if (g.theme.hideIconLabels) cellH - 20 else cellH - 46
-            if (icon != null) g.bmpFit(icon, x + 10, y + 8, cellW - 20, iconBoxH)
-            else if (t.glyph == "game") g.systemTile(t.short, x + 22, y + 18, cellW - 44, iconBoxH - 20, sel)
-            else { g.systemTile("", x + 22, y + 18, cellW - 44, iconBoxH - 20, sel); g.glyph(t.glyph, x + cellW / 2, y + 18 + (iconBoxH - 20) / 2, 30f, Color.WHITE) }
-            if (!g.theme.hideIconLabels) {
-                g.text(t.label, labelStyle, x + cellW / 2, y + cellH - 22f, Align.CENTER, maxW = cellW - 8f,
-                    color = if (sel) gs.selectedColor else gs.color, marquee = sel)
-            }
+            HomeScenes.drawCell(g, tiles[idx], x0 + (i % cols) * cellW, y0 + (i / cols) * cellH, idx == index)
         }
         g.dots(pages, page, g.H - Gfx.FOOTER - 18f)
         g.footer("SELECT", "BACK")
@@ -268,6 +288,12 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
         return true
     }
 
+    override fun onSwipe(direction: Btn): Boolean = when (direction) {
+        Btn.RIGHT, Btn.DOWN -> onKey(Btn.R1, false)
+        Btn.LEFT, Btn.UP -> onKey(Btn.L1, false)
+        else -> false
+    }
+
     override fun onTap(x: Float, y: Float): Boolean {
         if (tiles.isEmpty()) return false
         val cellW = 155f; val cellH = 170f
@@ -284,15 +310,14 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
 }
 
 /**
- * Miyoo P60 style carousel: the focused icon large in the centre with its
- * neighbours scaled down on both sides, smooth scrolling between them.
- * [home] = top level screen (menu entries + systems), otherwise systems only.
+ * Row view: the games grid's own cells (bg-game-item-f/n, icon, label) in a
+ * single row that scrolls sideways. [home] = top level screen (main menu
+ * entries + systems), otherwise systems only. Replaces the old carousel.
  */
-class CarouselScene(host: SceneHost, private val title: String?, private val home: Boolean) : Scene(host) {
+class RowScene(host: SceneHost, private val title: String?, private val home: Boolean) : Scene(host) {
     private var tiles: List<Tile> = emptyList()
     private var index = if (home) MainUI.settings.mainMenuIndex else MainUI.settings.systemsIndex
-    private var pos = index.toFloat()
-    private var lastFrame = 0L
+    private var first = 0
     private var loading = true
 
     override fun onEnter() = reload(false)
@@ -308,65 +333,49 @@ class CarouselScene(host: SceneHost, private val title: String?, private val hom
                 front + sys + back
             } else sys
             index = index.coerceIn(0, max(0, tiles.size - 1))
-            if (loading) pos = index.toFloat()
             loading = false
         }
     }
 
-    override fun animating(now: Long) = abs(pos - index) > 0.001f
+    private fun visible(w: Float) = max(1, ((w - 20f) / HomeScenes.CELL_W).toInt())
+
+    private fun scrollTo(vis: Int) {
+        if (index < first) first = index
+        if (index >= first + vis) first = index - vis + 1
+        first = first.coerceIn(0, max(0, tiles.size - vis))
+    }
 
     override fun draw(g: Gfx) {
-        val now = g.now
-        val dt = if (lastFrame == 0L) 16f else min(64f, (now - lastFrame).toFloat())
-        lastFrame = now
-        pos += (index - pos) * min(1f, dt / 90f)
-        if (abs(pos - index) < 0.002f) pos = index.toFloat()
-
         g.background()
         g.header(title, logo = home)
         if (tiles.isEmpty()) {
-            g.text(if (loading) "Loading..." else "Nothing here yet", g.theme.list, g.W / 2, g.H / 2, Align.CENTER)
+            g.text(if (loading) "Loading..." else "No roms found. Put games in <storage>/roms/<system>/",
+                g.theme.list, g.W / 2, g.H / 2, Align.CENTER, maxW = g.W - 40f)
             g.footer(null, if (home) null else "BACK"); return
         }
-        val cy = Gfx.HEADER + (g.H - Gfx.HEADER - Gfx.FOOTER) * 0.43f
-        val baseW = 190f; val baseH = 206f
-        val spacing = 210f
-        // draw far items first so the focused one is on top
-        val order = tiles.indices.filter { abs(it - pos) < 3.2f }.sortedByDescending { abs(it - pos) }
-        for (i in order) {
-            val d = i - pos
-            val ad = abs(d)
-            val s = max(0.45f, 1.25f - ad * 0.42f)
-            val alpha = (255 * max(0.25f, 1f - ad * 0.38f)).toInt()
-            val w = baseW * s; val h = baseH * s
-            val cx = g.W / 2 + d * spacing * (1f - min(ad, 2f) * 0.1f)
-            val x = cx - w / 2; val y = cy - h / 2
-            val t = tiles[i]
-            val sel = i == index && ad < 0.5f
-            val img = t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") } ?: HomeScenes.tileIcon(g, t, sel)
-            if (img != null) g.bmpFit(img, x, y, w, h, alpha)
-            else if (t.skin != null || t.glyph != "game") {
-                g.systemTile("", x + w * 0.1f, y + h * 0.1f, w * 0.8f, h * 0.8f, sel, alpha)
-                g.glyph(t.glyph, cx, cy, w * 0.22f, Color.argb(alpha, 255, 255, 255))
-            } else g.systemTile(t.short, x + w * 0.1f, y + h * 0.1f, w * 0.8f, h * 0.8f, sel, alpha)
+        val vis = visible(g.W)
+        scrollTo(vis)
+        val count = min(vis, tiles.size)
+        val x0 = (g.W - count * HomeScenes.CELL_W) / 2
+        val y0 = Gfx.HEADER + (g.H - Gfx.HEADER - Gfx.FOOTER - HomeScenes.CELL_H) / 2
+        for (i in 0 until count) {
+            val idx = first + i
+            HomeScenes.drawCell(g, tiles[idx], x0 + i * HomeScenes.CELL_W, y0, idx == index)
         }
-        val cur = tiles[index]
-        val nameY = cy + baseH * 1.25f / 2 + 34f
-        g.text(cur.label, g.theme.title, g.W / 2, nameY, Align.CENTER, maxW = g.W - 80f, marquee = true)
-        cur.sub?.let { g.text(it, g.theme.list, g.W / 2, nameY + 38f, Align.CENTER, size = g.theme.list.size * 0.85f, alpha = 190) }
-        g.arrow(true, 16f, cy, withBg = true)
-        g.arrow(false, g.W - 16f, cy, withBg = true)
+        if (first > 0) g.arrow(true, 6f, y0 + HomeScenes.CELL_H / 2)
+        if (first + count < tiles.size) g.arrow(false, g.W - 6f, y0 + HomeScenes.CELL_H / 2)
         g.footer("SELECT", if (home) null else "BACK")
         g.footerStatus(index + 1, tiles.size)
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
         if (tiles.isEmpty()) { if (b == Btn.B && !home) { close(); return true }; return false }
+        val vis = visible(host.logicalWidth)
         when (b) {
-            Btn.LEFT, Btn.UP -> if (index > 0) index-- else if (!repeat) index = tiles.size - 1 else return false
-            Btn.RIGHT, Btn.DOWN -> if (index < tiles.size - 1) index++ else if (!repeat) index = 0 else return false
-            Btn.L1 -> index = max(0, index - 5)
-            Btn.R1 -> index = min(tiles.size - 1, index + 5)
+            Btn.LEFT -> if (index > 0) index-- else if (!repeat) index = tiles.size - 1 else return false
+            Btn.RIGHT -> if (index < tiles.size - 1) index++ else if (!repeat) index = 0 else return false
+            Btn.L1 -> index = max(0, index - vis)
+            Btn.R1 -> index = min(tiles.size - 1, index + vis)
             Btn.A -> if (!repeat) tiles[index].open()
             Btn.B -> if (!repeat && !home) close() else return false
             Btn.SELECT -> if (!repeat) { tiles[index].options?.invoke() ?: host.push(GameSwitcherScene(host)) }
@@ -376,18 +385,32 @@ class CarouselScene(host: SceneHost, private val title: String?, private val hom
             else -> return false
         }
         if (home) MainUI.settings.mainMenuIndex = index else MainUI.settings.systemsIndex = index
-        invalidate()
         return true
     }
 
+    private var dragAcc = 0f
+
+    /** Dragging the row moves the selection a cell at a time. */
+    override fun onDrag(dx: Float, dy: Float): Boolean {
+        if (dragAcc == 0f && kotlin.math.abs(dy) > kotlin.math.abs(dx)) return false
+        dragAcc += dx
+        while (dragAcc <= -HomeScenes.CELL_W / 2) { if (index < tiles.size - 1) index++; dragAcc += HomeScenes.CELL_W / 2 }
+        while (dragAcc >= HomeScenes.CELL_W / 2) { if (index > 0) index--; dragAcc -= HomeScenes.CELL_W / 2 }
+        return true
+    }
+
+    override fun onDragEnd() { dragAcc = 0f }
+    override fun onFling(vx: Float, vy: Float) = false
+
     override fun onTap(x: Float, y: Float): Boolean {
         if (tiles.isEmpty()) return false
-        val w = host.logicalWidth
-        when {
-            x < w * 0.3f -> if (index > 0) index--
-            x > w * 0.7f -> if (index < tiles.size - 1) index++
-            else -> tiles[index].open()
-        }
+        val vis = visible(host.logicalWidth)
+        val count = min(vis, tiles.size)
+        val x0 = (host.logicalWidth - count * HomeScenes.CELL_W) / 2
+        val c = floor((x - x0) / HomeScenes.CELL_W).toInt()
+        if (c !in 0 until count) return false
+        val idx = first + c
+        if (idx == index) tiles[idx].open() else index = idx
         return true
     }
 }
