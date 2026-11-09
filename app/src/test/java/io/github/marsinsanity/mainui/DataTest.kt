@@ -873,3 +873,39 @@ class UnzipSystemsTest {
         }
     }
 }
+
+class DialogSceneTest {
+    private class FakeHost : io.github.marsinsanity.mainui.ui.SceneHost {
+        val popped = ArrayList<io.github.marsinsanity.mainui.ui.Scene?>()
+        override val hostContext: android.content.Context get() = throw UnsupportedOperationException()
+        override val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        override val logicalWidth = 640f
+        override val logicalHeight = 480f
+        override fun push(scene: io.github.marsinsanity.mainui.ui.Scene) {}
+        override fun pop(scene: io.github.marsinsanity.mainui.ui.Scene?) { popped += scene }
+        override fun replace(scene: io.github.marsinsanity.mainui.ui.Scene) {}
+        override fun popToRoot() {}
+        override fun top(): io.github.marsinsanity.mainui.ui.Scene? = null
+        override fun invalidate() {}
+        override fun toast(message: String, millis: Long) {}
+        override fun <T> io(work: () -> T, done: (T) -> Unit): kotlinx.coroutines.Job { done(work()); return kotlinx.coroutines.Job() }
+        override fun finishHost() {}
+    }
+
+    @Test fun trailingLambdaIsTheConfirmAction() {
+        // Every caller writes DialogScene(host, title, text, "DOWNLOAD", "CANCEL") { download() }:
+        // A must run it and B must not (0.1.35-0.1.37 had them the other way round).
+        var confirmed = 0
+        val host = FakeHost()
+        val d = io.github.marsinsanity.mainui.ui.DialogScene(host, "Core not installed", "Download it?", "DOWNLOAD", "CANCEL") { confirmed++ }
+        d.onKey(io.github.marsinsanity.mainui.ui.Btn.B, false)
+        assertEquals(0, confirmed)
+        d.onKey(io.github.marsinsanity.mainui.ui.Btn.A, false)
+        assertEquals(1, confirmed)
+        var cancelled = 0
+        io.github.marsinsanity.mainui.ui.DialogScene(host, "t", "m", "YES", "NO", onCancel = { cancelled++ }) { confirmed++ }
+            .onKey(io.github.marsinsanity.mainui.ui.Btn.B, false)
+        assertEquals(1, cancelled)
+        assertEquals(1, confirmed)
+    }
+}

@@ -115,9 +115,9 @@ class DialogScene(
     private val message: String,
     private val confirmLabel: String? = "CONFIRM",
     private val cancelLabel: String? = "CANCEL",
-    private val onConfirm: () -> Unit = {},
-    /** B: besides closing the dialog. */
+    /** B: besides closing the dialog. Before [onConfirm] on purpose: callers pass the confirm action as a trailing lambda. */
     private val onCancel: () -> Unit = {},
+    private val onConfirm: () -> Unit = {},
 ) : Scene(host) {
     override val isOverlay = true
 
