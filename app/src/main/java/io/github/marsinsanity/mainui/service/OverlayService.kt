@@ -173,13 +173,23 @@ class OverlayService : AccessibilityService() {
         Log.d(TAG, "showing in-game menu for ${s.name}")
         worker.execute {
             val controller = MainUI.sessions.controllerFor(s)
+            runCatching { controller.prepare() }
             val paused = MainUI.settings.pauseOnMenu && runCatching { controller.pause() }.getOrDefault(false)
             Log.d(TAG, "paused=$paused (${controller.javaClass.simpleName})")
             capture { bmp ->
                 main.post {
                     opening = false
                     addOverlay { view -> InGameMenuScene(view, s, bmp, overlayMode = true, controller = controller, paused = paused) }
-                    if (overlay == null) worker.execute { controller.unpause() } // could not show: never leave it paused
+                    val v = overlay
+                    if (v == null) worker.execute { controller.unpause() } // could not show: never leave it paused
+                    else if (paused) {
+                        // The game lost focus to the overlay while frozen: let it acknowledge that
+                        // (see GameController.settle). Fallback timer in case no focus callback comes.
+                        var settled = false
+                        val settle = { if (!settled && overlay === v) { settled = true; worker.execute { controller.settle() } } }
+                        v.onWindowFocus = { has -> if (has) settle() }
+                        main.postDelayed({ settle() }, 1500)
+                    }
                 }
             }
         }

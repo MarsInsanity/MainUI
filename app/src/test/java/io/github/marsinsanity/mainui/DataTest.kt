@@ -56,3 +56,36 @@ class EmulatorConfigTest {
         assertEquals("SHIFT_LEFT+F7", io.github.marsinsanity.mainui.emu.StandaloneController.keyLabel("keys:KEYCODE_SHIFT_LEFT+KEYCODE_F7"))
     }
 }
+
+class CoresTest {
+    @Test
+    fun readsRetroArchConfigValues() {
+        val cfg = """
+            libretro_directory = "/data/user/0/com.retroarch.aarch64/cores"
+            libretro_info_path = ""
+            savefile_directory = "default"
+        """.trimIndent()
+        assertEquals("/data/user/0/com.retroarch.aarch64/cores",
+            io.github.marsinsanity.mainui.emu.RetroArchCores.cfgValue(cfg, "libretro_directory"))
+        // Empty and "default" mean RetroArch's built-in location.
+        assertEquals(null, io.github.marsinsanity.mainui.emu.RetroArchCores.cfgValue(cfg, "libretro_info_path"))
+        assertEquals(null, io.github.marsinsanity.mainui.emu.RetroArchCores.cfgValue(cfg, "savefile_directory"))
+        assertEquals(null, io.github.marsinsanity.mainui.emu.RetroArchCores.cfgValue(cfg, "missing_key"))
+    }
+
+    @Test
+    fun coreNamesFromPaths() {
+        val c = io.github.marsinsanity.mainui.emu.RetroArchCores
+        assertEquals("mgba", c.coreName("/data/data/com.retroarch/cores/mgba_libretro_android.so"))
+        assertEquals("yabadabadoo", c.coreName("lib/arm64-v8a/yabadabadoo_libretro_android.so"))
+        assertEquals("https://buildbot.libretro.com/nightly/android/latest/arm64-v8a/mgba_libretro_android.so.zip",
+            c.downloadUrl("arm64-v8a", "mgba"))
+    }
+
+    @Test
+    fun formatsSizes() {
+        assertEquals("1 KB", io.github.marsinsanity.mainui.store.formatBytes(10))
+        assertEquals("20 KB", io.github.marsinsanity.mainui.store.formatBytes(20 * 1024))
+        assertEquals("2.5 MB", io.github.marsinsanity.mainui.store.formatBytes(2_621_440))
+    }
+}

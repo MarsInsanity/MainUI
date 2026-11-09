@@ -89,7 +89,7 @@ EXTRA_CORES = {
     'nds': ['melondsds', 'melonds', 'desmume'],
     'psp': ['ppsspp'],
     'gc': ['dolphin'],
-    'saturn': ['yabasanshiro', 'mednafen_saturn'],
+    'saturn': ['yabasanshiro', 'mednafen_saturn', 'yabadabadoo'],
     'atarijaguar': ['virtualjaguar'],
 }
 

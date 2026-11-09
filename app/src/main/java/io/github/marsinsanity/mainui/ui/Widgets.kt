@@ -136,6 +136,17 @@ class DialogScene(
     override fun onTap(x: Float, y: Float): Boolean { close(); onConfirm(); return true }
 }
 
+/** "Working..." panel over the current screen; swallows input until the caller pops it. */
+class BusyScene(host: SceneHost, @Volatile var text: String) : Scene(host) {
+    override val isOverlay = true
+    override fun draw(g: Gfx) {
+        g.dim(90)
+        g.infoPanel(text)
+    }
+    override fun onKey(b: Btn, repeat: Boolean) = true
+    override fun onTap(x: Float, y: Float) = true
+}
+
 /** Small options menu over the current screen (Onion pop menu, bg-pop-menu-N). */
 class PopMenuScene(
     host: SceneHost,

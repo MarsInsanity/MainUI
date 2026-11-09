@@ -39,6 +39,66 @@ object Root {
         return arrayOf("sh", "-c", "printf '%s\\nexit\\n' ${q(cmd)} | nc -q 60 127.0.0.1 $port")
     }
 
+    /** argv for an interactive root shell that reads commands from stdin. */
+    private fun shellArgv(): Array<String> {
+        val port = testRootPort ?: return arrayOf("su")
+        return arrayOf("sh", "-c", "nc 127.0.0.1 $port")
+    }
+
+    /**
+     * One root shell kept open for latency critical commands (freezing and
+     * thawing a game around the in-game menu): spawning `su` costs 50-300 ms
+     * on a handheld, writing a line to an open shell costs almost nothing.
+     * Falls back to [exec] when the shell can't be started.
+     */
+    object Shell {
+        private var proc: Process? = null
+        private var stdin: java.io.Writer? = null
+        private val lines = java.util.concurrent.LinkedBlockingQueue<String>()
+        private var seq = 0
+
+        @Synchronized
+        fun run(cmd: String, timeoutMs: Long = 5000): Result {
+            if (!knownAvailable() && !available()) return Result(-1, "", "no root")
+            val alive = proc?.isAlive == true
+            if (!alive && start() == null) return exec(cmd, timeoutMs / 1000 + 1)
+            val marker = "__mainui_end_${++seq}__"
+            try {
+                stdin!!.write("$cmd\necho \"$marker \$?\"\n")
+                stdin!!.flush()
+            } catch (e: java.io.IOException) {
+                close()
+                return exec(cmd, timeoutMs / 1000 + 1)
+            }
+            val out = StringBuilder()
+            val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
+            while (true) {
+                val left = deadline - android.os.SystemClock.uptimeMillis()
+                val l = if (left > 0) lines.poll(left, TimeUnit.MILLISECONDS) else null
+                if (l == null) { close(); return Result(-2, out.toString(), "timeout") }
+                if (l.startsWith(marker)) return Result(l.substringAfter(' ').trim().toIntOrNull() ?: 0, out.toString(), "")
+                out.appendLine(l)
+            }
+        }
+
+        private fun start(): Process? = runCatching {
+            lines.clear()
+            val p = ProcessBuilder(*shellArgv()).redirectErrorStream(true).start()
+            proc = p
+            stdin = p.outputStream.bufferedWriter()
+            Thread({ runCatching { p.inputStream.bufferedReader().forEachLine { lines.put(it) } } }, "root-shell")
+                .apply { isDaemon = true }.start()
+            p
+        }.onFailure { Log.w(TAG, "root shell failed", it) }.getOrNull()
+
+        @Synchronized
+        fun close() {
+            runCatching { proc?.destroy() }
+            proc = null
+            stdin = null
+        }
+    }
+
     /** True when `su` exists and granted us root. Cached after first success. */
     fun available(): Boolean {
         cached?.let { return it }

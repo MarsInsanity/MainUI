@@ -260,28 +260,41 @@ class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val g
     override val extraHints get() = listOf("X" to "RESET")
 
     override fun onEnter() {
+        build()
+        // Pick up cores added in RetroArch since the last scan.
+        host.io({ MainUI.emulators.refreshCoresIfStale(3000) }) { build() }
+    }
+
+    private fun build() {
         val current = if (game != null) MainUI.library.coreForGame(game.key) else MainUI.library.coreForSystem(def.id)
         val effective = MainUI.emulators.choose(def, game)?.ref
         val opts = MainUI.emulators.optionsFor(def)
         var defaultMarked = false
         list.set(opts.map { o ->
-            val status = when (o.installed) { true -> null; false -> "not installed"; null -> "?" }
+            val canGet = o.installed == false && o.isRetroArch
+            val status = when (o.installed) { true -> null; false -> if (canGet) "get" else "not installed"; null -> "?" }
             val isDefault = !defaultMarked && o.installed != false && o.recommended
             if (isDefault) defaultMarked = true
             val label = o.name + if (isDefault) " (default)" else ""
             UiItem(label, ItemType.TOGGLE, value = if (o.ref == effective) 1 else 0, sub = status,
-                disabled = o.installed == false, data = o.ref)
+                disabled = o.installed == false && !canGet, data = o)
         }, false)
         list.active = list.items.indexOfFirst { it.value == 1 }.coerceAtLeast(0)
         if (current == null && game != null) title = "Game core (using system)"
     }
 
+    override fun onResume() = build()
+
     override fun activate() {
-        val ref = list.current?.data as? String ?: return
+        val o = list.current?.data as? io.github.marsinsanity.mainui.emu.EmuOption ?: return
         if (list.current?.disabled == true) return
-        if (game != null) MainUI.library.setCoreForGame(game.key, ref) else MainUI.library.setCoreForSystem(def.id, ref)
-        host.toast("${MainUI.emulators.nameOf(ref)} selected")
-        close()
+        val select = {
+            if (game != null) MainUI.library.setCoreForGame(game.key, o.ref) else MainUI.library.setCoreForSystem(def.id, o.ref)
+            host.toast("${MainUI.emulators.nameOf(o.ref)} selected")
+            close()
+        }
+        // A RetroArch core that isn't installed yet: offer to download it first.
+        if (o.isRetroArch && o.installed == false) CoreInstall.offer(host, o.core) { select() } else select()
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {

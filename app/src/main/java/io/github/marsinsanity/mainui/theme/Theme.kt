@@ -180,6 +180,20 @@ class Theme private constructor(
             if (selected) image("icons/sel/$n.png")?.let { return it }
             image("icons/$n.png")?.let { return it }
         }
+        // Not in this theme: the bundled MainUI theme has an icon for every system.
+        val fb = iconFallbackDir ?: return null
+        if (dir != null && fb.parentFile?.absolutePath == dir.absolutePath) return null
+        for (n in names) {
+            for (rel in if (selected) listOf("sel/$n.png", "$n.png") else listOf("$n.png")) {
+                val key = "fallback:$rel"
+                val cached = bitmaps[key]
+                if (cached != null) { if (cached is Bitmap) return cached; continue }
+                val f = File(fb, rel)
+                val bmp = if (f.isFile) runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() else null
+                bitmaps[key] = bmp ?: MISSING
+                if (bmp != null) return bmp
+            }
+        }
         return null
     }
 
@@ -208,6 +222,9 @@ class Theme private constructor(
 
     companion object {
         private val MISSING = Any()
+
+        /** icons/ of the bundled MainUI theme, used for systems a theme has no icon for. */
+        @Volatile var iconFallbackDir: File? = null
 
         /** Onion bundled font names -> fonts shipped with this app ("" = system bold). */
         private val BUNDLED_ALIASES = mapOf(

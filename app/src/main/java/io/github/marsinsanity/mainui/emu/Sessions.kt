@@ -130,7 +130,7 @@ class SessionManager(
     }
 
     fun controllerFor(s: Session): GameController =
-        if (s.isRetroArch) RetroArchController(emulators.raCommandPort)
+        if (s.isRetroArch) RetroArchController(emulators.raCommandPort, s.pkg)
         else StandaloneController(s.pkg, s.emuRef?.let { emulators.defFor(it) })
 
     // ---- screenshots -----------------------------------------------------------------

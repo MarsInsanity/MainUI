@@ -118,7 +118,9 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
                 // Folders named like a rom (e.g. "Game.m3u/") count as a game, like ES-DE.
                 if (f.extension.isNotEmpty() && system.def.accepts(f)) {
                     out += Game(system.id, f, entry?.name ?: f.nameWithoutExtension, imagePath = entry?.image, desc = entry?.desc)
-                } else {
+                } else if (entry != null || hasRoms(system, f, 0)) {
+                    // Folders without any playable file (e.g. RetroArch's per-core save
+                    // folders like "Gambatte/" next to the roms) are not shown.
                     out += Game(system.id, f, entry?.name ?: n, isFolder = true, imagePath = entry?.image)
                 }
                 continue
@@ -132,6 +134,19 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         }
         dirCache[dir.absolutePath] = DirCache(dir.lastModified(), stamp, out)
         return out
+    }
+
+    private fun hasRoms(system: GameSystem, dir: File, depth: Int): Boolean {
+        val files = dir.listFiles() ?: return false
+        for (f in files) {
+            if (f.name.startsWith(".")) continue
+            if (f.isDirectory) {
+                if (f.extension.isNotEmpty() && system.def.accepts(f)) return true
+            } else if (system.def.accepts(f) && !f.name.endsWith(".dat", true) && f.name != "gamelist.xml") return true
+        }
+        if (depth >= 2) return false
+        return files.any { it.isDirectory && !it.name.startsWith(".") && it.name.lowercase() !in MEDIA_FOLDERS &&
+            it.name.lowercase() !in SystemRegistry.IGNORED_FOLDERS && hasRoms(system, it, depth + 1) }
     }
 
     /** gamelist.xml lives in the system's top folder even for games in sub folders. */

@@ -106,6 +106,8 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         io.github.marsinsanity.mainui.emu.Freezer.thawAll()
+        // Cores downloaded in RetroArch while MainUI was in the background.
+        MainUI.worker.execute { runCatching { MainUI.emulators.refreshCoresIfStale(15_000) } }
         immersive()
         if (MainUI.sessions.active != null && leftForSession && !keepSession) {
             // Back in MainUI without a HOME press: the emulator / app closed itself.

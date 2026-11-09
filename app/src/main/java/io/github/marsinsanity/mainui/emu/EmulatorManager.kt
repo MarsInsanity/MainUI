@@ -89,6 +89,13 @@ class EmulatorManager(
     /** Installed core basenames, null if unknown (no root). */
     @Volatile var raCores: Set<String>? = null
         private set
+    /** core basename -> path RetroArch loads it from. */
+    @Volatile private var corePaths: Map<String, String> = emptyMap()
+    /** False when some core folders couldn't be read (no root): missing cores are then "unknown". */
+    @Volatile private var coresComplete = false
+    @Volatile var raCoreDir: String? = null
+        private set
+    @Volatile private var lastCoreScan = 0L
     /** core basename -> display name / supported extensions read from RetroArch .info files (root). */
     private val coreInfo = HashMap<String, Pair<String, Set<String>>>()
     private val installedPkgs = HashMap<String, String?>() // emu id -> installed package
@@ -171,18 +178,33 @@ class EmulatorManager(
         val ra = settings.raPackageOverride.takeIf { it.isNotBlank() && installed(it) }
             ?: retroarch.packages.firstOrNull { installed(it) }
         raPackage = ra
-        raCores = null
-        coreInfo.clear()
-        if (ra != null && Root.available()) {
-            val names = Root.listDir("/data/data/$ra/cores")
-                .filter { it.endsWith("_libretro_android.so") }
-                .map { it.removeSuffix("_libretro_android.so") }
-                .toSet()
-            raCores = names
-            // .info files give us names + extensions so cores we don't know still show up.
-            val info = Root.exec("cd /data/data/$ra/info 2>/dev/null && grep -H -E '^(display_name|supported_extensions) *=' *.info").lines
+        refreshCores()
+    }
+
+    /**
+     * Re-scans RetroArch's cores (cores added in RetroArch's Online Updater
+     * show up without restarting MainUI). Call off the main thread.
+     */
+    fun refreshCores() {
+        val ra = raPackage
+        lastCoreScan = android.os.SystemClock.uptimeMillis()
+        if (ra == null) {
+            raCores = null; corePaths = emptyMap(); coresComplete = false; raCoreDir = null
+            return
+        }
+        val cfg = if (Root.knownAvailable() || Root.available()) Root.readFile(raConfigPath(ra))
+        else runCatching { File(raConfigPath(ra)).readText() }.getOrNull()
+        val scan = RetroArchCores.scan(ctx, ra, cfg)
+        corePaths = scan.cores
+        coresComplete = scan.complete
+        raCoreDir = scan.coreDir
+        raCores = if (scan.complete || scan.cores.isNotEmpty()) scan.cores.keys else null
+        // .info files give us names + extensions so cores we don't know still show up.
+        val info = HashMap<String, Pair<String, Set<String>>>()
+        if (Root.knownAvailable()) {
+            val lines = Root.exec("cd ${Root.q(scan.infoDir)} 2>/dev/null && grep -H -E '^(display_name|supported_extensions) *=' *.info").lines
             val tmp = HashMap<String, Pair<String?, Set<String>>>()
-            for (line in info) {
+            for (line in lines) {
                 val file = line.substringBefore(':').removeSuffix("_libretro.info")
                 val kv = line.substringAfter(':')
                 val key = kv.substringBefore('=').trim()
@@ -191,16 +213,60 @@ class EmulatorManager(
                 tmp[file] = if (key == "display_name") value to cur.second
                 else cur.first to value.split('|').map { it.lowercase() }.toSet()
             }
-            for ((k, v) in tmp) coreInfo[k] = (v.first ?: k) to v.second
+            for ((k, v) in tmp) info[k] = (v.first ?: k) to v.second
         }
+        synchronized(coreInfo) { coreInfo.clear(); coreInfo.putAll(info) }
     }
+
+    /** Re-scan cores when the last scan is older than [maxAgeMs]. */
+    fun refreshCoresIfStale(maxAgeMs: Long = 10_000) {
+        if (android.os.SystemClock.uptimeMillis() - lastCoreScan > maxAgeMs) refreshCores()
+    }
+
+    /** Is [core] installed? null = can't tell (no root). */
+    fun coreInstalled(core: String): Boolean? = when {
+        raPackage == null -> false
+        core in corePaths -> true
+        coresComplete -> false
+        else -> null
+    }
+
+    /**
+     * Installs [core] into RetroArch (root): from MainUI/cores when a file for it
+     * is there, otherwise downloaded from the libretro buildbot.
+     */
+    fun installCore(core: String, progress: (String) -> Unit = {}): Result<String> = runCatching {
+        val ra = raPackage ?: throw IllegalStateException("RetroArch is not installed")
+        val dir = raCoreDir ?: "/data/data/$ra/cores"
+        val local = localCores()[core]
+        if (local != null) RetroArchCores.installFile(ctx, ra, dir, local, core, progress)
+        else RetroArchCores.install(ctx, ra, dir, core, progress)
+        refreshCores()
+        "${coreDisplayName(core)} installed"
+    }
+
+    /** Folder for cores that aren't on the buildbot (custom builds): <storage>/MainUI/cores. */
+    val localCoreDir: File get() = storage.dataDir("cores")
+
+    /** core -> file for every `*_libretro_android.so` (or .zip of one) in [localCoreDir]. */
+    fun localCores(): Map<String, File> =
+        (localCoreDir.listFiles() ?: emptyArray()).filter { it.isFile }.mapNotNull { f ->
+            val n = f.name.removeSuffix(".zip").removeSuffix(".ZIP")
+            if (n.endsWith(RetroArchCores.SUFFIX)) RetroArchCores.coreName(n) to f else null
+        }.toMap()
+
+    /** Every RetroArch core recommended for any system (for the core installer). */
+    fun recommendedCores(): List<String> = systemsCoreRefs().distinct()
+
+    private fun systemsCoreRefs(): List<String> =
+        io.github.marsinsanity.mainui.MainUI.systems.defs.flatMap { d -> d.emulators.filter { it.startsWith("ra:") }.map { it.removePrefix("ra:") } }
 
     fun isEmulatorPackage(pkg: String): Boolean =
         pkg in retroarch.packages || standalone.values.any { pkg in it.packages }
 
     fun standaloneDefs(): Collection<EmuDef> = standalone.values
     fun installedPackage(id: String): String? = installedPkgs[id]
-    fun coreDisplayName(core: String): String = coreInfo[core]?.first ?: prettyCore(core)
+    fun coreDisplayName(core: String): String = synchronized(coreInfo) { coreInfo[core]?.first } ?: prettyCore(core)
 
     fun nameOf(ref: String): String = when {
         ref.startsWith("ra:") -> coreDisplayName(ref.removePrefix("ra:"))
@@ -211,9 +277,7 @@ class EmulatorManager(
     private fun option(ref: String, recommended: Boolean): EmuOption? = when {
         ref.startsWith("ra:") -> {
             val core = ref.removePrefix("ra:")
-            val cores = raCores
-            EmuOption(ref, "${coreDisplayName(core)} (RetroArch)",
-                if (raPackage == null) false else cores?.contains(core), raPackage, recommended)
+            EmuOption(ref, "${coreDisplayName(core)} (RetroArch)", coreInstalled(core), raPackage, recommended)
         }
         ref.startsWith("sa:") -> {
             val d = standalone[ref.removePrefix("sa:")] ?: return null
@@ -236,7 +300,10 @@ class EmulatorManager(
             for (c in cores.sorted()) {
                 val ref = "ra:$c"
                 if (ref in known) continue
-                val exts = coreInfo[c]?.second ?: emptySet()
+                // Containers (.zip, .chd, .iso...) say nothing about the system: a Saturn core
+                // listing .zip must not show up for NES. Match on the specific extensions only.
+                val exts = (synchronized(coreInfo) { coreInfo[c]?.second } ?: emptySet()) - GENERIC_EXTENSIONS
+                // Unknown folders (no extension list) offer every core, so one can be picked by hand.
                 if (sys.extensions.isEmpty() || exts.any { it in sys.extensions }) {
                     option(ref, false)?.let { out += it }
                 }
@@ -250,13 +317,23 @@ class EmulatorManager(
         val opts = optionsFor(sys)
         val chosen = (game?.let { library.coreForGame(it.key) } ?: library.coreForSystem(sys.id))
         chosen?.let { ref -> (opts.firstOrNull { it.ref == ref } ?: option(ref, false))?.let { return it } }
-        return opts.firstOrNull { it.installed == true }
-            ?: opts.firstOrNull { it.installed == null }
+        // Automatic choice: recommended emulators, or other cores whose .info lists this
+        // game's extension (a Game Boy core claims .gb, which the GBA folder also accepts,
+        // but it can't run a .gba file).
+        val ext = game?.file?.let { if (it.isDirectory) null else it.extension.lowercase() }
+        val fits = opts.filter { o ->
+            o.recommended || ext == null || !o.isRetroArch ||
+                (synchronized(coreInfo) { coreInfo[o.core]?.second }?.contains(ext) ?: false)
+        }
+        return fits.firstOrNull { it.installed == true }
+            ?: fits.firstOrNull { it.installed == null }
+            ?: fits.firstOrNull()
             ?: opts.firstOrNull()
     }
 
     fun raConfigPath(pkg: String) = "/storage/emulated/0/Android/data/$pkg/files/retroarch.cfg"
-    fun raCorePath(pkg: String, core: String) = "/data/data/$pkg/cores/${core}_libretro_android.so"
+    fun raCorePath(pkg: String, core: String) =
+        corePaths[core] ?: "${raCoreDir ?: "/data/data/$pkg/cores"}/$core${RetroArchCores.SUFFIX}"
 
     /** Builds the launch intent. Throws [IllegalStateException] with a user readable reason. */
     fun buildIntent(game: Game, opt: EmuOption): Intent {
@@ -344,7 +421,11 @@ class EmulatorManager(
             "network_cmd_port" to "\"$raCommandPort\"",
             "savestate_auto_index" to "\"false\"",
             "savestate_thumbnail_enable" to "\"true\"",
-            "pause_nonactive" to "\"false\"",
+            // RetroArch pauses itself while MainUI's menu or Game Switcher has focus
+            // (official Android builds have no pause command).
+            "pause_nonactive" to "\"true\"",
+            // Flush in-game saves (SRAM) every 10 s so a force stopped game keeps them
+            "autosave_interval" to "\"10\"",
         )
         if (settings.autoSaveOnExit) {
             wanted["savestate_auto_save"] = "\"true\""
@@ -360,6 +441,9 @@ class EmulatorManager(
     }
 
     companion object {
+        /** Archive / disc image extensions that many unrelated cores accept. */
+        val GENERIC_EXTENSIONS = setOf("zip", "7z", "rar", "gz", "bin", "iso", "img", "chd", "cue", "m3u", "ccd", "mds", "cso", "pbp", "toc", "ecm")
+
         private val FLAGS = mapOf(
             "NEW_TASK" to Intent.FLAG_ACTIVITY_NEW_TASK,
             "CLEAR_TASK" to Intent.FLAG_ACTIVITY_CLEAR_TASK,
@@ -377,7 +461,7 @@ class EmulatorManager(
             "pcsx_rearmed" to "PCSX ReARMed", "swanstation" to "SwanStation", "mupen64plus_next_gles3" to "Mupen64Plus-Next",
             "parallel_n64" to "ParaLLEl N64", "flycast" to "Flycast", "fbneo" to "FinalBurn Neo", "mame2003_plus" to "MAME 2003-Plus",
             "mame2010" to "MAME 2010", "mame" to "MAME", "ppsspp" to "PPSSPP", "melondsds" to "melonDS DS", "melonds" to "melonDS",
-            "desmume" to "DeSmuME", "citra" to "Citra", "dolphin" to "Dolphin", "yabasanshiro" to "YabaSanshiro",
+            "desmume" to "DeSmuME", "citra" to "Citra", "dolphin" to "Dolphin", "yabasanshiro" to "YabaSanshiro", "yabadabadoo" to "Yabadabadoo",
             "mednafen_saturn" to "Beetle Saturn", "dosbox_pure" to "DOSBox Pure", "scummvm" to "ScummVM",
             "mednafen_pce_fast" to "Beetle PCE Fast", "mednafen_ngp" to "Beetle NeoPop", "mednafen_wswan" to "Beetle WonderSwan",
             "mednafen_vb" to "Beetle VB", "handy" to "Handy", "stella" to "Stella", "stella2014" to "Stella 2014",

@@ -1,0 +1,52 @@
+{
+    "name": "MainUI",
+    "author": "MainUI",
+    "description": "MainUI's default theme: deep blue, with art for every system MainUI supports.",
+    "hideLabels": {
+        "icons": false,
+        "hints": false
+    },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "Exo-2-Bold-Italic.ttf",
+        "size": 18,
+        "color": "#FFFFFF",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": {
+        "font": "Exo-2-Bold-Italic.ttf",
+        "size": 30,
+        "color": "#FFFFFF"
+    },
+    "hint": {
+        "font": "Exo-2-Bold-Italic.ttf",
+        "size": 30,
+        "color": "#FFFFFF"
+    },
+    "currentpage": {
+        "color": "#56DCFF"
+    },
+    "total": {
+        "color": "#FFFFFF"
+    },
+    "grid": {
+        "font": "Exo-2-Bold-Italic.ttf",
+        "grid1x4": 24,
+        "grid3x4": 17,
+        "color": "#96B0DC",
+        "selectedcolor": "#FFFFFF"
+    },
+    "list": {
+        "font": "Exo-2-Bold-Italic.ttf",
+        "size": 24,
+        "color": "#FFFFFF"
+    },
+    "mainui": {
+        "accent": "#3A96FF",
+        "panel": "#F0122A5A",
+        "background": "#050C1E"
+    }
+}

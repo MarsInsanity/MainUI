@@ -15,9 +15,17 @@ import java.util.zip.ZipFile
 /** Lists, installs and applies OnionOS themes; owns the active [Theme]. */
 class ThemeManager(private val ctx: Context, private val storage: Storage, private val settings: Settings) {
 
-    data class ThemeEntry(val dir: File?, val zip: File?, val name: String, val author: String, val description: String) {
-        val id get() = dir?.absolutePath ?: zip?.absolutePath ?: "builtin"
+    /**
+     * [key] is what Settings.themePath stores: "" for the bundled MainUI theme,
+     * [CLASSIC] for the flat theme drawn in code, otherwise the theme folder.
+     */
+    data class ThemeEntry(val dir: File?, val zip: File?, val name: String, val author: String, val description: String,
+                          val key: String = dir?.absolutePath ?: zip?.absolutePath ?: CLASSIC) {
+        val id get() = key
     }
+
+    /** The bundled default theme (assets/themes/MainUI), unpacked to app storage. */
+    val builtinDir: File = File(ctx.filesDir, "themes/MainUI").also { extractBuiltin(it) }
 
     @Volatile var current: Theme = loadTheme(settings.themePath)
         private set
@@ -30,8 +38,37 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     fun onThemeChanged(l: (Theme) -> Unit) { listeners += l }
 
     private fun loadTheme(path: String): Theme {
-        val dir = path.takeIf { it.isNotBlank() }?.let { File(it) }?.takeIf { File(it, "config.json").isFile || File(it, "skin").isDirectory }
+        // Themes that lack a system icon borrow the bundled theme's (it has one for every system).
+        Theme.iconFallbackDir = File(builtinDir, "icons").takeIf { it.isDirectory }
+        val dir = when {
+            path == CLASSIC -> null
+            path.isBlank() -> builtinDir.takeIf { it.isDirectory }
+            else -> File(path).takeIf { File(it, "config.json").isFile || File(it, "skin").isDirectory } ?: builtinDir.takeIf { it.isDirectory }
+        }
         return Theme.load(ctx, dir, storage.themeOverrideDir.takeIf { it.isDirectory }, listOf(dir ?: storage.fontDir, storage.fontDir))
+    }
+
+    /** Copies the bundled theme out of the APK once per install / update. */
+    private fun extractBuiltin(dir: File) {
+        val stamp = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime }.getOrDefault(0L).toString()
+        val marker = File(dir, ".stamp")
+        if (marker.isFile && runCatching { marker.readText() }.getOrNull() == stamp) return
+        runCatching {
+            dir.deleteRecursively()
+            copyAsset("themes/MainUI", dir)
+            marker.writeText(stamp)
+        }
+    }
+
+    private fun copyAsset(path: String, dest: File) {
+        val children = ctx.assets.list(path) ?: emptyArray()
+        if (children.isEmpty()) {
+            dest.parentFile?.mkdirs()
+            ctx.assets.open(path).use { input -> dest.outputStream().use { input.copyTo(it) } }
+        } else {
+            dest.mkdirs()
+            for (c in children) copyAsset("$path/$c", File(dest, c))
+        }
     }
 
     fun reload() {
@@ -43,15 +80,24 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     }
 
     fun apply(entry: ThemeEntry): String? {
-        val dir = entry.dir ?: entry.zip?.let { install(it) ?: return "Could not extract ${it.name}" }
-        settings.themePath = dir?.absolutePath ?: ""
+        settings.themePath = if (entry.zip != null) {
+            (install(entry.zip) ?: return "Could not extract ${entry.zip.name}").absolutePath
+        } else entry.key
         reload()
         return null
     }
 
-    /** All themes: built-in first, then folders and .zip files in every Themes directory. */
+    /** Key of the active theme, comparable with [ThemeEntry.key]. */
+    val currentKey: String get() = settings.themePath.let { p ->
+        if (p.isBlank() || p == CLASSIC || File(p).isDirectory) p else ""
+    }
+
+    /** All themes: the built-in ones first, then folders and .zip files in every Themes directory. */
     fun list(): List<ThemeEntry> {
-        val out = mutableListOf(ThemeEntry(null, null, "MainUI Default", "MainUI", "Built-in theme"))
+        val out = mutableListOf(
+            ThemeEntry(builtinDir, null, "MainUI", "MainUI", "Built-in blue theme with an icon for every system", key = ""),
+            ThemeEntry(null, null, "MainUI Classic", "MainUI", "The original flat theme, drawn in code", key = CLASSIC),
+        )
         val seen = HashSet<String>()
         for (root in storage.themeDirs()) {
             val children = root.listFiles()?.sortedBy { it.name.lowercase() } ?: continue
@@ -141,4 +187,8 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
 
     fun pauseBgm() { runCatching { bgmPlayer?.takeIf { it.isPlaying }?.pause() } }
     fun resumeBgm() { runCatching { bgmPlayer?.start() } }
+
+    companion object {
+        const val CLASSIC = "classic"
+    }
 }
