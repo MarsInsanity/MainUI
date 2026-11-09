@@ -91,6 +91,12 @@ class Settings(ctx: Context) {
     /** "auto", "sd" or "internal": where MainUI keeps Themes / config / screenshots. */
     var dataLocation by str("data_location", "auto")
 
+    // ---- updates ---------------------------------------------------------------------
+    var updateAutoCheck by bool("update_auto_check", true)
+    var updateLastCheck by long("update_last_check", 0L)
+    /** versionName of a newer build found by the last check ("" = none). */
+    var updateAvailable by str("update_available", "")
+
     // ---- emulation -----------------------------------------------------------------
     var raPackageOverride by str("ra_package", "")
     var autoSaveOnExit by bool("auto_save_on_exit", true)

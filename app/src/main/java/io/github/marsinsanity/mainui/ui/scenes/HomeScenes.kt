@@ -170,9 +170,19 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
         first = first.coerceIn(0, max(0, tiles.size - VISIBLE))
     }
 
-    init { follow() }
+    init { follow(); checkForUpdate() }
+
+    /** Automatic update check (every few hours at most); says so once when a newer build exists. */
+    private fun checkForUpdate() {
+        if (!io.github.marsinsanity.mainui.store.Updater.isDue()) return
+        host.io({ runCatching { io.github.marsinsanity.mainui.store.Updater.check() }.getOrNull() }) { u ->
+            if (u != null && u.versionCode > io.github.marsinsanity.mainui.store.Updater.installed)
+                host.toast("MainUI ${u.versionName} is available: Settings > Updates", 4000)
+        }
+    }
 
     override fun onResume() {
+        checkForUpdate()
         tiles = HomeScenes.menuTiles(host)
         index = index.coerceIn(0, tiles.size - 1)
         follow()

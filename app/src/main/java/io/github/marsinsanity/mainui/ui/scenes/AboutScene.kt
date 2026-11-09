@@ -83,7 +83,9 @@ class AboutScene(host: SceneHost) : ListScene(host, "About") {
         battery(ctx)?.let { rows += row("Battery", it) }
 
         // ---- software
-        rows += row("MainUI", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})" + if (BuildConfig.DEBUG) " debug" else "")
+        rows += row("MainUI", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})" + if (BuildConfig.DEBUG) " debug" else "") {
+            host.push(UpdateScene(host))
+        }
         rows += row("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         if (Build.VERSION.SECURITY_PATCH.isNotBlank()) rows += row("Security patch", Build.VERSION.SECURITY_PATCH)
         rows += row("Build number", Build.DISPLAY) { openDeveloperOptions() }
