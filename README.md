@@ -126,6 +126,11 @@ Differences from a Miyoo Mini, due to the screen:
   (`Halo.zip` -> `Halo.iso`; progress on screen, B stops, free space checked first, never a half
   written image left behind), then asks whether to delete the zip, and launches. From then on the
   image is launched and the zip is no longer listed. Systems opt in with `"unzip"` in systems.json.
+- **Haptic feedback** (Settings > User interface, *Light* by default; Off / Light / Medium / Strong): a
+  short pulse when the selection moves (d-pad, L/R paging, swipes) and a firmer one for buttons and
+  taps, in MainUI and its in-game menu. Plain timed pulses that a handheld's rumble motor can feel,
+  following MainUI's setting rather than Android's touch feedback switch; moves are spaced at least
+  45 ms apart so holding a direction doesn't become a buzz.
 - The top bar clock (Settings > User interface > *Show clock*) is 24-hour, 12-hour or like Android's
   own setting (*Clock format*).
 - Backgrounds are cropped to fill the screen by default (Settings > User interface > Background fit:

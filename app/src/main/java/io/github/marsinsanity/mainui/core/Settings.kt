@@ -61,6 +61,8 @@ class Settings(ctx: Context) {
     var showGameArt by bool("show_game_art", true)
     var uiSounds by bool("ui_sounds", true)
     var bgm by bool("bgm", false)
+    /** Vibration in MainUI's menus: "off", "light", "medium", "strong" (see Haptics). */
+    var haptics by str("haptics", "light")
     var showClock by bool("show_clock", false)
     /** Clock in the top bar: "24" (14:05), "12" (2:05 PM) or "system" (Android's own setting). */
     var clockFormat by str("clock_format", "24")

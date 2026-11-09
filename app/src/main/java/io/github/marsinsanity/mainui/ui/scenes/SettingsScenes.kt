@@ -79,6 +79,8 @@ class UiSettingsScene(host: SceneHost) : ListScene(host, "User interface") {
             multi("Clock format", listOf("24" to "24-hour", "12" to "12-hour", "system" to "Like Android"),
                 { s.clockFormat }) { s.clockFormat = it },
             toggle("Menu sounds", { s.uiSounds }) { s.uiSounds = it; MainUI.themes.reloadSounds() },
+            multi("Haptic feedback", listOf("off" to "Off", "light" to "Light", "medium" to "Medium", "strong" to "Strong"),
+                { s.haptics }) { s.haptics = it; io.github.marsinsanity.mainui.core.Haptics.press() },
             toggle("Theme background music", { s.bgm }) { s.bgm = it; MainUI.themes.reloadSounds() },
         ))
     }
