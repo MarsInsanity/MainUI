@@ -200,6 +200,45 @@ object Root {
     /** Quote a string for use inside a single shell command. */
     fun q(s: String): String = "'" + s.replace("'", "'\\''") + "'"
 
+    /** `am start` arguments for [intent]: component, action, data, typed extras and flags. */
+    fun amStartArgs(intent: android.content.Intent): String = buildString {
+        append("am start --user 0")
+        intent.component?.let { append(" -n ").append(q(it.flattenToString())) }
+        intent.action?.let { append(" -a ").append(q(it)) }
+        intent.dataString?.let { append(" -d ").append(q(it)) }
+        intent.type?.let { append(" -t ").append(q(it)) }
+        intent.extras?.let { b ->
+            for (k in b.keySet()) {
+                @Suppress("DEPRECATION") val v = b.get(k)
+                when (v) {
+                    is Boolean -> append(" --ez ").append(q(k)).append(' ').append(v)
+                    is Int -> append(" --ei ").append(q(k)).append(' ').append(v)
+                    is Long -> append(" --el ").append(q(k)).append(' ').append(v)
+                    is Array<*> -> append(" --esa ").append(q(k)).append(' ')
+                        .append(q(v.joinToString(",") { it.toString().replace(",", "\\,") }))
+                    null -> append(" --esn ").append(q(k))
+                    else -> append(" --es ").append(q(k)).append(' ').append(q(v.toString()))
+                }
+            }
+        }
+        if (intent.flags != 0) append(" -f ").append(intent.flags)
+    }
+
+    /**
+     * Starts an activity as root, for emulators whose game activity isn't exported
+     * to other apps. Returns null on success, otherwise what `am` said.
+     */
+    fun startActivity(intent: android.content.Intent): String? {
+        val r = exec(amStartArgs(intent), 30)
+        val out = (r.out + "\n" + r.err).lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val error = out.firstOrNull { it.startsWith("Error") || it.contains("Exception") }
+        return when {
+            error != null -> error
+            !r.ok -> out.lastOrNull() ?: "am start failed"
+            else -> null
+        }
+    }
+
     // ---- common privileged helpers ------------------------------------------------
 
     fun forceStop(pkg: String): Boolean = exec("am force-stop ${q(pkg)}").ok

@@ -5,6 +5,7 @@ import io.github.marsinsanity.mainui.data.GameRepository
 import io.github.marsinsanity.mainui.scraper.Hashes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -108,6 +109,40 @@ class EmulatorStoreTest {
         // Store flavours and debug builds lose to the plain build.
         val flavours = listOf("azahar-2125.0-android-googleplay.apk", "azahar-2125.0-android-vanilla.apk", "app-debug.apk")
         assertEquals("azahar-2125.0-android-vanilla.apk", flavours.maxByOrNull { es.scoreApk(it, "arm64-v8a") })
+    }
+
+    @Test
+    fun picksTheArmsx3BuildForTheAndroidVersionAndCpu() {
+        // ARMSX3 1.6.7's release assets.
+        val names = listOf("ARMSX3-1.6.7-a11-armv8.2-sdk30.apk", "ARMSX3-1.6.7-a13-armv8.2-sdk33.apk",
+            "ARMSX3-1.6.7-a15-armv8.2-sdk35.apk", "ARMSX3-1.6.7-legacy-armv8.1-sdk30.apk")
+        fun pick(sdk: Int, v82: Boolean = true) = names.maxByOrNull { es.scoreApk(it, "arm64-v8a", sdk, v82) }
+        assertEquals("ARMSX3-1.6.7-a13-armv8.2-sdk33.apk", pick(33))   // Retroid Pocket Mini V2 (Android 13)
+        assertEquals("ARMSX3-1.6.7-a13-armv8.2-sdk33.apk", pick(34))
+        assertEquals("ARMSX3-1.6.7-a15-armv8.2-sdk35.apk", pick(36))
+        assertEquals("ARMSX3-1.6.7-a11-armv8.2-sdk30.apk", pick(31))
+        assertEquals("ARMSX3-1.6.7-legacy-armv8.1-sdk30.apk", pick(33, v82 = false))
+        // Nothing this Android can install: every candidate is rejected.
+        assertTrue(names.all { es.scoreApk(it, "arm64-v8a", 29, true) <= -50 })
+        // RPCSX's single APK is still picked.
+        assertTrue(es.scoreApk("rpcsx-release.apk", "arm64-v8a", 33, true) > -50)
+    }
+}
+
+class Ps3GamesTest {
+    private val p = io.github.marsinsanity.mainui.emu.Ps3Games
+
+    @Test fun titleIdsInShortcutsAndNames() {
+        assertEquals("BLUS12345", p.titleIdIn("BLUS12345"))
+        assertEquals("BLUS12345", p.titleIdIn("[title_id] BLUS12345\n"))
+        assertEquals("NPEB00874", p.titleIdIn("Some Game [npeb-00874]"))
+        assertNull(p.titleIdIn("Killzone 3"))
+        assertNull(p.titleIdIn("ABCDE123456"))
+    }
+
+    @Test fun pathsAreGivenAsRpcsxSeesThem() {
+        assertEquals("/storage/emulated/0/Android/data/net.rpcsx/files/config/dev_hdd0/game/BLUS12345",
+            p.toRpcsxView("/data/media/0/Android/data/net.rpcsx/files/config/dev_hdd0/game/BLUS12345"))
     }
 }
 

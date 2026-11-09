@@ -1962,7 +1962,8 @@
     "ps3"
    ],
    "emulators": [
-    "sa:armsx3"
+    "sa:armsx3",
+    "sa:rpcsx"
    ],
    "screenscraper": 59,
    "icons": [

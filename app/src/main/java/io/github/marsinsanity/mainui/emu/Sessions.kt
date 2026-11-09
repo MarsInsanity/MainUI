@@ -68,7 +68,10 @@ class SessionManager(
         val intent = try { emulators.buildIntent(game, option) } catch (e: IllegalStateException) { return e.message }
         endActive()
         return try {
-            ctx.startActivity(intent)
+            if (emulators.defFor(option.ref)?.rootLaunch == true) {
+                if (!Root.available()) return "${option.name} can only be started by MainUI with root"
+                Root.startActivity(intent)?.let { return "Could not start ${option.name}: $it" }
+            } else ctx.startActivity(intent)
             val pkg = intent.component?.packageName ?: intent.`package` ?: option.pkg ?: ""
             begin(Session(game.key, game.systemId, game.file?.absolutePath, game.name, option.ref, pkg,
                 intent.component?.className, System.currentTimeMillis()))
