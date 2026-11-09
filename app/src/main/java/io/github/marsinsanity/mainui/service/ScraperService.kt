@@ -1,6 +1,7 @@
 package io.github.marsinsanity.mainui.service
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -49,13 +50,18 @@ class ScraperService : Service() {
         if (nm.getNotificationChannel(CHANNEL) == null) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Scraper", NotificationManager.IMPORTANCE_LOW))
         }
-        return Notification.Builder(this, CHANNEL)
+        val b = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("MainUI scraper")
             .setContentText(text)
             .setOngoing(ongoing)
             .setOnlyAlertOnce(true)
-            .build()
+        if (ongoing && !Scraper.stopping) {
+            val stop = PendingIntent.getService(this, 1, Intent(this, ScraperService::class.java).setAction(ACTION_STOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            b.addAction(Notification.Action.Builder(null, "Stop", stop).build())
+        }
+        return b.build()
     }
 
     companion object {
