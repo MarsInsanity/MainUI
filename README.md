@@ -314,7 +314,9 @@ screenscraper.devpassword=yourDevPassword
 Then add your normal ScreenScraper username and password. The scraper reads your account's
 `maxthreads` and runs that many workers (anonymous: 1; free sources alone: 4). Metadata goes to
 `gamelist.xml` (a `gamelist.xml.bak` is kept the first time) or a Logiqx DAT. Scraping keeps running
-in the background with a notification. `SELECT` on a system or game scrapes just that.
+in the background with a notification. `SELECT` on a system or game scrapes just that. To stop it:
+**A** on the progress screen (B hides it and keeps scraping), *Stop scraping* under *Show progress*,
+or **Stop** in the notification; games already being scraped finish and the art found is kept.
 
 ## Updates
 

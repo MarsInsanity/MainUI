@@ -3,6 +3,7 @@ package io.github.marsinsanity.mainui.ui.scenes
 import io.github.marsinsanity.mainui.BuildConfig
 import io.github.marsinsanity.mainui.MainUI
 import io.github.marsinsanity.mainui.scraper.ScrapeState
+import io.github.marsinsanity.mainui.scraper.Scraper
 import io.github.marsinsanity.mainui.scraper.ScreenScraper
 import io.github.marsinsanity.mainui.service.ScraperService
 import io.github.marsinsanity.mainui.ui.Align
@@ -11,6 +12,7 @@ import io.github.marsinsanity.mainui.ui.Gfx
 import io.github.marsinsanity.mainui.ui.KeyboardScene
 import io.github.marsinsanity.mainui.ui.ListScene
 import io.github.marsinsanity.mainui.ui.Scene
+import io.github.marsinsanity.mainui.ui.DialogScene
 import io.github.marsinsanity.mainui.ui.SceneHost
 import io.github.marsinsanity.mainui.ui.UiItem
 import io.github.marsinsanity.mainui.ui.withAlpha
@@ -36,6 +38,10 @@ class ScraperScene(host: SceneHost, private val systems: List<String>?) :
                 }
                 host.push(ScraperProgressScene(host))
             }),
+        )
+        if (ScrapeState.running) items += UiItem(if (Scraper.stopping) "Stopping..." else "Stop scraping",
+            disabled = Scraper.stopping, onSelect = { ScraperProgressScene.confirmStop(host) { build() } })
+        items += listOf(
             multi("Box art sources", listOf(
                 "ss,gametdb,libretro" to "All",
                 "gametdb,libretro" to "Free only",
@@ -110,16 +116,29 @@ class ScraperProgressScene(host: SceneHost) : Scene(host) {
         for (l in lines) { g.text(l, g.theme.list, x, y, maxW = g.W - 60f, size = 22f); y += 34f }
         y += 6f
         for (l in st.log) { g.text(l, g.theme.list, x, y, maxW = g.W - 60f, size = 18f, alpha = 160); y += 26f; if (y > g.H - 80f) break }
-        g.footer(null, "BACK", if (st.running) listOf("X" to "STOP") else emptyList())
+        val stoppable = st.running && !Scraper.stopping
+        g.footer(if (stoppable) "STOP" else null, if (st.running) "HIDE" else "BACK")
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
         if (repeat) return false
         when (b) {
-            Btn.B, Btn.A -> close()
-            Btn.X -> if (ScrapeState.running) ScraperService.stop(host.hostContext)
+            Btn.A, Btn.X -> if (ScrapeState.running && !Scraper.stopping) confirmStop(host) else if (b == Btn.A) close()
+            Btn.B -> close()   // a running scrape keeps going in the background
             else -> return false
         }
         return true
+    }
+
+    companion object {
+        /** Asks, then stops: the games being scraped finish, art found so far is kept. */
+        fun confirmStop(host: SceneHost, then: () -> Unit = {}) {
+            host.push(DialogScene(host, "Stop scraping?",
+                "The games being scraped right now finish first. Art found so far is kept.", "STOP", "CANCEL") {
+                Scraper.cancel()
+                ScraperService.stop(host.hostContext)
+                then()
+            })
+        }
     }
 }

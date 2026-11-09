@@ -49,7 +49,10 @@ object Scraper {
     private const val TAG = "MainUI.Scraper"
     private val cancel = AtomicBoolean(false)
 
-    fun cancel() { cancel.set(true); ScrapeState.message = "Stopping..." }
+    fun cancel() { if (ScrapeState.running) { cancel.set(true); ScrapeState.message = "Stopping..." } }
+
+    /** A stop was asked for and the run hasn't ended yet. */
+    val stopping: Boolean get() = cancel.get() && ScrapeState.running
 
     private fun regions() = MainUI.settings.ssRegions.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 
@@ -67,6 +70,7 @@ object Scraper {
                 st.message = "ScreenScraper developer ID missing (Scraper > Developer ID)"; return
             }
             val api = if (useSs) ScreenScraper.fromSettings() else null
+            if (cancel.get()) { st.message = "Cancelled"; return }
             val freeArt = FreeArt.Session(free, BoxArtMatch.regionPrefs(MainUI.settings.ssRegions))
             var threads = if (useSs) 1 else 4
             var perMin = 0
@@ -91,7 +95,8 @@ object Scraper {
                 .filter { systemIds == null || it.id in systemIds }
                 .filter { (api != null && it.def.screenscraperId != null) || FreeArt.supports(free, it.id) }
             val jobs = ArrayList<Pair<GameSystem, Game>>()
-            for (s in systems) collect(s, null, 0, jobs)
+            for (s in systems) { if (cancel.get()) break; collect(s, null, 0, jobs) }
+            if (cancel.get()) { st.message = "Cancelled"; return }
             st.total = jobs.size
             if (jobs.isEmpty()) { st.message = "Nothing to scrape"; return }
 
