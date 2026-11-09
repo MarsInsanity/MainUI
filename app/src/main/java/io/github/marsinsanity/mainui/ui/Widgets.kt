@@ -116,6 +116,8 @@ class DialogScene(
     private val confirmLabel: String? = "CONFIRM",
     private val cancelLabel: String? = "CANCEL",
     private val onConfirm: () -> Unit = {},
+    /** B: besides closing the dialog. */
+    private val onCancel: () -> Unit = {},
 ) : Scene(host) {
     override val isOverlay = true
 
@@ -128,7 +130,7 @@ class DialogScene(
         if (repeat) return false
         when (b) {
             Btn.A -> { close(); onConfirm() }
-            Btn.B -> close()
+            Btn.B -> { close(); onCancel() }
             else -> return false
         }
         return true

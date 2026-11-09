@@ -101,7 +101,9 @@ ANDROID_EXTRA_SYSTEMS = [
          standalone=['armsx2', 'nethersx2']),
     dict(id='ps3', name='PlayStation 3', folders=['ps3'], ext='.iso .ps3', standalone=['armsx3', 'rpcsx']),
     dict(id='psvita', name='PlayStation Vita', folders=['psvita'], ext='.psvita', standalone=['vita3k']),
-    dict(id='xbox', name='Microsoft Xbox', folders=['xbox'], ext='.iso .xiso', standalone=['hakux']),
+    # hakuX opens .iso .xiso .cso .cci; MainUI unpacks the image out of a .zip before launching.
+    dict(id='xbox', name='Microsoft Xbox', folders=['xbox'], ext='.iso .xiso .cso .cci .zip', standalone=['hakux'],
+         unzip=['iso', 'xiso', 'cso', 'cci']),
     dict(id='wii', name='Nintendo Wii', folders=['wii'], ext='.iso .rvz .wbfs .wia .gcz .ciso .wad .dol .elf .m3u',
          standalone=['dolphin', 'dolphin_mmjr'], cores=['dolphin']),
     dict(id='switch', name='Nintendo Switch', folders=['switch'], ext='.nsp .xci .nca .nro .nso',
@@ -263,6 +265,8 @@ def main():
             screenscraper=SSID.get(x['id']),
             icons=[x['id']], short=SHORT.get(x['id'], x['id'][:4].upper()),
         ))
+        if x.get('unzip'):
+            systems[-1]['unzip'] = x['unzip']
     systems.sort(key=lambda s: s['name'].lower())
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump({'version': 1, 'source': 'dArkOS wiki: Emulators and Ports information',
