@@ -589,14 +589,18 @@ class Gfx {
     }
 
     /** Small centred message box (Onion's info panel / toast). */
+    /** Centered message panel; one line per '\n'. */
     fun infoPanel(message: String) {
         val style = theme.list
-        val tw = min(W - 80f, textWidth(message, style) + 60f)
-        val h = 80f
+        val lines = message.split('\n').filter { it.isNotEmpty() }.ifEmpty { listOf("") }
+        val lineH = style.size * 1.45f
+        val tw = min(W - 80f, (lines.maxOf { textWidth(it, style) }) + 60f)
+        val h = max(80f, lines.size * lineH + 40f)
         val x = (W - tw) / 2; val y = (H - h) / 2
         fillRect(x, y, tw, h, theme.panel, 12f)
         strokeRect(x, y, tw, h, theme.accent, 2f, 12f)
-        text(message, style, W / 2, y + h / 2, Align.CENTER, maxW = tw - 30f)
+        val top = y + h / 2 - (lines.size - 1) * lineH / 2
+        lines.forEachIndexed { i, l -> text(l, style, W / 2, top + i * lineH, Align.CENTER, maxW = tw - 30f) }
     }
 
     // ---- procedural artwork for missing theme images ----------------------------------------

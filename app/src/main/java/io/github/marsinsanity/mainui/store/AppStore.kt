@@ -91,39 +91,115 @@ object AppStore {
      * Downloads and verifies a repository's index-v1.jar and stores a compact
      * copy. Returns the number of apps. [progress] gets a human readable status.
      */
+    private fun metaFile(r: Repo) = File(dataDir, "${repoKey(r)}.meta.json")
+
+    private data class Meta(val etag: String?, val lastModified: String?, val timestamp: Long, val count: Int, val mirrors: List<String>)
+
+    private fun readMeta(r: Repo): Meta? = runCatching {
+        val o = JSONObject(metaFile(r).readText())
+        Meta(o.optString("etag").ifEmpty { null }, o.optString("lastModified").ifEmpty { null }, o.optLong("timestamp"),
+            o.optInt("count"), o.optJSONArray("mirrors")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
+    }.getOrNull()
+
+    private fun writeMeta(r: Repo, m: Meta) = runCatching {
+        metaFile(r).writeText(JSONObject().put("etag", m.etag).put("lastModified", m.lastModified).put("timestamp", m.timestamp)
+            .put("count", m.count).put("mirrors", JSONArray(m.mirrors)).toString())
+    }
+
+    /**
+     * Downloads and verifies a repository's index-v1.jar and stores a compact copy.
+     * Returns the number of apps. Fast paths: the request is conditional, so an
+     * unchanged index isn't downloaded again; the download uses several
+     * connections; and when the repository itself fails, the mirrors listed in
+     * its last signed index are tried (an index from a mirror is verified the
+     * same way, and an older one than we have is ignored).
+     */
     fun refresh(r: Repo, progress: (String) -> Unit): Int {
         val jar = File(cacheDir, "${repoKey(r)}-index-v1.jar")
-        progress("Downloading ${r.name}...")
-        Http.download("${r.address}/index-v1.jar", jar) { done, total ->
-            progress("Downloading ${r.name}: ${done / 1024 / 1024} MB" + if (total > 0) " / ${total / 1024 / 1024} MB" else "")
-        }
-        progress("Checking ${r.name}...")
-        val apps = ArrayList<App>()
-        var repoName = r.name
-        JarFile(jar, true).use { jf ->
-            val entry = jf.getJarEntry("index-v1.json") ?: throw IOException("index-v1.json missing")
-            jf.getInputStream(entry).use { input ->
-                parseIndex(JsonReader(InputStreamReader(input, Charsets.UTF_8)), r.address, apps) { repoName = it }
+        val meta = readMeta(r)
+        val haveIndex = compactFile(r).isFile && meta != null
+        val sources = listOf(r.address) + (meta?.mirrors.orEmpty()
+            .filter { it.startsWith("https://") && !it.contains(".onion") && it.trimEnd('/') != r.address.trimEnd('/') }
+            .shuffled().take(3))
+        var lastError: Exception? = null
+        for ((i, src) in sources.withIndex()) {
+            val primary = i == 0
+            try {
+                progress("${r.name}: connecting...")
+                val started = android.os.SystemClock.elapsedRealtime()
+                val info = Http.downloadFast("${src.trimEnd('/')}/index-v1.jar", jar,
+                    ifNoneMatch = if (primary && haveIndex) meta?.etag else null,
+                    ifModifiedSince = if (haveIndex) meta?.lastModified else null) { done, total ->
+                    val secs = (android.os.SystemClock.elapsedRealtime() - started).coerceAtLeast(1) / 1000.0
+                    val speed = done / secs
+                    progress("${r.name}: ${formatBytes(done)}" + (if (total > 0) " / ${formatBytes(total)}" else "") +
+                        "  (${formatBytes(speed.toLong())}/s)")
+                }
+                if (info.notModified && meta != null) {
+                    compactFile(r).setLastModified(System.currentTimeMillis())
+                    return meta.count
+                }
+                progress("${r.name}: checking...")
+                val apps = ArrayList<App>()
+                val repoInfo = RepoInfo()
+                JarFile(jar, true).use { jf ->
+                    val entry = jf.getJarEntry("index-v1.json") ?: throw IOException("index-v1.json missing")
+                    jf.getInputStream(entry).use { input ->
+                        parseIndex(JsonReader(InputStreamReader(input, Charsets.UTF_8)), r.address, apps, repoInfo)
+                    }
+                    // Certificates are only known after the entry was read completely.
+                    val certs = entry.certificates ?: throw SecurityException("${r.name}: index is not signed")
+                    val fp = sha256(certs.first().encoded)
+                    when {
+                        r.fingerprint == null -> { r.fingerprint = fp; Log.i(TAG, "trusting ${r.address} with $fp") }
+                        !r.fingerprint.equals(fp, true) -> throw SecurityException("${r.name}: signing key changed! Expected ${r.fingerprint}, got $fp")
+                    }
+                }
+                jar.delete()
+                if (meta != null && haveIndex && repoInfo.timestamp in 1 until meta.timestamp) {
+                    Log.i(TAG, "$src has an older index than ours; keeping ours")
+                    return meta.count
+                }
+                repoInfo.name?.let { r.name = it }
+                val arr = JSONArray()
+                for (a in apps) arr.put(JSONObject().apply {
+                    put("p", a.pkg); put("n", a.name); put("s", a.summary); put("d", a.description); put("i", a.icon)
+                    put("c", JSONArray(a.categories)); put("l", a.license); put("u", a.lastUpdated)
+                    a.apk?.let { put("vc", it.versionCode); put("vn", it.versionName); put("an", it.apkName); put("sz", it.size); put("h", it.sha256); put("sg", it.signer) }
+                })
+                compactFile(r).writeText(JSONObject().put("repo", r.address).put("apps", arr).toString())
+                writeMeta(r, Meta(if (primary) info.etag else null, info.lastModified, repoInfo.timestamp, apps.size,
+                    repoInfo.mirrors.ifEmpty { meta?.mirrors.orEmpty() }))
+                appsCache = null
+                return apps.size
+            } catch (e: SecurityException) {
+                jar.delete()
+                throw IOException(e.message)                  // never fall back over a signature problem
+            } catch (e: Exception) {
+                Log.w(TAG, "refresh ${r.name} from $src failed: ${e.message}")
+                lastError = e
             }
-            // Certificates are only known after the entry was read completely.
-            val certs = entry.certificates ?: throw IOException("${r.name}: index is not signed")
-            val fp = sha256(certs.first().encoded)
-            when {
-                r.fingerprint == null -> { r.fingerprint = fp; Log.i(TAG, "trusting ${r.address} with $fp") }
-                !r.fingerprint.equals(fp, true) -> throw IOException("${r.name}: signing key changed! Expected ${r.fingerprint}, got $fp")
-            }
         }
-        jar.delete()
-        r.name = repoName
-        val arr = JSONArray()
-        for (a in apps) arr.put(JSONObject().apply {
-            put("p", a.pkg); put("n", a.name); put("s", a.summary); put("d", a.description); put("i", a.icon)
-            put("c", JSONArray(a.categories)); put("l", a.license); put("u", a.lastUpdated)
-            a.apk?.let { put("vc", it.versionCode); put("vn", it.versionName); put("an", it.apkName); put("sz", it.size); put("h", it.sha256); put("sg", it.signer) }
-        })
-        compactFile(r).writeText(JSONObject().put("repo", r.address).put("apps", arr).toString())
-        appsCache = null
-        return apps.size
+        throw lastError ?: IOException("could not download the index")
+    }
+
+    /**
+     * Refreshes [repos] at the same time. [progress] gets one combined line.
+     * Returns error messages (empty when all worked).
+     */
+    fun refreshAll(repos: List<Repo>, progress: (String) -> Unit): List<String> {
+        val lines = java.util.concurrent.ConcurrentHashMap<String, String>()
+        val errors = java.util.Collections.synchronizedList(ArrayList<String>())
+        val threads = repos.map { r ->
+            Thread {
+                runCatching {
+                    refresh(r) { msg -> lines[r.address] = msg; progress(repos.mapNotNull { lines[it.address] }.joinToString("\n")) }
+                }.onFailure { errors += "${r.name}: ${it.message}" }
+                lines.remove(r.address)
+            }.apply { start() }
+        }
+        threads.forEach { it.join() }
+        return errors
     }
 
     /** All apps from every enabled, refreshed repository (first repository wins on duplicates). */
@@ -156,7 +232,9 @@ object AppStore {
     fun categories(): List<String> = apps().flatMap { it.categories }.groupingBy { it }.eachCount()
         .entries.sortedByDescending { it.value }.map { it.key }
 
-    private fun parseIndex(r: JsonReader, address: String, out: MutableList<App>, onRepoName: (String) -> Unit) {
+    private class RepoInfo(var name: String? = null, val mirrors: MutableList<String> = mutableListOf(), var timestamp: Long = 0)
+
+    private fun parseIndex(r: JsonReader, address: String, out: MutableList<App>, info: RepoInfo) {
         val apps = HashMap<String, App>()
         val best = HashMap<String, Apk>()
         val suggested = HashMap<String, Long>()
@@ -166,7 +244,12 @@ object AppStore {
             when (r.nextName()) {
                 "repo" -> {
                     r.beginObject()
-                    while (r.hasNext()) if (r.nextName() == "name") onRepoName(r.nextString()) else r.skipValue()
+                    while (r.hasNext()) when (r.nextName()) {
+                        "name" -> info.name = r.nextString()
+                        "timestamp" -> info.timestamp = r.nextLong()
+                        "mirrors" -> { r.beginArray(); while (r.hasNext()) info.mirrors += r.nextString(); r.endArray() }
+                        else -> r.skipValue()
+                    }
                     r.endObject()
                 }
                 "apps" -> {
