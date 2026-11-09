@@ -182,11 +182,17 @@ by a small root helper) and presses RetroArch's keyboard hotkeys on it: **F1** m
 state, **F4** load state (RetroArch's defaults; *Configure RetroArch* makes sure they are set and that
 no keyboard hotkey-enable key blocks them). The device only has F keys, so the on-screen keyboard is
 not affected. Without root, *Native Menu* sends Back. For the
-"hotkeys" emulators MainUI closes the menu, unpauses the game and injects the key with root. The key
-must be bound in that emulator. MainUI helps with that: open the emulator's hotkey settings, start
-binding "Save state", press Home and pick **Bind hotkeys... > Send save key**. MainUI sends the key to
-the waiting emulator, so you can bind it with only the handheld's buttons. Without root, hotkey
-emulators fall back to "Save / Load (in emulator)", which opens the emulator's own menu.
+"hotkeys" emulators MainUI closes the menu, unpauses the game and presses the key with root, on its
+virtual keyboard (F keys and Shift / Ctrl / Alt), so the emulator sees the same device every time.
+
+**Save / load keys...** in the in-game menu sets those keys for any standalone emulator, including
+ones MainUI knows no keys for: *Save key* and *Load key* change with left / right (F1-F12, alone or
+with Shift, Ctrl or Alt) and are kept per emulator; once both are set, the menu gets **Save** and
+**Load** for it. The same keys must be bound in the emulator: open its hotkey settings, start binding
+"Save state", press Home and pick **Send save key** (then the same for Load). MainUI sends the key to
+the waiting emulator, so you can bind it with only the handheld's buttons. *Use defaults* goes back
+to the keys in `emulators.json`. Without root, hotkey emulators fall back to "Save / Load (in
+emulator)", which opens the emulator's own menu.
 
 Recipes live in `app/src/main/assets/emulators.json`. To fix or add one without rebuilding,
 copy that file to `MainUI/emulators.json` and edit it (Settings > Emulators & cores, `Y` rescans).

@@ -54,7 +54,7 @@ class EmulatorConfigTest {
 
     @Test fun hotkeyLabelsAreReadable() {
         assertEquals("F2", io.github.marsinsanity.mainui.emu.StandaloneController.keyLabel("keys:KEYCODE_F2"))
-        assertEquals("SHIFT_LEFT+F7", io.github.marsinsanity.mainui.emu.StandaloneController.keyLabel("keys:KEYCODE_SHIFT_LEFT+KEYCODE_F7"))
+        assertEquals("Shift+F7", io.github.marsinsanity.mainui.emu.StandaloneController.keyLabel("keys:KEYCODE_SHIFT_LEFT+KEYCODE_F7"))
     }
 }
 
@@ -510,5 +510,29 @@ More text &amp; more.</Overview>
         assertEquals("B/ds/coverM/EN/AMCP.jpg" to false, t.urls("B", "nds", "AMCP", 320, emptyList()).first())
         assertEquals("B/ps3/coverHQ/EN/BLES00687.jpg" to false, t.urls("B", "ps3", "BLES00687", 0, emptyList()).first())
         assertEquals("JA", t.regions("BLJM60001", emptyList(), ps3 = true).first())
+    }
+}
+
+class HotkeysTest {
+    private val h = io.github.marsinsanity.mainui.emu.Hotkeys
+
+    @Test fun labelsReadLikeKeyboards() {
+        assertEquals("F1", h.label("keys:KEYCODE_F1"))
+        assertEquals("Shift+F7", h.label("keys:KEYCODE_SHIFT_LEFT+KEYCODE_F7"))
+        assertEquals("not set", h.label(null))
+    }
+
+    @Test fun stepsThroughFKeysAndModifiers() {
+        assertEquals(48, h.CHOICES.size)
+        assertEquals("keys:KEYCODE_F2", h.step("keys:KEYCODE_F1", true))
+        assertEquals("keys:KEYCODE_SHIFT_LEFT+KEYCODE_F1", h.step("keys:KEYCODE_F12", true))
+        assertEquals("keys:KEYCODE_ALT_LEFT+KEYCODE_F12", h.step("keys:KEYCODE_F1", false))   // wraps around
+        assertEquals("keys:KEYCODE_F1", h.step(null, true))                                  // from "not set"
+    }
+
+    @Test fun virtualKeyboardNames() {
+        assertEquals("F3", h.virtualKeys("keys:KEYCODE_F3"))
+        assertEquals("CTRL+F5", h.virtualKeys("keys:KEYCODE_CTRL_LEFT+KEYCODE_F5"))
+        assertNull(h.virtualKeys("keys:KEYCODE_BACK"))   // not on the virtual keyboard: sent with `input` instead
     }
 }

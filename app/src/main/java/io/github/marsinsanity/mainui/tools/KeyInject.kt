@@ -18,9 +18,11 @@ import android.view.KeyEvent
  * The key is held for holdMs (default 150) so it is seen on at least one frame, and stamped
  * with a keyboard-only input device that exists (e.g. "gpio-keys"), unless one is given.
  */
-/** Linux key codes of the F keys (what the virtual keyboard has). */
+/** Linux key codes of the keys the virtual keyboard has: F keys and modifiers. */
 val LINUX_KEYS = mapOf("F1" to 59, "F2" to 60, "F3" to 61, "F4" to 62, "F5" to 63, "F6" to 64,
-    "F7" to 65, "F8" to 66, "F9" to 67, "F10" to 68, "F11" to 87, "F12" to 88)
+    "F7" to 65, "F8" to 66, "F9" to 67, "F10" to 68, "F11" to 87, "F12" to 88,
+    // Modifiers for combinations ("SHIFT+F7"); still no letter keys, so not a typing keyboard.
+    "SHIFT" to 42, "CTRL" to 29, "ALT" to 56)
 
 external fun nativeOpen(name: String, keys: IntArray): Int
 external fun nativePress(fd: Int, keys: IntArray, holdMs: Int): Boolean
