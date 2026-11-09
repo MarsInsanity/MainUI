@@ -812,3 +812,11 @@ game (
         assertEquals(listOf("Cruis'n USA (rev L4.1)"), dat.file("crusnusa"))
     }
 }
+
+class ExtraCoreUrlTest {
+    @Test fun matchesTheCoresReleaseAsset() {
+        // The name .github/workflows/cores.yml uploads (an earlier build asked for "..._android.so-arm64-v8a.zip": 404).
+        assertEquals("yabadabadoo_libretro_android-arm64-v8a.zip",
+            io.github.marsinsanity.mainui.emu.RetroArchCores.extraZip("yabadabadoo", "arm64-v8a"))
+    }
+}

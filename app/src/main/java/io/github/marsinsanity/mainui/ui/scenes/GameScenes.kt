@@ -84,7 +84,16 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
 
     private fun reload() {
         host.io({ MainUI.games.list(sys, dir) }) { games ->
-            list.set(games.map { GameItems.item(host, sys, it) }, keepIndex = loaded)
+            if (games.isEmpty() && dir == null) {
+                // Say why: the folder has files, but not of a kind this system's emulators open.
+                val exts = sys.def.extensions.sorted().joinToString(" ") { ".$it" }
+                val found = sys.unplayableSummary
+                list.set(listOfNotNull(
+                    UiItem("No games found", disabled = true),
+                    found?.let { UiItem("Found: $it", disabled = true) },
+                    UiItem("${sys.def.short} games must be: $exts", disabled = true),
+                ), false)
+            } else list.set(games.map { GameItems.item(host, sys, it) }, keepIndex = loaded)
             loaded = true
         }
     }

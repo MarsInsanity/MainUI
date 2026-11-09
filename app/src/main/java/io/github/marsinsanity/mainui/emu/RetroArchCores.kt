@@ -153,9 +153,12 @@ object RetroArchCores {
 
     fun downloadUrl(abi: String, core: String) = when {
         core !in EXTRA_CORES -> "$buildbot/$abi/$core$SUFFIX.zip"
-        buildbot != BUILDBOT -> "$buildbot/extra/$core${SUFFIX}-$abi.zip"      // debug mirror
-        else -> "https://github.com/${BuildConfig.UPDATE_REPO}/releases/download/cores/$core${SUFFIX}-$abi.zip"
+        buildbot != BUILDBOT -> "$buildbot/extra/${extraZip(core, abi)}"      // debug mirror
+        else -> "https://github.com/${BuildConfig.UPDATE_REPO}/releases/download/cores/${extraZip(core, abi)}"
     }
+
+    /** The "cores" release asset .github/workflows/cores.yml publishes: yabadabadoo_libretro_android-arm64-v8a.zip. */
+    fun extraZip(core: String, abi: String) = "${core}_libretro_android-$abi.zip"
 
     /** A core the buildbot offers: name, build date and download size (0 = unknown). */
     data class Remote(val core: String, val date: String, val bytes: Long)
