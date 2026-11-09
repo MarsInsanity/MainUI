@@ -152,8 +152,9 @@ class ArtSourcesScene(host: SceneHost) : ListScene(host, "Box art sources") {
     override val showPreview = false
 
     companion object {
-        private val ORDER = listOf("ss", "gametdb", "libretro", "launchbox")
-        private val NAMES = mapOf("ss" to "ScreenScraper", "gametdb" to "GameTDB", "libretro" to "libretro", "launchbox" to "LaunchBox")
+        private val ORDER = listOf("ss", "gametdb", "libretro", "launchbox", "thegamesdb")
+        private val NAMES = mapOf("ss" to "ScreenScraper", "gametdb" to "GameTDB", "libretro" to "libretro", "launchbox" to "LaunchBox",
+            "thegamesdb" to "TheGamesDB")
 
         fun summary(): String = MainUI.settings.artSources.split(',').mapNotNull { NAMES[it.trim()] }.joinToString(", ").ifEmpty { "none" }
     }
@@ -183,6 +184,9 @@ class ArtSourcesScene(host: SceneHost) : ListScene(host, "Box art sources") {
             UiItem("LaunchBox Games DB", ItemType.TOGGLE, value = if ("launchbox" in enabled()) 1 else 0,
                 sub = "by title, 110 MB",
                 onChange = { set("launchbox", it.value == 1) }),
+            UiItem("TheGamesDB", ItemType.TOGGLE, value = if ("thegamesdb" in enabled()) 1 else 0,
+                sub = "by serial / title, 36 MB",
+                onChange = { set("thegamesdb", it.value == 1) }),
         ))
     }
 }

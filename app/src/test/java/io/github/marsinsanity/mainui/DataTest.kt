@@ -655,3 +655,160 @@ ACTIVITY MANAGER URI PERMISSIONS (dumpsys activity permissions)
         assertEquals("primary:roms/psx/a b", g.percentDecode("primary%3Aroms%2Fpsx%2Fa%20b"))
     }
 }
+
+class TasksTest {
+    private val dump = """
+  * Recent #0: Task{4032e34 #117 visible=true type=standard mode=fullscreen translucent=false A=10130:io.github.marsinsanity.mainui U=0 StackId=117 sz=1}
+    affinity=10130:io.github.marsinsanity.mainui
+  * Recent #1: Task{6eb97d0 #114 visible=false type=home mode=fullscreen translucent=true I=com.android.launcher3/.uioverrides.QuickstepLauncher U=0 StackId=1 sz=1}
+  * Recent #2: Task{3a3efb4 #110 visible=false type=undefined mode=undefined translucent=true A=10131:org.ppsspp.ppsspp U=0 StackId=110 sz=0}
+    affinity=10131:org.ppsspp.ppsspp
+  * Recent #3: Task{b49da77 #120 visible=false type=standard mode=fullscreen translucent=false A=10140:com.flycast.emulator U=0 StackId=120 sz=2}
+    affinity=10140:com.flycast.emulator
+    realActivity={com.flycast.emulator/com.flycast.emulator.NativeGLActivity}
+  * Recent #4: Task{90e17dd #80 visible=false type=standard A=10150:custom.affinity U=0 StackId=80 sz=1}
+    realActivity={org.dolphinemu.dolphinemu/org.dolphinemu.dolphinemu.ui.main.MainActivity}
+"""
+
+    @Test fun findsTheLiveTaskOfAPackage() {
+        val t = io.github.marsinsanity.mainui.emu.Tasks
+        assertEquals(120, t.idOf(dump, "com.flycast.emulator"))
+        assertEquals(114, t.idOf(dump, "com.android.launcher3"))
+        assertEquals(80, t.idOf(dump, "org.dolphinemu.dolphinemu"))     // found by its activity, not its affinity
+        assertNull(t.idOf(dump, "org.ppsspp.ppsspp"))                  // only remembered in recents (sz=0)
+        assertNull(t.idOf(dump, "com.retroarch"))
+    }
+}
+
+class TheGamesDbTest {
+    private val t = io.github.marsinsanity.mainui.scraper.TheGamesDb
+
+    private val dump = """{"code":200,"status":"Success","data":{"count":6,"games":[
+ {"id":1,"game_title":"Sonic the Hedgehog","release_date":"1991-06-23","platform":18,"region_id":2,"country_id":50,
+  "overview":"Blue \"hedgehog\" \\ runs {fast} [really]","developers":[1,2],"alternates":["Sonic 1"],"uids":null,"hashes":null},
+ {"id":2,"game_title":"Sonic the Hedgehog","platform":36,"region_id":6,"country_id":13,"alternates":null,"uids":null},
+ {"id":3,"game_title":"Tetris","platform":7,"region_id":2,"country_id":0,"alternates":null},
+ {"id":4,"game_title":"Tetris","platform":7,"region_id":2,"country_id":0,"alternates":null},
+ {"id":5,"game_title":"Devil May Cry 3: Dante&#039;s Awakening","platform":11,"region_id":2,"country_id":50,
+  "alternates":["DMC3"],"uids":[{"uid":"SLUS-20964","games_uids_patterns_id":2},{"uid":"SLES-53038","games_uids_patterns_id":2}]},
+ {"id":6,"game_title":"No Box","platform":7,"region_id":0,"country_id":0},
+ {"id":7,"game_title":"Halo","platform":1,"region_id":1,"country_id":50}
+]},"include":{"boxart":{"base_url":{"original":"https://cdn.thegamesdb.net/images/original/"},"data":{
+ "1":[{"id":10,"type":"fanart","side":null,"filename":"fanart/1-1.jpg","resolution":"1920x1080"},{"id":11,"type":"boxart","side":"back","filename":"boxart/back/1-1.jpg"},{"id":12,"type":"boxart","side":"front","filename":"boxart/front/1-1.jpg"}],
+ "2":[{"id":13,"type":"boxart","side":"front","filename":"boxart/front/2-1.jpg"},{"id":14,"type":"boxart","side":"front","filename":"boxart/front/2-2.jpg"}],
+ "3":[{"id":15,"type":"boxart","side":"front","filename":"boxart/front/3-1.jpg"}],
+ "4":[{"id":16,"type":"boxart","side":"front","filename":"boxart/front/4-1.jpg"}],
+ "5":[{"id":17,"type":"boxart","side":"front","filename":"boxart/front/5-1.jpg"}],
+ "7":[{"id":18,"type":"boxart","side":"front","filename":"boxart/front/7-1.jpg"}]
+}},"platform":{"data":{"7":{"id":7,"name":"NES","alias":"nes"}}}},"pages":null}"""
+
+    private fun lookup(system: String): io.github.marsinsanity.mainui.scraper.TheGamesDb.Lookup {
+        val dir = java.nio.file.Files.createTempDirectory("tgdb").toFile()
+        t.buildIndex(java.io.StringReader(dump), t.PLATFORMS.values.flatten().toSet(), dir)
+        val games = t.PLATFORMS.getValue(system).flatMap { p -> File(dir, "$p.tsv").takeIf { it.isFile }?.readLines()?.let { t.parseIndex(it.asSequence()) } ?: emptyList() }
+        dir.deleteRecursively()
+        return io.github.marsinsanity.mainui.scraper.TheGamesDb.Lookup(games)
+    }
+
+    @Test fun indexKeepsFrontBoxesOfKnownPlatforms() {
+        val dir = java.nio.file.Files.createTempDirectory("tgdb").toFile()
+        val counts = t.buildIndex(java.io.StringReader(dump), t.PLATFORMS.values.flatten().toSet(), dir)
+        assertEquals(mapOf(18 to 1, 36 to 1, 7 to 2, 11 to 1), counts)       // no box (6) and PC (7: not a system here) are left out
+        val ps2 = t.parseIndex(File(dir, "11.tsv").readLines().asSequence()).single()
+        assertEquals(listOf("Devil May Cry 3: Dante's Awakening", "DMC3"), ps2.names)
+        assertTrue("SLUS20964" in ps2.serials)
+        assertEquals("boxart/front/5-1.jpg", ps2.file)
+        assertEquals("boxart/front/2-1.jpg", t.parseIndex(File(dir, "36.tsv").readLines().asSequence()).single().file)
+        dir.deleteRecursively()
+    }
+
+    @Test fun regionPicksAmongSameTitleEntriesAndRefusesRealAmbiguity() {
+        val md = lookup("megadrive")
+        assertEquals("1", md.find("Sonic the Hedgehog (USA, Europe)", listOf("USA"))?.id)
+        assertEquals("2", md.find("Sonic the Hedgehog (Europe)", listOf("USA"))?.id)     // Germany counts as Europe
+        assertEquals("1", md.find("Sonic the Hedgehog", listOf("USA", "Europe"))?.id)
+        assertEquals("1", md.find("Sonic 1", listOf("USA"))?.id)                         // alternate name
+        assertNull(md.find("Sonic the Hedgehog 2", listOf("USA")))                       // never a neighbour
+        assertNull(lookup("nes").find("Tetris (USA)", listOf("USA")))                    // two different USA "Tetris"
+    }
+
+    @Test fun serialIdentifiesDiscs() {
+        val ps2 = lookup("ps2")
+        assertEquals("5", ps2.bySerial(listOf("SLES-53038"))?.id)
+        assertEquals("5", ps2.find("Devil May Cry 3 - Dante's Awakening (USA)", listOf("USA"))?.id)
+        assertNull(ps2.bySerial(listOf("SLUS-99999")))
+    }
+
+    /**
+     * Against the real dump and DATs (opt in: TGDB_DUMP=<database-latest.json> TGDB_DATS=<dir with
+     * libretro-database DATs>): how many dumps find a box, and whether serial matches agree with the
+     * dump's own title.
+     */
+    @Test fun realData() {
+        val dumpPath = System.getenv("TGDB_DUMP") ?: return
+        val dats = File(System.getenv("TGDB_DATS") ?: return)
+        val dir = java.nio.file.Files.createTempDirectory("tgdb-real").toFile()
+        val counts = File(dumpPath).bufferedReader().use { t.buildIndex(it, t.PLATFORMS.values.flatten().toSet(), dir) }
+        println("TGDB index: ${counts.values.sum()} games")
+        fun lk(system: String) = io.github.marsinsanity.mainui.scraper.TheGamesDb.Lookup(t.PLATFORMS.getValue(system).flatMap { p ->
+            File(dir, "$p.tsv").takeIf { it.isFile }?.readLines()?.let { t.parseIndex(it.asSequence()) } ?: emptyList() })
+        val gameRe = Regex("""game \(\s*\n\s*name "([^"]+)"(.*?)\n\)""", RegexOption.DOT_MATCHES_ALL)
+        val serialRe = Regex("""^\s*serial "([^"]+)"""", RegexOption.MULTILINE)
+        val unwanted = Regex("""\((Beta|Proto|Demo|Sample|Kiosk|Promo|Pirate|Hack|Unl|Aftermarket|Program|Test|Debug|Alt)[^)]*\)""")
+        for ((system, file) in listOf("gba" to "Nintendo - Game Boy Advance.dat", "snes" to "Nintendo - Super Nintendo Entertainment System.dat",
+                "psx" to "Sony - PlayStation.dat", "ps2" to "Sony - PlayStation 2.dat")) {
+            val f = File(dats, file); if (!f.isFile) continue
+            val lookup = lk(system)
+            var total = 0; var byTitle = 0; var bySerial = 0; var serialAgree = 0; var either = 0
+            for (m in gameRe.findAll(f.readText())) {
+                val name = m.groupValues[1]
+                if (unwanted.containsMatchIn(name) || name.contains("(Disc ") && !name.contains("(Disc 1)")) continue
+                total++
+                val tg = lookup.find(name, listOf("USA", "Europe", "Japan"))
+                val sg = lookup.bySerial(serialRe.findAll(m.groupValues[2]).map { it.groupValues[1] }.toList())
+                if (tg != null) byTitle++
+                if (sg != null) {
+                    bySerial++
+                    val dumpTitle = io.github.marsinsanity.mainui.scraper.BoxArtMatch.title(name.replace(Regex(""" \(Disc \d\)"""), ""))
+                    if (sg.names.any { io.github.marsinsanity.mainui.scraper.BoxArtMatch.title(it) == dumpTitle ||
+                            io.github.marsinsanity.mainui.scraper.BoxArtMatch.title(it).replace(" ", "") == dumpTitle.replace(" ", "") }) serialAgree++
+                    else if (System.getenv("TGDB_SHOW") != null && serialAgree % 7 == 0) println("  serial: $name -> ${sg.names}")
+                }
+                if (sg != null || tg != null) either++
+            }
+            println("$system: $total dumps, title $byTitle (${byTitle * 100 / maxOf(total, 1)}%), serial $bySerial " +
+                "(title agrees on $serialAgree), any ${either * 100 / maxOf(total, 1)}%")
+        }
+        dir.deleteRecursively()
+    }
+}
+
+class ArcadeSourcesTest {
+    private val db = io.github.marsinsanity.mainui.scraper.LibretroDb
+
+    @Test fun arcadeFoldersUseFbneoAndMame() {
+        assertEquals(listOf("FBNeo - Arcade Games", "MAME"), db.sources("arcade").map { it.thumbs })
+        assertEquals(listOf("FBNeo - Arcade Games", "MAME"), db.sources("neogeo").map { it.thumbs })
+        assertEquals(listOf("MAME", "FBNeo - Arcade Games"), db.sources("mame").map { it.thumbs })
+        assertEquals(listOf("MAME", "FBNeo - Arcade Games"), db.sources("atomiswave").map { it.thumbs })
+        assertEquals(listOf("Sega - Naomi", "MAME"), db.sources("naomi").map { it.thumbs })
+        assertEquals(listOf("Nintendo - Game Boy Advance"), db.sources("gba").map { it.thumbs })
+        assertTrue(db.supports("atomiswave"))
+    }
+
+    @Test fun mameDatNamesTheZip() {
+        val dat = db.parse("""
+clrmamepro (
+	name "MAME - Consolidated ROM Sets"
+)
+
+game (
+	name "Cruis'n USA (rev L4.1)"
+	year "1994"
+	rom ( name crusnusa.zip size 1 crc D123FE67 )
+)
+""")
+        assertEquals(listOf("Cruis'n USA (rev L4.1)"), dat.file("crusnusa.zip"))
+        assertEquals(listOf("Cruis'n USA (rev L4.1)"), dat.file("crusnusa"))
+    }
+}

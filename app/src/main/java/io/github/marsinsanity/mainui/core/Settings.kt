@@ -62,6 +62,8 @@ class Settings(ctx: Context) {
     var uiSounds by bool("ui_sounds", true)
     var bgm by bool("bgm", false)
     var showClock by bool("show_clock", false)
+    /** Clock in the top bar: "24" (14:05), "12" (2:05 PM) or "system" (Android's own setting). */
+    var clockFormat by str("clock_format", "24")
 
     // ---- input ---------------------------------------------------------------------
     var swapAB by bool("swap_ab", false)
@@ -113,8 +115,8 @@ class Settings(ctx: Context) {
     var ssDevPassword by str("ss_dev_password", "")
     /** The software name sent to ScreenScraper (softname); use the one your developer ID was registered for. */
     var ssSoftName by str("ss_soft_name", "")
-    /** Where box art comes from, in order: "ss" (ScreenScraper), "gametdb", "libretro", "launchbox". */
-    var artSources by str("art_sources", "ss,gametdb,libretro,launchbox")
+    /** Where box art comes from, in order: "ss" (ScreenScraper), "gametdb", "libretro", "launchbox", "thegamesdb". */
+    var artSources by str("art_sources", "ss,gametdb,libretro,launchbox,thegamesdb")
     var ssMedia by str("ss_media", "box-2D")
     var ssRegions by str("ss_regions", "us,wor,eu,ss,jp")
     var ssLanguage by str("ss_language", "en")

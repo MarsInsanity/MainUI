@@ -75,10 +75,33 @@ object LibretroDb {
         ni("Arduboy Inc - Arduboy", "arduboy")
         put("zxspectrum", Source("no-intro", "Sinclair - ZX Spectrum +3", "Sinclair - ZX Spectrum"))
         // Arcade: the DAT maps the zip's short name ("sf2.zip") to the title the art is filed under.
-        listOf("arcade", "neogeo", "cps1", "cps2", "cps3", "mame", "mame2003").forEach { put(it, Source("fbneo-split", "FBNeo - Arcade Games")) }
+        // FBNeo sets first in the FBNeo folders, MAME sets first in the MAME ones; see MORE.
+        listOf("arcade", "neogeo", "cps1", "cps2", "cps3").forEach { put(it, FBNEO) }
+        listOf("mame", "mame2003", "atomiswave").forEach { put(it, MAME) }
     }
 
-    fun supports(systemId: String) = SYSTEMS.containsKey(systemId)
+    /** FinalBurn Neo's sets and libretro's "FBNeo - Arcade Games" thumbnails. */
+    val FBNEO get() = Source("fbneo-split", "FBNeo - Arcade Games")
+    /** MAME's sets of every version (metadat/mame/MAME.dat, about 30,000) and libretro's "MAME" thumbnails. */
+    val MAME get() = Source("mame", "MAME")
+
+    /**
+     * More DATs and thumbnail sets tried after [SYSTEMS]' one: arcade zips may be FBNeo or MAME
+     * sets whatever their folder ("arcade" runs FBNeo or MAME), and Naomi / Atomiswave zips are
+     * MAME sets (Redump's Naomi DAT only knows GD-ROM images).
+     */
+    val MORE: Map<String, List<Source>> get() = buildMap {
+        listOf("arcade", "neogeo", "cps1", "cps2", "cps3", "naomi").forEach { put(it, listOf(MAME)) }
+        listOf("mame", "mame2003", "atomiswave").forEach { put(it, listOf(FBNEO)) }
+    }
+
+    /** Every DAT + thumbnail set for a system, in the order they are tried. */
+    fun sources(systemId: String): List<Source> = (listOfNotNull(SYSTEMS[systemId]) + MORE[systemId].orEmpty()).distinct()
+
+    /** DATs whose entries are named by the arcade zip ("sf2.zip"), so "sf2.7z" is looked up as "sf2" too. */
+    val ARCADE_DIRS = setOf("fbneo-split", "mame")
+
+    fun supports(systemId: String) = sources(systemId).isNotEmpty()
 
     /** Canonical names by CRC, by serial and by dump file name. */
     class Dat(

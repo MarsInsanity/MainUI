@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.util.Log
 import io.github.marsinsanity.mainui.BuildConfig
 import io.github.marsinsanity.mainui.MainUI
+import io.github.marsinsanity.mainui.core.allGroups
 import io.github.marsinsanity.mainui.store.Http
 import org.json.JSONObject
 import java.io.File
@@ -22,11 +23,14 @@ import java.util.concurrent.ConcurrentHashMap
  *    when nothing identifies it, matched by title with [BoxArtMatch]'s strict rules.
  *  - LaunchBox Games Database: matched by title (the canonical name when the dump was
  *    identified) against names and alternate names; ambiguous titles are skipped.
+ *  - TheGamesDB: matched by disc serial, else the same way by title, the region deciding
+ *    between its per-region entries.
  */
 object FreeArt {
     const val GAMETDB = "gametdb"
     const val LIBRETRO = "libretro"
     const val LAUNCHBOX = "launchbox"
+    const val THEGAMESDB = "thegamesdb"
     private const val TAG = "MainUI.FreeArt"
     private const val DAT_MAX_AGE = 30L * 24 * 3600 * 1000
     private const val INDEX_MAX_AGE = 7L * 24 * 3600 * 1000
@@ -51,10 +55,12 @@ object FreeArt {
     private val gametdbBase get() = testBase?.let { "$it/gametdb" } ?: "https://art.gametdb.com"
     private fun launchBoxImage(file: String) = testBase?.let { "$it/launchbox-images/$file" } ?: "https://images.launchbox-app.com/$file"
     private val launchBoxMetadata get() = testBase?.let { "$it/launchbox/Metadata.zip" } ?: "https://gamesdb.launchbox-app.com/Metadata.zip"
+    private fun tgdbImage(size: String, file: String) = testBase?.let { "$it/thegamesdb-images/$size/$file" } ?: "https://cdn.thegamesdb.net/images/$size/$file"
+    private val tgdbDump get() = testBase?.let { "$it/thegamesdb/database-latest.json" } ?: "https://cdn.thegamesdb.net/json/database-latest.json"
 
     fun supports(sources: List<String>, systemId: String) =
         (GAMETDB in sources && GameTdb.supports(systemId)) || (LIBRETRO in sources && LibretroDb.supports(systemId)) ||
-            (LAUNCHBOX in sources && LaunchBoxDb.supports(systemId))
+            (LAUNCHBOX in sources && LaunchBoxDb.supports(systemId)) || (THEGAMESDB in sources && TheGamesDb.supports(systemId))
 
     /** Per scraping run: DATs, thumbnail lists and LaunchBox indexes are loaded once per system. */
     class Session(val sources: List<String>, val prefs: List<String>) {
@@ -71,10 +77,11 @@ object FreeArt {
      * Returns the source's name, or null when no source has this game.
      */
     fun find(s: Session, systemId: String, file: File, dest: File, maxWidth: Int, crc: String? = null): String? {
-        // Canonical names, once per file (libretro and LaunchBox both use them).
-        fun identified(): List<String> = s.identified.computeIfAbsent(file.path) {
-            LibretroDb.SYSTEMS[systemId]?.let { identify(s, it, systemId, file, crc) } ?: emptyList()
+        // Canonical names, once per file and DAT (libretro, LaunchBox and TheGamesDB use them).
+        fun identified(src: LibretroDb.Source): List<String> = s.identified.computeIfAbsent("${src.dat}\u0000${file.path}") {
+            identify(s, src, systemId, file, crc)
         }
+        fun identified(): List<String> = LibretroDb.sources(systemId).flatMap { identified(it) }.distinct()
         for (src in s.sources) {
             when (src) {
                 GAMETDB -> if (GameTdb.supports(systemId)) {
@@ -82,24 +89,98 @@ object FreeArt {
                     for ((url, wrap) in GameTdb.urls(gametdbBase, systemId, id, maxWidth, s.prefs))
                         if (saveImage(url, dest, maxWidth, frontOfWrap = wrap)) return "GameTDB"
                 }
-                LIBRETRO -> {
-                    val lsrc = LibretroDb.SYSTEMS[systemId] ?: continue
-                    val name = BoxArtMatch.pick(identified(), file.nameWithoutExtension, index(s, lsrc.thumbs), s.prefs) ?: continue
+                LIBRETRO -> for (lsrc in LibretroDb.sources(systemId)) {
+                    // Arcade: the FBNeo set, then the MAME set (or the other way round in MAME folders).
+                    // Its own DAT's names first; only then the other DATs' (a MAME name may be filed in
+                    // another set too), so a second DAT is only read for games the first doesn't cover.
+                    val available = index(s, lsrc.thumbs)
+                    val name = BoxArtMatch.pick(identified(lsrc), file.nameWithoutExtension, available, s.prefs)
+                        ?: BoxArtMatch.pick(identified(), file.nameWithoutExtension, available, s.prefs)
+                        ?: continue
                     if (saveImage(thumbDir(lsrc.thumbs) + enc(name) + ".png", dest, maxWidth) ||
                         (testBase == null && saveImage(thumbGithub(lsrc.thumbs, name), dest, maxWidth))) return "libretro"
                 }
                 LAUNCHBOX -> {
                     val lookup = launchBoxLookup(s, systemId) ?: continue
-                    // The identified (canonical) name says exactly which game; else the file name.
-                    val source = identified().firstOrNull() ?: file.nameWithoutExtension
-                    val game = lookup.find(source) ?: (if (source != file.nameWithoutExtension) lookup.find(file.nameWithoutExtension) else null)
-                        ?: continue
+                    // The identified (canonical) names say exactly which game (arcade sets have a few:
+                    // "Marvel vs. Capcom 2" / "Marvel Vs. Capcom 2 New Age of Heroes"); else the file name.
+                    var source = file.nameWithoutExtension
+                    val game = titlesToTry(identified(), file).firstNotNullOfOrNull { n -> lookup.find(n)?.also { source = n } } ?: continue
                     val box = LaunchBoxDb.pickBox(game, source, s.prefs) ?: continue
                     if (saveImage(launchBoxImage(box), dest, maxWidth)) return "LaunchBox"
+                }
+                THEGAMESDB -> {
+                    val lookup = tgdbLookup(s, systemId) ?: continue
+                    // The disc's serial says exactly which game; else the canonical name, else the file name.
+                    val game = lookup.bySerial(runCatching { RomIdent.serials(file, systemId) }.getOrDefault(emptyList()))
+                        ?: titlesToTry(identified(), file).firstNotNullOfOrNull { lookup.find(it, s.prefs) }
+                        ?: continue
+                    if (saveImage(tgdbImage(TheGamesDb.imageSize(maxWidth), game.file), dest, maxWidth)) return "TheGamesDB"
                 }
             }
         }
         return null
+    }
+
+    /** Names to look a game up by title with: the identified ones (a few at most), then the file name. */
+    private fun titlesToTry(identified: List<String>, file: File): List<String> =
+        (identified.take(4) + file.nameWithoutExtension).distinct()
+
+    // ---- TheGamesDB ----------------------------------------------------------------------------
+
+    private val tgdbDir get() = MainUI.storage.dataDir("cache/thegamesdb")
+
+    private fun tgdbLookup(s: Session, systemId: String): TheGamesDb.Lookup? = s.lookups.computeIfAbsent("tgdb:$systemId") {
+        val dir = File(tgdbDir, "index")
+        val games = TheGamesDb.PLATFORMS[systemId].orEmpty().flatMap { p ->
+            val f = File(dir, "$p.tsv")
+            if (f.isFile) f.bufferedReader().useLines { TheGamesDb.parseIndex(it) } else emptyList()
+        }
+        if (games.isEmpty()) None else TheGamesDb.Lookup(games)
+    } as? TheGamesDb.Lookup
+
+    /**
+     * Makes sure the TheGamesDB indexes exist and are at most a month old: streams the dump
+     * (compressed on the wire, about 36 MB; skipped when unchanged) straight into the indexes,
+     * nothing of it is kept. Returns false when there is no index to use.
+     */
+    fun ensureTheGamesDb(progress: (String) -> Unit, cancelled: () -> Boolean): Boolean {
+        val dir = tgdbDir
+        val index = File(dir, "index")
+        val stamp = File(dir, "dump.lastmodified")
+        val have = index.isDirectory && (index.list()?.isNotEmpty() == true)
+        if (have && System.currentTimeMillis() - stamp.lastModified() < LAUNCHBOX_MAX_AGE) return true
+        val tmp = File(dir, "index.new").apply { deleteRecursively() }
+        return try {
+            progress("Downloading TheGamesDB...")
+            val c = (java.net.URL(tgdbDump).openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 20000; readTimeout = 60000
+                setRequestProperty("User-Agent", "MainUI-Android/${BuildConfig.VERSION_NAME}")
+                if (have) stamp.takeIf { it.isFile }?.readText()?.trim()?.ifEmpty { null }?.let { setRequestProperty("If-Modified-Since", it) }
+            }
+            try {
+                if (c.responseCode == 304) { stamp.setLastModified(System.currentTimeMillis()); return true }
+                if (c.responseCode !in 200..299) throw java.io.IOException("HTTP ${c.responseCode}")
+                // Android's HttpURLConnection asks for gzip and unpacks it by itself.
+                java.io.InputStreamReader(c.inputStream, Charsets.UTF_8).use { r ->
+                    val counts = TheGamesDb.buildIndex(r, TheGamesDb.PLATFORMS.values.flatten().toSet(), tmp) { read ->
+                        if (cancelled()) throw java.io.InterruptedIOException("cancelled")
+                        progress("Reading TheGamesDB: ${read shr 20} MB")
+                    }
+                    Log.i(TAG, "TheGamesDB index: ${counts.values.sum()} games on ${counts.size} platforms")
+                }
+                index.deleteRecursively()
+                if (!tmp.renameTo(index)) { tmp.copyRecursively(index, true); tmp.deleteRecursively() }
+                stamp.writeText(c.getHeaderField("Last-Modified") ?: "")
+                true
+            } finally {
+                c.disconnect()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "TheGamesDB: ${e.message}")
+            tmp.deleteRecursively()
+            have
+        }
     }
 
     // ---- LaunchBox -----------------------------------------------------------------------------
@@ -171,7 +252,7 @@ object FreeArt {
         crcs.forEach { names += dat.crc(it) }
         serials.forEach { names += dat.serial(it) }
         names += dat.file(file.name)
-        if (file.extension.equals("zip", true) || src.dir == "fbneo-split") names += dat.file(file.nameWithoutExtension)
+        if (file.extension.equals("zip", true) || src.dir in LibretroDb.ARCADE_DIRS) names += dat.file(file.nameWithoutExtension)
         return names.toList()
     }
 
@@ -198,8 +279,8 @@ object FreeArt {
 
     /** Thumbnail names from a web server's folder listing (links to *.png). */
     fun parseListing(html: String): Set<String> =
-        Regex("""href="([^"?#]+)\.png"""", RegexOption.IGNORE_CASE).findAll(html)
-            .map { URLDecoder.decode(it.groupValues[1].replace("+", "%2B"), "UTF-8").substringAfterLast('/') }
+        Regex("""href="([^"?#]+)\.png"""", RegexOption.IGNORE_CASE).allGroups(html)
+            .map { URLDecoder.decode(it[1].replace("+", "%2B"), "UTF-8").substringAfterLast('/') }
             .toHashSet()
 
     /** The same list from the set's GitHub repository (libretro-thumbnails/<set>). */

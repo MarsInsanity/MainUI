@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.provider.Settings
+import io.github.marsinsanity.mainui.core.allGroups
 
 /**
  * The running apps the process manager offers: one row per app (all of its processes together),
@@ -56,7 +57,7 @@ object RunningApps {
 
     /** Packages with a task in Android's recent apps, from `dumpsys activity recents`. */
     fun recentPackages(dump: String): Set<String> =
-        recentRe.findAll(dump).map { it.groupValues[1].trimEnd('.') }.filter { it.contains('.') }.toSet()
+        recentRe.allGroups(dump).map { it[1].trimEnd('.') }.filter { it.contains('.') }.toSet()
 
     /**
      * Which packages are apps you can safely stop: they have a launcher icon, and are not MainUI,

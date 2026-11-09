@@ -24,17 +24,47 @@ data class Session(
     val pkg: String,
     val activity: String?,
     val startedAt: Long,
+    /** The intent that started the game (Intent.toUri), to bring the same task back. */
+    val launchUri: String? = null,
 ) {
     val isRetroArch get() = emuRef?.startsWith("ra:") == true
     val isAndroidApp get() = emuRef == null
 
     fun json() = JSONObject().put("gameKey", gameKey).put("system", systemId).put("path", path).put("name", name)
-        .put("emu", emuRef).put("pkg", pkg).put("activity", activity).put("startedAt", startedAt)
+        .put("emu", emuRef).put("pkg", pkg).put("activity", activity).put("startedAt", startedAt).put("launch", launchUri)
 
     companion object {
         fun from(o: JSONObject) = Session(o.getString("gameKey"), o.getString("system"), o.optString("path").ifEmpty { null },
             o.getString("name"), o.optString("emu").ifEmpty { null }, o.getString("pkg"),
-            o.optString("activity").ifEmpty { null }, o.getLong("startedAt"))
+            o.optString("activity").ifEmpty { null }, o.getLong("startedAt"), o.optString("launch").ifEmpty { null })
+    }
+}
+
+/** Android tasks, from `dumpsys activity recents` (root). */
+object Tasks {
+    private val taskRe = Regex("""Task\{[0-9a-f]+ #(\d+)""")
+    private val pkgRe = Regex("""(?:\bA=\d+:|\bI=|realActivity=\{?|cmp=)([A-Za-z0-9_.]+)""")
+
+    /**
+     * The id of [pkg]'s most recent task that still has activities ("sz=0" tasks are only
+     * remembered in recents), or null.
+     */
+    fun idOf(dump: String, pkg: String): Int? {
+        var id: Int? = null
+        var live = false
+        var match = false
+        fun done(): Int? = if (id != null && live && match) id else null
+        for (line in dump.lineSequence()) {
+            val t = taskRe.find(line)
+            if (t != null) {
+                done()?.let { return it }
+                id = t.groupValues[1].toIntOrNull()
+                live = !line.contains("sz=0")
+                match = false
+            }
+            if (id != null && pkgRe.findAll(line).any { it.groupValues[1] == pkg }) match = true
+        }
+        return done()
     }
 }
 
@@ -75,7 +105,7 @@ class SessionManager(
             } else ctx.startActivity(intent)
             val pkg = intent.component?.packageName ?: intent.`package` ?: option.pkg ?: ""
             begin(Session(game.key, game.systemId, game.file?.absolutePath, game.name, option.ref, pkg,
-                intent.component?.className, System.currentTimeMillis()))
+                intent.component?.className, System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME)))
             library.addRecent(game, option.ref)
             null
         } catch (e: Exception) {
@@ -94,7 +124,8 @@ class SessionManager(
             if (asGame) {
                 val g = Game(SystemDef.ANDROID.id, null, label, pkg = pkg)
                 endActive()
-                begin(Session(g.key, g.systemId, null, label, null, pkg, intent.component?.className, System.currentTimeMillis()))
+                begin(Session(g.key, g.systemId, null, label, null, pkg, intent.component?.className, System.currentTimeMillis(),
+                    intent.toUri(Intent.URI_INTENT_SCHEME)))
                 library.addRecent(g, null)
             }
             null
@@ -122,11 +153,48 @@ class SessionManager(
     }
 
     /** Re-opens the running emulator exactly where it was. */
+    /**
+     * Brings the running game back as it was, without starting anything in it:
+     *  1. with root, its task is moved to the front (Android's own task switch);
+     *  2. else, for an emulator whose game screen is an ordinary activity (Flycast...), the intent
+     *     that started the game, which Android matches to the running task;
+     *  3. else (activities that take new intents themselves, like RetroArch's) a plain launch.
+     * A plain launch of an ordinary activity started a second, empty game screen on top of the
+     * running one: Flycast showed black until its menu was opened and closed.
+     */
     fun resume(): Boolean {
         val s = active ?: return false
+        if (Root.knownAvailable()) {
+            val id = runCatching { Tasks.idOf(Root.Shell.run("dumpsys activity recents", 4000).out, s.pkg) }.getOrNull()
+            if (id != null && runCatching {
+                    ctx.getSystemService(android.app.ActivityManager::class.java).moveTaskToFront(id, 0); true
+                }.getOrDefault(false)) {
+                // Android may quietly refuse the switch: if MainUI is still in front a moment later, launch instead.
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    val fg = io.github.marsinsanity.mainui.service.OverlayService.instance?.foregroundPackage
+                    if (active === s && fg == ctx.packageName) relaunchToFront(s)
+                }, 1200)
+                return true
+            }
+        }
+        return relaunchToFront(s)
+    }
+
+    private fun relaunchToFront(s: Session): Boolean {
+        val launch = s.launchUri?.let { runCatching { Intent.parseUri(it, Intent.URI_INTENT_SCHEME) }.getOrNull() }
+        if (launch != null && launch.component != null && isStandard(launch)) {
+            // Same action / data / component as the task's root: Android only brings the task back.
+            launch.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            if (runCatching { ctx.startActivity(launch); true }.getOrDefault(false)) return true
+        }
         val intent = emulators.resumeIntent(s.pkg, s.activity) ?: return false
         return runCatching { ctx.startActivity(intent); true }.getOrDefault(false)
     }
+
+    /** The activity [intent] starts uses the standard launch mode (a new instance per differing intent). */
+    private fun isStandard(intent: Intent): Boolean = runCatching {
+        ctx.packageManager.getActivityInfo(intent.component!!, 0).launchMode == android.content.pm.ActivityInfo.LAUNCH_MULTIPLE
+    }.getOrDefault(false)
 
     fun isRunning(s: Session): Boolean {
         if (!Root.knownAvailable()) return true // can't tell, assume so

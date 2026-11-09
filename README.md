@@ -117,6 +117,8 @@ Differences from a Miyoo Mini, due to the screen:
 - The Retroid Pocket Mini V2 screen (1240x1080) is narrower than 4:3. MainUI keeps the theme's
   640 px width and gains about 77 px of height (a 640x557 canvas). Header and footer stay at the
   top and bottom, content is centred, and lists show one extra row.
+- The top bar clock (Settings > User interface > *Show clock*) is 24-hour, 12-hour or like Android's
+  own setting (*Clock format*).
 - Backgrounds are cropped to fill the screen by default (Settings > User interface > Background fit:
   Crop / Stretch / Fit).
 - Fonts that Onion ships (`/mnt/SDCARD/miyoo/app/...`) are matched by file name. BPreplay, Exo 2 and
@@ -234,6 +236,14 @@ MainUI applies these RetroArch settings by itself before a RetroArch game starts
 running) whenever it needs new ones, so *Configure RetroArch* doesn't have to be run again. Standalone
 emulators save with their save key; loading on start is up to each emulator's own resume option.
 
+**Resuming from the Game Switcher** brings the game's own task back to the front (with root:
+Android's task switch, `moveTaskToFront`), so nothing new is started in the emulator. Before, MainUI
+sent a plain launch; for emulators whose game screen is an ordinary activity (Flycast's
+`NativeGLActivity`) Android answered that with a second, empty game screen on top of the running one:
+a black screen until the in-game menu was opened and closed. Without root, the intent that started
+the game is sent again for such emulators (Android matches it to the running task), and a plain launch
+only for emulators that handle new launches themselves (RetroArch).
+
 RetroArch only takes note of a new keyboard when it gets its first key, and ignored that key, so the
 first Save or Load did nothing. MainUI now taps Ctrl (unused by RetroArch) on its virtual keyboard
 once per RetroArch run before the first hotkey.
@@ -336,10 +346,10 @@ minutes for a large library and looked stuck. Every run is logged to **`MainUI/l
 the sources, the ScreenScraper account answer, how many games, and each game's outcome or error. If a
 run finds nothing, the progress screen says so, and that file says why.
 
-### Free sources: GameTDB, libretro thumbnails, LaunchBox
+### Free sources: GameTDB, libretro thumbnails, LaunchBox, TheGamesDB
 
 *Box art sources* switches each source on or off; they are tried in this order: ScreenScraper,
-GameTDB, libretro, LaunchBox. The free ones need no account, and matching is built to be exact
+GameTDB, libretro, LaunchBox, TheGamesDB. The free ones need no account, and matching is built to be exact
 rather than to guess:
 
 1. **GameTDB** covers GameCube, Wii, DS, 3DS and PS3 by the game id in the disc or cartridge header
@@ -353,7 +363,12 @@ rather than to guess:
      big to checksum: GBA and DS game codes, N64 codes (any byte order), 3DS product codes,
      GameCube / Wii disc ids, PS1 / PS2 `SYSTEM.CNF`, PSP `UMD_DATA.BIN` / `PARAM.SFO`, PS1 EBOOT.PBP,
      PS3 title ids, Saturn / Dreamcast / Mega-CD headers;
-   - arcade zips by their short name (`sf2.zip`) through the FBNeo DAT.
+   - arcade zips by their short name (`sf2.zip`) through both the **FBNeo** DAT and the **MAME** DAT
+     (`metadat/mame/MAME.dat`, every MAME version's sets), with libretro's "FBNeo - Arcade Games" and
+     "MAME" thumbnail sets: FBNeo first in `arcade`, `neogeo` and `cps1-3`, MAME first in `mame`,
+     `mame2003` and `atomiswave`, and Naomi zips through MAME after Redump's Naomi DAT. A game only
+     one of them knows (Cruis'n USA, Killer Instinct, Area 51... are MAME only) still gets its box,
+     and the second DAT is only read for games the first doesn't cover.
    The canonical name is exactly what libretro's thumbnails are filed under. Only if nothing
    identifies the dump is its file name matched by title, strictly (below).
 3. **LaunchBox Games Database**: MainUI downloads its public `Metadata.zip` (about 110 MB, once a
@@ -374,6 +389,26 @@ No match means no art, never a guess.
 Tested against real data: identified GBA / PS1 dumps get their exact libretro box 87% / 86% of the
 time; LaunchBox matches 93% of No-Intro's retail GBA titles and 85% of Redump's PS1 discs, all of the
 sampled matches being the right game.
+
+4. **TheGamesDB** (thegamesdb.net): MainUI streams its public dump (`database-latest.json`, 36 MB
+   compressed on the wire, once a month, skipped when unchanged) into small per-system indexes of
+   front boxes; images come from cdn.thegamesdb.net (1080 px "large", 720 px "medium" when *Max image
+   width* is 720 or less). Disc games are found by their **serial** first (TheGamesDB lists them for
+   PS1, PS2, PS3, Dreamcast...: `SLUS-20672`, `T1202N`), then by exact title or alternate title like
+   LaunchBox. TheGamesDB keeps one entry per release region, so among same-title entries the dump's
+   own region wins, then its wider region (a German dump gets the PAL box), then *Region priority*;
+   two different games with one title in that region are skipped. Against the real dump: 71% of
+   No-Intro's GBA dumps, 78% of SNES, 55% of Redump's PS1 and 61% of PS2 find a box; of the serial
+   matches 87% carry the dump's own title and the rest are the same game under a localized or longer
+   title. On by default for new installs; turn it on under *Box art sources* otherwise.
+
+Arcade sets have a few names (MAME's "Marvel vs. Capcom 2" / "Marvel Vs. Capcom 2 New Age of
+Heroes"): LaunchBox and TheGamesDB try each identified name, then the file name.
+
+libretro's thumbnail lists are web pages with thousands of links (FBNeo's: 1.7 MB, 6,500 boxes).
+They are now read with one regular expression matcher for the whole page; Kotlin's `findAll` made a
+new one per link, and on Android every one copied the whole page, which on the FBNeo list kept all
+scraper threads waiting for minutes (over 15 minutes on the Android emulator, 50 s with the fix).
 
 The Cover Project isn't a source: its site refuses automated clients.
 
