@@ -23,7 +23,8 @@ open class ListScene(
         g.background()
         g.list(list, showPreview = showPreview && MainUI.settings.showGameArt)
         g.header(title)
-        g.footer(if (list.current?.disabled == true) null else aLabel, bLabel, extraHints)
+        g.footer(if (list.current?.disabled == true) null else aLabel, bLabel, extraHints,
+            reserveRight = if (showStatus) g.statusWidth(list.active + 1, list.size) else 0f)
         if (showStatus) g.footerStatus(list.active + 1, list.size)
     }
 

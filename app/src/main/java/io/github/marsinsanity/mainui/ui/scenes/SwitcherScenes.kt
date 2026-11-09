@@ -104,7 +104,7 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
                 g.battery(g.W - 44f, headerH / 2)
             } else g.header(title)
             if (bottomBar != null) g.bmp(bottomBar, 0f, g.H - bottomBar.height, g.W, bottomBar.height.toFloat())
-            else { g.footer("RESUME", "BACK"); g.footerStatus(index + 1, games.size) }
+            else { g.footer("RESUME", "BACK", reserveRight = g.statusWidth(index + 1, games.size)); g.footerStatus(index + 1, games.size) }
         }
 
         if (view != 2) {
@@ -226,7 +226,7 @@ class ThemeSwitcherScene(host: SceneHost) : Scene(host) {
         g.text(by, g.theme.list, g.W / 2, y + 54f, Align.CENTER, maxW = g.W - 100f, size = 18f, color = Color.LTGRAY, marquee = true)
         val active = t.key == MainUI.themes.currentKey && t.zip == null
         g.header(if (active) "Themes (current)" else "Themes")
-        g.footer(if (active) null else "APPLY", "BACK", listOf("X" to "GET MORE"))
+        g.footer(if (active) null else "APPLY", "BACK", listOf("X" to "GET MORE"), reserveRight = g.statusWidth(index + 1, themes.size))
         g.footerStatus(index + 1, themes.size)
         if (busy) g.infoPanel("Applying theme...")
     }

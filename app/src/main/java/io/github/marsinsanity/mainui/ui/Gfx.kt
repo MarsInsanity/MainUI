@@ -320,24 +320,54 @@ class Gfx {
     }
 
     /** Footer bar with "(A) LABEL  (B) LABEL" hints, Onion's theme_renderStandardHint. */
-    fun footer(aLabel: String?, bLabel: String?, extra: List<Pair<String, String>> = emptyList()) {
+    /**
+     * The A / B / extra button hints, Onion's theme_renderStandardHint. They are
+     * fitted into the bar: tighter spacing first, then slightly smaller, then
+     * without the n/total counter ([reserveRight] is its width), and only as a
+     * last resort are trailing hints left out (their buttons still work).
+     */
+    fun footer(aLabel: String?, bLabel: String?, extra: List<Pair<String, String>> = emptyList(), reserveRight: Float = 0f) {
         val bg = skin("tips-bar-bg")
         val y = H - FOOTER
         if (bg != null) bar(bg, y, FOOTER) else fillRect(0f, y, W, FOOTER, darken(theme.bgColor, 0.45f))
         val cy = H - 30f
-        var x = 20f
         val hideLabels = theme.hideHintLabels
-        fun hintPair(btn: String, label: String?) {
-            if (label == null) return
-            val startX = x
-            x += buttonIcon(btn, x, cy) + 5
-            if (!hideLabels) x += text(label, theme.hint, x, cy - 1) + 30 else x += 25
-            btnFor(btn)?.let { pendingHints += RectF(startX - 10, y, x - 10, H) to it }
+        val hints = buildList {
+            aLabel?.let { add("A" to it) }
+            bLabel?.let { add("B" to it) }
+            addAll(extra)
         }
-        hintPair("A", aLabel)
-        hintPair("B", bLabel)
-        for ((b, l) in extra) hintPair(b, l)
-        hintsEndX = x - 30f
+        val left = 20f
+        fun widthOf(n: Int, gap: Float, scale: Float): Float = hints.take(n).sumOf { (b, l) ->
+            (buttonIcon(b, 0f, 0f, scale = scale, draw = false) + 5f * scale +
+                (if (hideLabels) 0f else textWidth(l, theme.hint, theme.hint.size * scale))).toDouble()
+        }.toFloat() + gap * (n - 1).coerceAtLeast(0)
+        // (gap, smallest scale, room on the right) tried in order.
+        val withCounter = W - left - 20f - reserveRight - (if (reserveRight > 0f) 12f else 0f)
+        val noCounter = W - left - 20f
+        var n = hints.size
+        var gap = 30f; var scale = 1f
+        run fit@{
+            while (n > 0) {
+                for ((g, minScale, room) in listOf(Triple(30f, 1f, withCounter), Triple(16f, 1f, withCounter),
+                    Triple(16f, 0.82f, withCounter), Triple(16f, 0.72f, noCounter))) {
+                    val w1 = widthOf(n, g, 1f)
+                    val s = if (w1 <= room) 1f else ((room - g * (n - 1)) / (w1 - g * (n - 1))).coerceAtMost(1f)
+                    if (s >= minScale) { gap = g; scale = s; return@fit }
+                }
+                if (n <= 2) { gap = 16f; scale = 0.72f; return@fit }
+                n-- // drop the last extra hint
+            }
+        }
+        var x = left
+        for ((btn, label) in hints.take(n)) {
+            val startX = x
+            x += buttonIcon(btn, x, cy, scale = scale) + 5f * scale
+            if (!hideLabels) x += text(label, theme.hint, x, cy - 1, size = theme.hint.size * scale)
+            btnFor(btn)?.let { pendingHints += RectF(startX - 10, y, x + gap / 2, H) to it }
+            x += gap
+        }
+        hintsEndX = x - gap
     }
 
     /** Right edge of the footer hints drawn this frame (footerStatus avoids overlapping them). */
@@ -348,29 +378,44 @@ class Gfx {
         "START" -> Btn.START; "SELECT" -> Btn.SELECT; "MENU" -> Btn.MENU; else -> null
     }
 
-    /** Draws a button glyph (icon-A-54 / icon-B-54 / icon-x / icon-y from the skin). Returns its width. */
-    fun buttonIcon(btn: String, x: Float, cy: Float, size: Float = 44f): Float {
+    /**
+     * Draws a button glyph (icon-A-54 / icon-B-54 / icon-x / icon-y from the skin)
+     * and returns its width. [draw] = false only measures it.
+     */
+    fun buttonIcon(btn: String, x: Float, cy: Float, size: Float = 44f, scale: Float = 1f, draw: Boolean = true): Float {
         val skinName = when (btn) {
             "A" -> "icon-A-54"; "B" -> "icon-B-54"; "X" -> "icon-x"; "Y" -> "icon-y"
             "MENU" -> "ic-MENU"; "START" -> "icon-START"; else -> null
         }
         val b = skinName?.let { skin(it) }
-        if (b != null && btn in setOf("A", "B")) { bmp(b, x, cy - b.height / 2f); return b.width.toFloat() }
-        if (b != null) {
-            val s = size / b.height
-            bmp(b, x, cy - size / 2, b.width * s, size); return b.width * s
+        if (b != null && btn in setOf("A", "B")) {
+            val w = b.width * scale; val h = b.height * scale
+            if (draw) bmp(b, x, cy - h / 2f, w, h)
+            return w
         }
-        val w = if (btn.length > 1) textWidth(btn, theme.hint, size * 0.5f) + 20f else size
-        fillRect(x, cy - size / 2, w, size, theme.accent, 8f)
-        text(btn, theme.hint, x + w / 2, cy, Align.CENTER, color = Color.WHITE, size = if (btn.length > 1) size * 0.5f else size * 0.8f)
+        val sz = size * scale
+        if (b != null) {
+            val s = sz / b.height
+            if (draw) bmp(b, x, cy - sz / 2, b.width * s, sz)
+            return b.width * s
+        }
+        val w = if (btn.length > 1) textWidth(btn, theme.hint, sz * 0.5f) + 20f * scale else sz
+        if (draw) {
+            fillRect(x, cy - sz / 2, w, sz, theme.accent, 8f * scale)
+            text(btn, theme.hint, x + w / 2, cy, Align.CENTER, color = Color.WHITE, size = if (btn.length > 1) sz * 0.5f else sz * 0.8f)
+        }
         return w
     }
+
+    /** Width footerStatus needs for "current/total". */
+    fun statusWidth(current: Int, total: Int): Float =
+        textWidth("$total", theme.total) + textWidth("${if (total == 0) 0 else current}/", theme.currentPage)
 
     /** "3/120" at the bottom right, Onion's theme_renderFooterStatus. */
     fun footerStatus(current: Int, total: Int) {
         val cur = if (total == 0) 0 else current
         val cy = H - 31f
-        val width = textWidth("$total", theme.total) + textWidth("$cur/", theme.currentPage)
+        val width = statusWidth(current, total)
         if (W - 20f - width < hintsEndX + 12f) return // no room next to the hints
         val tw = text("$total", theme.total, W - 20f, cy, Align.RIGHT)
         text("$cur/", theme.currentPage, W - 20f - tw, cy, Align.RIGHT)
