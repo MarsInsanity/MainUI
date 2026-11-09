@@ -61,10 +61,10 @@ class UiSettingsScene(host: SceneHost) : ListScene(host, "User interface") {
     override fun onEnter() {
         val s = MainUI.settings
         list.set(listOf(
-            multi("Home screen", listOf("menu" to "Main menu", "carousel" to "Carousel"), { s.homeLayout }) {
+            multi("Home screen", listOf("menu" to "Main menu", "row" to "Systems row"), { s.homeLayout.replace("carousel", "row") }) {
                 s.homeLayout = it; restartHome()
             },
-            multi("Games view", listOf("grid" to "Grid", "carousel" to "Carousel"), { s.systemsLayout }) { s.systemsLayout = it },
+            multi("Games view", listOf("grid" to "Grid", "row" to "Row"), { s.systemsLayout.replace("carousel", "row") }) { s.systemsLayout = it },
             toggle("Show Recents", { s.showRecents }) { s.showRecents = it },
             toggle("Show Favorites", { s.showFavorites }) { s.showFavorites = it },
             toggle("Show Expert (RetroArch)", { s.showExpert }) { s.showExpert = it },
@@ -96,20 +96,28 @@ class ControlSettingsScene(host: SceneHost) : ListScene(host, "Controls") {
         val overlayOn = OverlayService.isEnabled(host.hostContext)
         list.set(listOf(
             toggle("Swap A/B and X/Y", { s.swapAB }) { s.swapAB = it },
-            multi("In-game menu trigger", listOf(
-                "home" to "Home button", "select_start" to "Select+Start", "l3_r3" to "L3+R3", "off" to "Off",
-            ), { s.ingameTrigger }) { s.ingameTrigger = it; OverlayService.instance?.updateHotkeyListener() },
-            toggle("Hold Home: Game Switcher", { s.longHomeGameSwitcher }) { s.longHomeGameSwitcher = it },
-            multi("Home inside MainUI", listOf(
+            multi("Press Home in game", HOME_ACTIONS, { s.homePress }) { s.homePress = it },
+            multi("Hold Home in game", HOME_ACTIONS, { s.homeHold }) { s.homeHold = it },
+            multi("Hold time", listOf("300" to "0.3 s", "500" to "0.5 s", "700" to "0.7 s", "1000" to "1 s", "1500" to "1.5 s"),
+                { s.homeHoldMs.toString() }) { s.homeHoldMs = it.toInt() },
+            multi("Extra menu combo", listOf(
+                "off" to "Off", "select_start" to "Select+Start", "l3_r3" to "L3+R3",
+            ), { s.comboTrigger }) { s.comboTrigger = it; OverlayService.instance?.updateHotkeyListener() },
+            multi("Press Home in MainUI", listOf(
                 "menu_then_gs" to "Menu, then GS", "gs" to "Game Switcher", "menu" to "Main menu",
             ), { s.homeInMainUI }) { s.homeInMainUI = it },
+            multi("Hold Home in MainUI", listOf("gs" to "Game Switcher", "none" to "Nothing"),
+                { s.homeHoldInMainUI }) { s.homeHoldInMainUI = it },
             toggle("Pause game while menu is open", { s.pauseOnMenu }) { s.pauseOnMenu = it },
+            toggle("Freeze standalone emulators (root)", { s.freezeStandalone }) { s.freezeStandalone = it },
             toggle("Auto save state on exit", { s.autoSaveOnExit }) { s.autoSaveOnExit = it },
             action("Overlay service", if (overlayOn) "enabled" else "disabled") { openAccessibility(host) },
         ))
     }
 
     companion object {
+        val HOME_ACTIONS = listOf("menu" to "In-game menu", "gs" to "Game Switcher", "home" to "Go to MainUI", "none" to "Nothing")
+
         fun openAccessibility(host: SceneHost) {
             host.hostContext.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             host.toast("Enable \"MainUI in-game menu\"", 3000)
@@ -127,44 +135,60 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
         val s = MainUI.settings
         val roots = MainUI.storage.romRoots()
         list.set(listOf(
+            action("Hidden apps", "${MainUI.library.hiddenApps().size}") { host.push(HiddenAppsScene(host)) },
             toggle("Auto-sort Android games", { s.autoSortAndroidGames }) { s.autoSortAndroidGames = it },
             action("Sort installed games now") {
                 host.io({ s.lastPackageReconcile = 0; MainUI.apps.reconcileNewInstalls(MainUI.emulators); MainUI.library.androidGames().size }) {
                     host.toast("$it Android games")
                 }
             },
+            multi("Game metadata", listOf("both" to "gamelist + DAT", "gamelist" to "gamelist.xml", "logiqx" to "Logiqx DAT"),
+                { s.metadataSource }) { s.metadataSource = it; MainUI.games.invalidate() },
             toggle("Show unknown rom folders", { s.showUnknownFolders }) { s.showUnknownFolders = it; MainUI.games.invalidate() },
             multi("MainUI data folder", listOf("auto" to "Auto", "sd" to "SD card", "internal" to "Internal"), { s.dataLocation }) {
                 s.dataLocation = it; MainUI.reloadStorage()
             },
-            action("Rom folders", if (roots.isEmpty()) "none found" else "${roots.size}") {
-                host.push(DialogScene(host, "Rom folders",
-                    (roots.map { it.path }.ifEmpty { listOf("Create <SD card>/roms/<system> folders") }).joinToString("\n"), "OK", null))
-            },
-            action("Add rom folder...") {
-                host.push(io.github.marsinsanity.mainui.ui.KeyboardScene(host, "Absolute path", "/storage/") { p ->
-                    if (p.isNotBlank()) { s.extraRomRoots = (s.extraRomRoots.lines() + p.trim()).filter { it.isNotBlank() }.joinToString("\n"); MainUI.games.invalidate(); build() }
-                })
-            },
+            action("Rom folders", if (roots.isEmpty()) "none found" else "${roots.size}") { host.push(RomFoldersScene(host)) },
             action("Create dArkOS folders") {
-                host.push(DialogScene(host, "Create folders", "Create the dArkOS rom folders on ${MainUI.storage.sdCard?.label ?: "internal storage"}?") {
-                    host.io({ createFolders() }) { host.toast("Created $it folders"); build() }
-                })
+                // Pick the storage first: internal storage or the SD card
+                host.push(io.github.marsinsanity.mainui.ui.PopMenuScene(host, "Create rom folders on",
+                    MainUI.storage.volumes().map { v ->
+                        val label = if (v.removable) "SD card (${v.dir.name})" else "Internal storage"
+                        UiItem(label, onSelect = {
+                            host.push(DialogScene(host, "Create folders",
+                                "Create roms/<system> folders for every dArkOS system on $label?\nExisting folders are kept and used, nothing is overwritten.") {
+                                host.io({ createFolders(v) }) { host.toast("Created $it folders on $label", 2500); build() }
+                            })
+                        })
+                    }))
             },
             action("Rescan library") { MainUI.games.invalidate(); MainUI.apps.invalidate(); host.toast("Library will be rescanned") },
         ))
     }
 
-    private fun createFolders(): Int {
-        val vol = MainUI.storage.sdCard ?: MainUI.storage.internal
-        val roms = java.io.File(vol.dir, "roms")
+    /**
+     * Creates the dArkOS rom folders on [vol]. Purely additive: an existing roms
+     * folder (any letter case) is reused, and a system is skipped when any of its
+     * folder names (e.g. "genesis" for "megadrive") already exists. Nothing is
+     * ever overwritten, moved or deleted.
+     */
+    private fun createFolders(vol: io.github.marsinsanity.mainui.core.Storage.Volume): Int {
+        val roms = vol.dir.listFiles()?.firstOrNull { it.isDirectory && it.name.equals("roms", true) } ?: java.io.File(vol.dir, "roms")
+        roms.mkdirs()
+        val existing = (roms.listFiles()?.filter { it.isDirectory }?.map { it.name.lowercase() } ?: emptyList()).toSet()
         var n = 0
-        for (d in MainUI.systems.defs) for (f in d.folders.take(1)) {
-            val dir = java.io.File(roms, f)
-            if (!dir.exists() && dir.mkdirs()) n++
+        for (d in MainUI.systems.defs) {
+            if (d.folders.isEmpty()) continue
+            val already = d.folders.any { f ->
+                val parts = f.split('/')
+                if (parts.size == 1) parts[0].lowercase() in existing
+                else java.io.File(roms, f).isDirectory // nested (pico-8/carts)
+            }
+            if (already) continue
+            if (java.io.File(roms, d.folders.first()).mkdirs()) n++
         }
-        java.io.File(roms, "bios").mkdirs()
-        java.io.File(vol.dir, "Themes").mkdirs()
+        if ("bios" !in existing) java.io.File(roms, "bios").mkdirs()
+        if (vol.dir.listFiles()?.none { it.isDirectory && it.name.equals("Themes", true) } != false) java.io.File(vol.dir, "Themes").mkdirs()
         MainUI.games.invalidate()
         return n
     }
@@ -195,7 +219,14 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
         }
         for (d in em.standaloneDefs()) {
             val pkg = em.installedPackage(d.id)
-            items += UiItem(d.name, sub = pkg ?: "not installed", disabled = pkg == null)
+            val states = when (d.states) {
+                io.github.marsinsanity.mainui.emu.StateSupport.API -> "slots"
+                io.github.marsinsanity.mainui.emu.StateSupport.HOTKEY -> "hotkeys " + listOfNotNull(d.save, d.load)
+                    .joinToString("/") { io.github.marsinsanity.mainui.emu.StandaloneController.keyLabel(it) }
+                io.github.marsinsanity.mainui.emu.StateSupport.MENU -> "own menu"
+                io.github.marsinsanity.mainui.emu.StateSupport.NONE -> "no states"
+            }
+            items += UiItem(d.name, sub = (if (pkg == null) "not installed  " else "") + states, disabled = pkg == null)
         }
         list.set(items)
     }

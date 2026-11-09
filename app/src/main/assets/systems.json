@@ -42,10 +42,11 @@
     "app"
    ],
    "emulators": [
-    "ra:citra",
     "sa:azahar",
+    "sa:lime3ds",
     "sa:citra",
-    "sa:lime3ds"
+    "sa:citra_mmj",
+    "ra:citra"
    ],
    "screenscraper": 17,
    "icons": [
@@ -1143,8 +1144,8 @@
    ],
    "emulators": [
     "sa:dolphin",
-    "ra:dolphin",
-    "sa:dolphin_mmjr"
+    "sa:dolphin_mmjr",
+    "ra:dolphin"
    ],
    "screenscraper": 13,
    "icons": [
@@ -1345,6 +1346,25 @@
     "md"
    ],
    "short": "MSUM"
+  },
+  {
+   "id": "xbox",
+   "name": "Microsoft Xbox",
+   "folders": [
+    "xbox"
+   ],
+   "extensions": [
+    "iso",
+    "xiso"
+   ],
+   "emulators": [
+    "sa:hakux"
+   ],
+   "screenscraper": 32,
+   "icons": [
+    "xbox"
+   ],
+   "short": "XBOX"
   },
   {
    "id": "mv",
@@ -1580,10 +1600,11 @@
    ],
    "emulators": [
     "sa:drastic",
+    "sa:melonds",
+    "sa:melonds_nightly",
     "ra:melondsds",
     "ra:melonds",
-    "ra:desmume",
-    "sa:melonds"
+    "ra:desmume"
    ],
    "screenscraper": 15,
    "icons": [
@@ -1630,9 +1651,7 @@
    ],
    "emulators": [
     "sa:eden",
-    "sa:citron",
-    "sa:sudachi",
-    "sa:yuzu"
+    "sa:kenjinx"
    ],
    "screenscraper": 225,
    "icons": [
@@ -1910,15 +1929,20 @@
     "iso",
     "chd",
     "cso",
+    "ciso",
     "bin",
     "img",
     "mdf",
     "nrg",
     "elf",
     "gz",
-    "zso"
+    "zso",
+    "isz",
+    "m3u",
+    "dump"
    ],
    "emulators": [
+    "sa:armsx2",
     "sa:nethersx2"
    ],
    "screenscraper": 58,
@@ -1926,6 +1950,25 @@
     "ps2"
    ],
    "short": "PS2"
+  },
+  {
+   "id": "ps3",
+   "name": "PlayStation 3",
+   "folders": [
+    "ps3"
+   ],
+   "extensions": [
+    "iso",
+    "ps3"
+   ],
+   "emulators": [
+    "sa:armsx3"
+   ],
+   "screenscraper": 59,
+   "icons": [
+    "ps3"
+   ],
+   "short": "PS3"
   },
   {
    "id": "psp",
@@ -1971,6 +2014,24 @@
     "psp"
    ],
    "short": "PSPM"
+  },
+  {
+   "id": "psvita",
+   "name": "PlayStation Vita",
+   "folders": [
+    "psvita"
+   ],
+   "extensions": [
+    "psvita"
+   ],
+   "emulators": [
+    "sa:vita3k"
+   ],
+   "screenscraper": 62,
+   "icons": [
+    "psvita"
+   ],
+   "short": "Vita"
   },
   {
    "id": "pokemonmini",

@@ -5,6 +5,7 @@ import io.github.marsinsanity.mainui.MainUI
 import io.github.marsinsanity.mainui.data.Game
 import io.github.marsinsanity.mainui.data.GameListXml
 import io.github.marsinsanity.mainui.data.GameSystem
+import io.github.marsinsanity.mainui.data.LogiqxDat
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -40,7 +41,8 @@ object ScrapeState {
  * Scrapes artwork + metadata from ScreenScraper using as many worker threads
  * as the user's ScreenScraper account allows (maxthreads grows with the
  * donation level). Images go to <volume>/roms/<system>/images/ on the SD card
- * or on internal storage, and gamelist.xml is updated in the dArkOS / ES format.
+ * or on internal storage; metadata goes to gamelist.xml (dArkOS / ES format),
+ * a Logiqx DAT, or both.
  */
 object Scraper {
     private const val TAG = "MainUI.Scraper"
@@ -89,6 +91,7 @@ object Scraper {
             val queue = LinkedBlockingQueue(jobs)
             val limiter = RateLimiter(perMin)
             val gamelists = ConcurrentHashMap<String, GameListXml>()
+            val dats = ConcurrentHashMap<String, LogiqxDat>()
             val pool = Executors.newFixedThreadPool(threads)
             val fatal = AtomicBoolean(false)
             st.message = "Scraping with $threads thread${if (threads > 1) "s" else ""}"
@@ -98,7 +101,7 @@ object Scraper {
                         val (sys, game) = queue.poll() ?: break
                         st.current = "${sys.def.short}: ${game.name}"
                         try {
-                            when (scrapeGame(api, sys, game, gamelists, limiter)) {
+                            when (scrapeGame(api, sys, game, gamelists, dats, limiter)) {
                                 Result.FOUND -> st.found.incrementAndGet()
                                 Result.NOT_FOUND -> { st.missing.incrementAndGet(); st.addLog("Not found: ${game.name}") }
                                 Result.SKIPPED -> st.skipped.incrementAndGet()
@@ -117,7 +120,8 @@ object Scraper {
             }
             pool.shutdown()
             pool.awaitTermination(7, TimeUnit.DAYS)
-            if (MainUI.settings.ssWriteGamelist) gamelists.values.forEach { gl -> synchronized(gl) { runCatching { gl.save() } } }
+            gamelists.values.forEach { gl -> synchronized(gl) { runCatching { gl.save() } } }
+            dats.values.forEach { d -> synchronized(d) { runCatching { d.save() } } }
             MainUI.games.invalidate()
             if (!fatal.get()) st.message = if (cancel.get()) "Cancelled" else "Done"
         } catch (e: Exception) {
@@ -150,7 +154,7 @@ object Scraper {
     enum class Result { FOUND, NOT_FOUND, SKIPPED }
 
     private fun scrapeGame(api: ScreenScraper, sys: GameSystem, game: Game, gamelists: ConcurrentHashMap<String, GameListXml>,
-                           limiter: RateLimiter): Result {
+                           dats: ConcurrentHashMap<String, LogiqxDat>, limiter: RateLimiter): Result {
         val file = game.file ?: return Result.SKIPPED
         val ssId = sys.def.screenscraperId ?: return Result.SKIPPED
         val hashes = runCatching { Hashes.of(file) }.getOrNull()
@@ -169,7 +173,15 @@ object Scraper {
             api.download(media, dest, MainUI.settings.ssMaxImageWidth)
             imageRel = if (dest.absolutePath.startsWith(sysRoot.absolutePath + "/")) "./" + dest.relativeTo(sysRoot).path else dest.absolutePath
         }
-        if (MainUI.settings.ssWriteGamelist) {
+        val format = MainUI.settings.ssMetaFormat
+        if (format == "logiqx" || format == "both") {
+            val d = dats.getOrPut(sysRoot.absolutePath) { LogiqxDat.forWriting(sysRoot) }
+            synchronized(d) {
+                d.put(file, info.name, info.desc, info.releaseDate, info.publisher ?: info.developer, hashes)
+                if (ScrapeState.done.get() % 25 == 0) runCatching { d.save() }
+            }
+        }
+        if (format == "gamelist" || format == "both") {
             val gl = gamelists.getOrPut(sysRoot.absolutePath) { GameListXml(sysRoot).load() }
             synchronized(gl) {
                 gl.put(file) { e ->
@@ -207,9 +219,11 @@ object Scraper {
         val sys = io.github.marsinsanity.mainui.ui.scenes.Launch.gameSystem(game.systemId) ?: return "Unknown system"
         if (sys.def.screenscraperId == null) return "${sys.name} is not on ScreenScraper"
         val gamelists = ConcurrentHashMap<String, GameListXml>()
+        val dats = ConcurrentHashMap<String, LogiqxDat>()
         return try {
-            val r = scrapeGame(ScreenScraper.fromSettings(), sys, game, gamelists, RateLimiter(0))
+            val r = scrapeGame(ScreenScraper.fromSettings(), sys, game, gamelists, dats, RateLimiter(0))
             gamelists.values.forEach { it.save() }
+            dats.values.forEach { it.save() }
             MainUI.games.invalidate()
             if (r == Result.FOUND) "Artwork updated" else "Game not found on ScreenScraper"
         } catch (e: ScreenScraper.ApiException) {

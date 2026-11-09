@@ -68,8 +68,13 @@ class MainActivity : Activity() {
         val session = MainUI.sessions.active
         if (!resumed && session != null && leftForSession) {
             // HOME pressed inside a game without the accessibility overlay.
+            // (Long presses can't be told apart here: Android only delivers the HOME intent.)
             keepSession = true
-            if (MainUI.settings.ingameTrigger == "off") view.push(GameSwitcherScene(view)) else showInGameMenuFallback()
+            when (MainUI.settings.homePress) {
+                "menu" -> showInGameMenuFallback()
+                "gs" -> view.push(GameSwitcherScene(view))
+                else -> {}
+            }
             return
         }
         if (resumed) {
@@ -79,6 +84,11 @@ class MainActivity : Activity() {
                 else -> if (view.scenes().size > 1) view.popToRoot() else openGameSwitcher()
             }
         }
+    }
+
+    /** Opens the Game Switcher unless it is already showing (HOME held in MainUI). */
+    fun showGameSwitcher() {
+        if (view.top() !is GameSwitcherScene) view.push(GameSwitcherScene(view))
     }
 
     private fun openGameSwitcher() {
@@ -95,6 +105,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        io.github.marsinsanity.mainui.emu.Freezer.thawAll()
         immersive()
         if (MainUI.sessions.active != null && leftForSession && !keepSession) {
             // Back in MainUI without a HOME press: the emulator / app closed itself.

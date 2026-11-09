@@ -12,7 +12,7 @@ import java.io.StringReader
  * characters), so input is sanitised before parsing and unknown tags are kept
  * verbatim so rewriting never loses data written by other tools.
  */
-class GameListXml(val dir: File) {
+class GameListXml(val dir: File) : MetaLookup {
 
     class Entry(
         var path: String,
@@ -91,7 +91,9 @@ class GameListXml(val dir: File) {
         return sb.toString()
     }
 
-    fun get(romFile: File): Entry? = entries[normalize(relPath(romFile))]
+    override fun get(romFile: File): Entry? = entries[normalize(relPath(romFile))]
+
+    override fun stamp(): Long = if (file.isFile) file.lastModified() else 0L
 
     fun all(): Collection<Entry> = entries.values
 
@@ -102,7 +104,7 @@ class GameListXml(val dir: File) {
     }
 
     /** Resolves an image style field (./images/x.png, absolute, ~/...) to a file. */
-    fun resolve(value: String?): File? {
+    override fun resolve(value: String?): File? {
         if (value.isNullOrBlank()) return null
         val v = value.trim()
         val f = when {

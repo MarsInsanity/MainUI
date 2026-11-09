@@ -264,27 +264,86 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         if (down) press(b, timerRepeat = true) else release(b)
     }
 
+    // ---- touch ----------------------------------------------------------------------------
+    // Taps: footer hints first (tap "B BACK" to go back), then the header's left
+    // corner (back), then the scene. Drags scroll lists; flings either keep a list
+    // scrolling or turn into a page / item change on grids, switchers and rows.
+
+    private var dragging = false
+    private var dragHandled = false
+    private var flung = false
+    private var dragX = 0f
+    private var dragY = 0f
+
+    private fun toLogical(v: Float) = v / (width / logicalWidth)
+
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-        override fun onDown(e: MotionEvent) = true
-        override fun onSingleTapUp(e: MotionEvent): Boolean {
-            val s = width / logicalWidth
-            val top = stack.lastOrNull() ?: return false
-            if (top.onTap(e.x / s, e.y / s)) { MainUI.themes.click(); invalidate() }
+        override fun onDown(e: MotionEvent): Boolean {
+            dragging = false; dragHandled = false; flung = false; dragX = 0f; dragY = 0f
             return true
         }
-        override fun onLongPress(e: MotionEvent) = dispatch(Btn.SELECT, false)
+
+        override fun onSingleTapUp(e: MotionEvent): Boolean = tap(e)
+
+        // A quick second tap is reported as a double tap instead of a tap; treat it as one
+        // (first tap selects a row, second opens it).
+        override fun onDoubleTap(e: MotionEvent): Boolean = tap(e)
+
+        private fun tap(e: MotionEvent): Boolean {
+            val x = toLogical(e.x); val y = toLogical(e.y)
+            val top = stack.lastOrNull() ?: return false
+            gfx.hintAt(x, y)?.let { b -> dispatch(b, false); return true }
+            if (top.onTap(x, y)) { MainUI.themes.click(); invalidate(); return true }
+            if (y < Gfx.HEADER && x < logicalWidth * 0.25f && stack.size > 1 && !top.isOverlay) {
+                dispatch(Btn.B, false); return true
+            }
+            return false
+        }
+
+        override fun onLongPress(e: MotionEvent) {
+            if (!dragging) dispatch(Btn.SELECT, false)
+        }
+
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
+            dragging = true
+            dragX -= toLogical(dx); dragY -= toLogical(dy)
+            val top = stack.lastOrNull() ?: return false
+            if (top.onDrag(-toLogical(dx), -toLogical(dy))) { dragHandled = true; invalidate() }
+            return true
+        }
+
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
-            if (abs(vx) > abs(vy)) dispatch(if (vx < 0) Btn.RIGHT else Btn.LEFT, false)
-            else dispatch(if (vy < 0) Btn.DOWN else Btn.UP, false)
+            val top = stack.lastOrNull() ?: return false
+            flung = true
+            val lvx = toLogical(vx); val lvy = toLogical(vy)
+            if (dragHandled) { if (top.onFling(lvx, lvy)) invalidate(); return true }
+            val b = if (abs(vx) > abs(vy)) (if (vx < 0) Btn.RIGHT else Btn.LEFT) else (if (vy < 0) Btn.DOWN else Btn.UP)
+            if (top.onSwipe(b)) { MainUI.themes.click(); invalidate() }
             return true
         }
     })
 
     @SuppressLint("ClickableViewAccessibility")
-    override fun onTouchEvent(event: MotionEvent): Boolean = gestures.onTouchEvent(event)
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        val handled = gestures.onTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            val top = stack.lastOrNull()
+            if (dragging) top?.onDragEnd()
+            // A slow swipe never becomes a fling: still treat it as a swipe.
+            if (dragging && !flung && !dragHandled && event.actionMasked == MotionEvent.ACTION_UP && top != null &&
+                maxOf(abs(dragX), abs(dragY)) > SWIPE_MIN) {
+                val b = if (abs(dragX) > abs(dragY)) (if (dragX < 0) Btn.RIGHT else Btn.LEFT) else (if (dragY < 0) Btn.DOWN else Btn.UP)
+                if (top.onSwipe(b)) { MainUI.themes.click(); invalidate() }
+            }
+            dragging = false
+        }
+        return handled
+    }
 
     companion object {
         const val REPEAT_DELAY = 300L
         const val REPEAT_INTERVAL = 70L
+        /** Logical px a drag must travel to count as a swipe. */
+        const val SWIPE_MIN = 60f
     }
 }

@@ -47,6 +47,16 @@ abstract class Scene(val host: SceneHost) {
     open fun onKeyUp(b: Btn) {}
     /** Tap in logical coordinates. */
     open fun onTap(x: Float, y: Float): Boolean = false
+    /** Finger drag in logical px (positive dy = finger moving down). Return true if it scrolled something. */
+    open fun onDrag(dx: Float, dy: Float): Boolean = false
+    open fun onDragEnd() {}
+    /** Fling after a handled drag, logical px per second. */
+    open fun onFling(vx: Float, vy: Float): Boolean = false
+    /**
+     * Swipe that no drag handled. [direction] is the D-pad direction that
+     * matches it (swipe left = RIGHT = next). Defaults to pressing that direction.
+     */
+    open fun onSwipe(direction: Btn): Boolean = onKey(direction, false)
     /** Return true while an animation is running so the host keeps redrawing. */
     open fun animating(now: Long): Boolean = false
 

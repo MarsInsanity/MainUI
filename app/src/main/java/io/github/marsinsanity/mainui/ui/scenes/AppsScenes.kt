@@ -43,9 +43,9 @@ class AppsScene(host: SceneHost) : ListScene(host, "Apps", large = true) {
                 items += UiItem(b.label, icon = { MainUI.themes.current.appIcon(b.icon) ?: Glyphs.get(b.glyph) },
                     sub = "MainUI", data = b, onSelect = { b.open() })
             }
-            for (a in apps) items += appItem(a)
-            if (hiddenCount > 0) items += UiItem("Hidden apps", icon = { Glyphs.get("hidden") }, sub = "$hiddenCount",
+            items += UiItem("Hidden apps", icon = { Glyphs.get("hidden") }, sub = "$hiddenCount hidden",
                 onSelect = { host.push(HiddenAppsScene(host)) })
+            for (a in apps) items += appItem(a)
             list.set(items)
         }
     }
@@ -90,7 +90,10 @@ class AppsScene(host: SceneHost) : ListScene(host, "Apps", large = true) {
     }
 }
 
-/** Apps hidden from the Apps menu. */
+/**
+ * The hidden apps menu: launch hidden apps, unhide them (Y), or open
+ * "Edit hidden apps" to hide / show any app with a toggle.
+ */
 class HiddenAppsScene(host: SceneHost) : ListScene(host, "Hidden apps", large = true) {
     override var aLabel: String? = "OPEN"
     override val showPreview = false
@@ -101,13 +104,18 @@ class HiddenAppsScene(host: SceneHost) : ListScene(host, "Hidden apps", large = 
 
     private fun reload() {
         host.io({ MainUI.apps.hiddenApps() }) { apps ->
-            list.set(apps.map { a ->
+            val items = mutableListOf(
+                UiItem("Edit hidden apps...", icon = { Glyphs.get("hidden") }, sub = "show / hide any app",
+                    onSelect = { host.push(AppVisibilityScene(host)) }),
+            )
+            if (apps.isEmpty()) items += UiItem("No hidden apps. Press Y on an app in Apps to hide it.", disabled = true)
+            items += apps.map { a ->
                 UiItem(a.label, icon = { MainUI.apps.icon(a.pkg, 96) }, data = a, onSelect = {
                     val err = MainUI.sessions.launchApp(a.pkg, a.label, asGame = false)
                     if (err != null) host.toast(err)
                 })
-            })
-            if (apps.isEmpty()) close()
+            }
+            list.set(items)
         }
     }
 
@@ -117,6 +125,23 @@ class HiddenAppsScene(host: SceneHost) : ListScene(host, "Hidden apps", large = 
             Btn.Y -> { if (!repeat && a != null) { MainUI.library.setHidden(a.pkg, false); host.toast("${a.label} visible"); reload() }; return true }
             Btn.SELECT -> { if (!repeat && a != null) AppsScene.appOptions(host, a) { reload() }; return true }
             else -> return super.onKey(b, repeat)
+        }
+    }
+}
+
+/** Every installed app with a "shown" toggle: the quick way to hide many apps at once. */
+class AppVisibilityScene(host: SceneHost) : ListScene(host, "Edit hidden apps", large = true) {
+    override var aLabel: String? = "TOGGLE"
+    override val showPreview = false
+
+    override fun onEnter() {
+        host.io({ MainUI.apps.all() }) { apps ->
+            list.set(apps.map { a ->
+                UiItem(a.label, io.github.marsinsanity.mainui.ui.ItemType.TOGGLE, icon = { MainUI.apps.icon(a.pkg, 96) },
+                    value = if (MainUI.library.isHidden(a.pkg)) 0 else 1, data = a,
+                    sub = if (MainUI.library.isAndroidGame(a.pkg)) "game" else null,
+                    onChange = { item -> MainUI.library.setHidden(a.pkg, item.value == 0) })
+            })
         }
     }
 }

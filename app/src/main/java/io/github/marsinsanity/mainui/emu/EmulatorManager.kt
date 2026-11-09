@@ -3,7 +3,6 @@ package io.github.marsinsanity.mainui.emu
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings as AndroidSettings
 import androidx.core.content.FileProvider
@@ -17,21 +16,43 @@ import io.github.marsinsanity.mainui.data.strings
 import org.json.JSONObject
 import java.io.File
 
+/** How the in-game menu can reach an emulator's save states. */
+enum class StateSupport {
+    /** RetroArch network commands: slots, works while paused. */
+    API,
+    /** MainUI injects the emulator's save/load hotkeys (needs root, keys bound in the emulator). */
+    HOTKEY,
+    /** Only through the emulator's own menu. */
+    MENU,
+    /** The emulator has no save states. */
+    NONE;
+
+    companion object {
+        fun parse(s: String?) = when (s?.lowercase()) {
+            "api" -> API; "hotkey" -> HOTKEY; "none" -> NONE; else -> MENU
+        }
+    }
+}
+
 /** One launch recipe (RetroArch itself or a standalone emulator). */
 data class EmuDef(
     val id: String,
     val name: String,
-    val packages: List<String>,
-    val activity: String?,
+    /** package -> activity (null = launch intent / package only), in preference order. */
+    val components: List<Pair<String, String?>>,
     val action: String?,
+    val category: String?,
     val data: String?,
     val mime: String?,
     val extras: Map<String, String>,
     val flags: List<String>,
     val menu: String,
+    val states: StateSupport,
     val save: String?,
     val load: String?,
-)
+) {
+    val packages: List<String> get() = components.map { it.first }.distinct()
+}
 
 /** A selectable emulator for a system: "ra:<core>" or "sa:<id>". */
 data class EmuOption(
@@ -71,6 +92,7 @@ class EmulatorManager(
     /** core basename -> display name / supported extensions read from RetroArch .info files (root). */
     private val coreInfo = HashMap<String, Pair<String, Set<String>>>()
     private val installedPkgs = HashMap<String, String?>() // emu id -> installed package
+    private val installedComponents = HashMap<String, Pair<String, String?>?>()
 
     init { loadDefs() }
 
@@ -99,19 +121,33 @@ class EmulatorManager(
         val extras = LinkedHashMap<String, String>()
         o.optJSONObject("extras")?.let { e -> e.keys().forEach { k -> extras[k] = e.getString(k) } }
         val ingame = o.optJSONObject("ingame")
+        val components = ArrayList<Pair<String, String?>>()
+        o.optJSONArray("components")?.strings()?.forEach { c ->
+            val pkg = c.substringBefore('/')
+            val act = c.substringAfter('/', "").takeIf { it.isNotEmpty() }
+            components += pkg to act?.let { if (it.startsWith(".")) pkg + it else it }
+        }
+        // v1 format: "packages" + one "activity"
+        val activity = o.optString("activity").takeIf { it.isNotEmpty() }
+        o.optJSONArray("packages")?.strings()?.forEach { p -> components += p to activity }
+        val save = ingame?.optString("save")?.takeIf { it.isNotEmpty() && it != "none" }
+        val load = ingame?.optString("load")?.takeIf { it.isNotEmpty() && it != "none" }
+        val states = ingame?.optString("states")?.takeIf { it.isNotEmpty() }?.let { StateSupport.parse(it) }
+            ?: if (save != null && load != null) StateSupport.HOTKEY else StateSupport.MENU
         return EmuDef(
             id = id,
             name = o.optString("name", id),
-            packages = o.optJSONArray("packages")?.strings() ?: emptyList(),
-            activity = o.optString("activity").takeIf { it.isNotEmpty() },
+            components = components,
             action = o.optString("action").takeIf { it.isNotEmpty() },
+            category = o.optString("category").takeIf { it.isNotEmpty() },
             data = o.optString("data").takeIf { it.isNotEmpty() },
             mime = o.optString("type").takeIf { it.isNotEmpty() },
             extras = extras,
             flags = o.optJSONArray("flags")?.strings() ?: listOf("NEW_TASK", "CLEAR_TASK"),
             menu = ingame?.optString("menu", "back") ?: "back",
-            save = ingame?.optString("save")?.takeIf { it.isNotEmpty() && it != "none" },
-            load = ingame?.optString("load")?.takeIf { it.isNotEmpty() && it != "none" },
+            states = if (id == "retroarch") StateSupport.API else states,
+            save = save,
+            load = load,
         )
     }
 
@@ -120,7 +156,18 @@ class EmulatorManager(
         val pm = ctx.packageManager
         fun installed(p: String) = runCatching { pm.getPackageInfo(p, 0); true }.getOrDefault(false)
         installedPkgs.clear()
-        for ((id, d) in standalone) installedPkgs[id] = d.packages.firstOrNull { installed(it) }
+        installedComponents.clear()
+        for ((id, d) in standalone) {
+            // First recipe component whose package is installed and whose activity exists.
+            val c = d.components.firstOrNull { (pkg, act) ->
+                installed(pkg) && (act == null || runCatching { pm.getActivityInfo(ComponentName(pkg, act), 0); true }.getOrDefault(false))
+            } ?: d.components.firstOrNull { installed(it.first) }?.let { (pkg, _) ->
+                // Package installed but the recipe's activity was renamed: use its launcher activity.
+                pkg to pm.getLaunchIntentForPackage(pkg)?.component?.className
+            }
+            installedPkgs[id] = c?.first
+            installedComponents[id] = c
+        }
         val ra = settings.raPackageOverride.takeIf { it.isNotBlank() && installed(it) }
             ?: retroarch.packages.firstOrNull { installed(it) }
         raPackage = ra
@@ -216,17 +263,24 @@ class EmulatorManager(
         val rom = game.file ?: throw IllegalStateException("No rom file")
         if (opt.isRetroArch) {
             val pkg = raPackage ?: throw IllegalStateException("RetroArch is not installed")
-            return fill(retroarch, pkg, rom, opt.core)
+            return fill(retroarch, pkg, rom, opt.core, retroarch.components.first().second)
         }
         val def = standalone[opt.ref.removePrefix("sa:")] ?: throw IllegalStateException("Unknown emulator ${opt.ref}")
-        val pkg = opt.pkg ?: installedPkgs[def.id] ?: throw IllegalStateException("${def.name} is not installed")
-        return fill(def, pkg, rom, null)
+        val comp = installedComponents[def.id] ?: throw IllegalStateException("${def.name} is not installed")
+        return fill(def, comp.first, rom, null, comp.second)
     }
 
     fun defFor(ref: String): EmuDef? = if (ref.startsWith("ra:")) retroarch else standalone[ref.removePrefix("sa:")]
 
-    private fun fill(def: EmuDef, pkg: String, rom: File, core: String?): Intent {
+    private fun fill(def: EmuDef, pkg: String, rom: File, core: String?,
+                     activity: String? = def.components.firstOrNull { it.first == pkg }?.second): Intent {
+        val fileContent by lazy {
+            runCatching { if (rom.isFile && rom.length() < 4096) rom.readText().lineSequence().firstOrNull()?.trim() else null }
+                .getOrNull()?.takeIf { it.isNotEmpty() } ?: rom.nameWithoutExtension
+        }
         fun sub(t: String): String = t
+            .replace("%FILECONTENT%", if (t.contains("%FILECONTENT%")) fileContent else "")
+            .replace("%GAMEDIR%", rom.parentFile?.absolutePath ?: "")
             .replace("%ROM%", rom.absolutePath)
             .replace("%ROMURI%", Uri.fromFile(rom).toString())
             .replace("%ROMPROVIDER%", providerUri(rom).toString())
@@ -238,7 +292,8 @@ class EmulatorManager(
             .replace("%RA_CONFIG%", raConfigPath(pkg))
 
         val intent = Intent(def.action ?: Intent.ACTION_MAIN)
-        if (def.activity != null) intent.component = ComponentName(pkg, def.activity) else intent.setPackage(pkg)
+        if (activity != null) intent.component = ComponentName(pkg, activity) else intent.setPackage(pkg)
+        def.category?.let { intent.addCategory(it) }
         def.data?.let { d ->
             val uri = Uri.parse(sub(d))
             if (def.mime != null) intent.setDataAndType(uri, def.mime) else intent.data = uri
@@ -248,6 +303,7 @@ class EmulatorManager(
             when {
                 v.startsWith("bool:") -> intent.putExtra(k, v.removePrefix("bool:").toBoolean())
                 v.startsWith("int:") -> intent.putExtra(k, v.removePrefix("int:").toIntOrNull() ?: 0)
+                v.startsWith("array:") -> intent.putExtra(k, v.removePrefix("array:").split(',').map { sub(it) }.toTypedArray())
                 else -> intent.putExtra(k, sub(v))
             }
         }

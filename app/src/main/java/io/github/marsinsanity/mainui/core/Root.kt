@@ -19,10 +19,30 @@ object Root {
     @Volatile
     private var cached: Boolean? = null
 
+    /**
+     * Debug builds only: when the system property `debug.mainui.rootport` is set,
+     * root commands go to a root shell server on 127.0.0.1:<port> (started over
+     * `adb root` with toybox nc). Used to test root features on emulator images
+     * whose own su refuses apps. Release builds always use the real `su` (Magisk).
+     */
+    private val testRootPort: Int? by lazy {
+        if (!io.github.marsinsanity.mainui.BuildConfig.DEBUG) null
+        else runCatching {
+            Runtime.getRuntime().exec(arrayOf("getprop", "debug.mainui.rootport")).inputStream
+                .bufferedReader().readText().trim().toIntOrNull()
+        }.getOrNull()
+    }
+
+    /** argv that runs [cmd] as root. */
+    fun rootArgv(cmd: String): Array<String> {
+        val port = testRootPort ?: return arrayOf("su", "-c", cmd)
+        return arrayOf("sh", "-c", "printf '%s\\nexit\\n' ${q(cmd)} | nc -q 60 127.0.0.1 $port")
+    }
+
     /** True when `su` exists and granted us root. Cached after first success. */
     fun available(): Boolean {
         cached?.let { return it }
-        val hasBinary = listOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/debug_ramdisk/su")
+        val hasBinary = testRootPort != null || listOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/debug_ramdisk/su")
             .any { File(it).exists() } || runCatching {
             Runtime.getRuntime().exec(arrayOf("sh", "-c", "command -v su")).inputStream
                 .bufferedReader().readText().isNotBlank()
@@ -42,7 +62,8 @@ object Root {
     /** Last known state without spawning a process. */
     fun knownAvailable(): Boolean = cached == true
 
-    fun exec(cmd: String, timeoutSec: Long = 20): Result = run(arrayOf("su", "-c", cmd), timeoutSec)
+
+    fun exec(cmd: String, timeoutSec: Long = 20): Result = run(rootArgv(cmd), timeoutSec)
 
     /** Runs a shell command as the app user (no root). */
     fun sh(cmd: String, timeoutSec: Long = 20): Result = run(arrayOf("sh", "-c", cmd), timeoutSec)
@@ -94,10 +115,21 @@ object Root {
 
     fun readFile(path: String): String? = exec("cat ${q(path)}").takeIf { it.ok }?.out
 
+    /**
+     * Writes [content] to [path] as root. The data goes through a temp file in
+     * MainUI's cache (root can read it) rather than the command line, which
+     * Linux limits to 128 KB per argument (RetroArch's config is bigger).
+     * `cat >` keeps the target's owner and permissions.
+     */
     fun writeFile(path: String, content: String): Boolean {
-        // base64 avoids any quoting issues with arbitrary file contents
-        val b64 = android.util.Base64.encodeToString(content.toByteArray(), android.util.Base64.NO_WRAP)
-        return exec("echo $b64 | base64 -d > ${q(path)}").ok
+        val tmp = File(io.github.marsinsanity.mainui.MainUI.app.cacheDir, "root-write-${System.nanoTime()}")
+        return try {
+            tmp.writeText(content)
+            tmp.setReadable(true, false)
+            exec("cat ${q(tmp.absolutePath)} > ${q(path)}").ok
+        } finally {
+            tmp.delete()
+        }
     }
 
     /** Returns the package name of the app that currently owns the focused window. */

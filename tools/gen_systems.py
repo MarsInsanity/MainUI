@@ -19,7 +19,8 @@ import sys
 # dArkOS "lr-xxx" name -> RetroArch for Android core basename
 # (<basename>_libretro_android.so). None = core not available on Android.
 CORES = {
-    'lr-81': '81', 'lr-Azahar': 'citra', 'lr-DoubleCherryGB': 'DoubleCherryGB',
+    'lr-81': '81', 'lr-Azahar': None,  # Azahar standalone is preferred on Android
+    'lr-DoubleCherryGB': 'DoubleCherryGB',
     'lr-a5200': 'a5200', 'lr-applewin': None, 'lr-ardens': 'ardens',
     'lr-arduous': 'arduous', 'lr-atari800': 'atari800', 'lr-b2': None,
     'lr-bluemsx': 'bluemsx', 'lr-cap32': 'cap32', 'lr-coolcv': None,
@@ -68,14 +69,15 @@ STANDALONE = {
 }
 
 # Extra Android-only standalone emulators per dArkOS folder (appended after
-# the dArkOS list, in preference order).
+# the dArkOS list, in preference order). Ids refer to emulators.json, whose
+# recipes follow ES-DE's Android rules.
 EXTRA_STANDALONE = {
-    'nds': ['drastic', 'melonds'],
+    'nds': ['drastic', 'melonds', 'melonds_nightly'],
     'n64': ['m64plusfz'],
     'psp': ['ppsspp'], 'pspminis': ['ppsspp'],
     'psx': ['duckstation'],
     'gc': ['dolphin', 'dolphin_mmjr'],
-    '3ds': ['azahar', 'citra', 'lime3ds'],
+    '3ds': ['azahar', 'lime3ds', 'citra', 'citra_mmj'],
     'dreamcast': ['redream', 'flycast'], 'naomi': ['flycast'], 'atomiswave': ['flycast'],
     'saturn': ['yabasanshiro2'],
     'arcade': ['mame4droid'], 'mame': ['mame4droid'],
@@ -83,23 +85,27 @@ EXTRA_STANDALONE = {
 
 # Extra RetroArch for Android cores per dArkOS folder.
 EXTRA_CORES = {
+    '3ds': ['citra'],
     'nds': ['melondsds', 'melonds', 'desmume'],
     'psp': ['ppsspp'],
     'gc': ['dolphin'],
     'saturn': ['yabasanshiro', 'mednafen_saturn'],
     'atarijaguar': ['virtualjaguar'],
-    'openbor': [],
 }
 
 # Systems that dArkOS cannot run but a Snapdragon Android handheld can. They
-# follow the same lowercase folder naming scheme.
+# follow the same lowercase folder naming scheme (and ES-DE's).
 ANDROID_EXTRA_SYSTEMS = [
-    dict(id='ps2', name='PlayStation 2', folders=['ps2'], ext='.iso .chd .cso .bin .img .mdf .nrg .elf .gz .zso',
-         standalone=['nethersx2']),
+    dict(id='ps2', name='PlayStation 2', folders=['ps2'],
+         ext='.iso .chd .cso .ciso .bin .img .mdf .nrg .elf .gz .zso .isz .m3u .dump',
+         standalone=['armsx2', 'nethersx2']),
+    dict(id='ps3', name='PlayStation 3', folders=['ps3'], ext='.iso .ps3', standalone=['armsx3']),
+    dict(id='psvita', name='PlayStation Vita', folders=['psvita'], ext='.psvita', standalone=['vita3k']),
+    dict(id='xbox', name='Microsoft Xbox', folders=['xbox'], ext='.iso .xiso', standalone=['hakux']),
     dict(id='wii', name='Nintendo Wii', folders=['wii'], ext='.iso .rvz .wbfs .wia .gcz .ciso .wad .dol .elf .m3u',
          standalone=['dolphin', 'dolphin_mmjr'], cores=['dolphin']),
     dict(id='switch', name='Nintendo Switch', folders=['switch'], ext='.nsp .xci .nca .nro .nso',
-         standalone=['eden', 'citron', 'sudachi', 'yuzu']),
+         standalone=['eden', 'kenjinx']),
 ]
 
 # ScreenScraper system ids (https://api.screenscraper.fr/api2/systemesListe.php)
@@ -126,7 +132,7 @@ SSID = {
     'virtualboy': 11, 'onscripter': None, 'wasm4': 262, 'supervision': 207, 'wolf': 135,
     'wonderswan': 45, 'wonderswancolor': 46, 'zx81': 77, 'zxspectrum': 76,
     'enterprise': None, 'cavestory': 135, 'alg': 75, 'mv': None, 'piece': None,
-    'ps2': 58, 'wii': 16, 'wiiu': 18, 'switch': 225, 'psvita': 62, 'windows': 138,
+    'ps2': 58, 'ps3': 59, 'xbox': 32, 'wii': 16, 'wiiu': 18, 'switch': 225, 'psvita': 62, 'windows': 138,
     'love2d': None,
 }
 
@@ -160,7 +166,7 @@ SHORT = {
     'nes': 'NES', 'famicom': 'FC', 'snes': 'SNES', 'sfc': 'SFC', 'n64': 'N64', 'gb': 'GB',
     'gbc': 'GBC', 'gba': 'GBA', 'nds': 'NDS', '3ds': '3DS', 'gc': 'GC', 'wii': 'Wii',
     'wiiu': 'WiiU', 'switch': 'NSW', 'psx': 'PS1', 'ps2': 'PS2', 'psp': 'PSP',
-    'psvita': 'Vita', 'megadrive': 'MD', 'genesis': 'GEN', 'mastersystem': 'SMS',
+    'psvita': 'Vita', 'ps3': 'PS3', 'xbox': 'XBOX', 'megadrive': 'MD', 'genesis': 'GEN', 'mastersystem': 'SMS',
     'gamegear': 'GG', 'segacd': 'SCD', 'sega32x': '32X', 'saturn': 'SAT', 'dreamcast': 'DC',
     'arcade': 'ARC', 'mame': 'MAME', 'neogeo': 'NEO', 'pcengine': 'PCE',
 }
@@ -233,12 +239,12 @@ def main():
         if sid in ('love2d',):
             continue
         emus = parse_emulators(s['emu'])
-        for core in EXTRA_CORES.get(sid, []):
-            if 'ra:' + core not in emus:
-                emus.append('ra:' + core)
         for extra in EXTRA_STANDALONE.get(sid, []):
             if 'sa:' + extra not in emus:
                 emus.append('sa:' + extra)
+        for core in EXTRA_CORES.get(sid, []):
+            if 'ra:' + core not in emus:
+                emus.append('ra:' + core)
         icons = []
         for f in folders:
             f = f.split('/')[0]

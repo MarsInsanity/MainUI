@@ -1,13 +1,17 @@
 {
-  "version": 1,
+  "version": 2,
   "_doc": [
-    "Launch recipes for Android emulators. Copy this file to <storage>/MainUI/emulators.json to override or extend it.",
-    "Entries in the override file replace built-in entries with the same id.",
+    "Launch recipes for Android emulators. Copy this file to <storage>/MainUI/emulators.json to override or extend it;",
+    "entries in the override file replace built-in entries with the same id.",
+    "Recipes follow ES-DE's maintained Android rules (resources/systems/android/es_find_rules.xml and es_systems.xml).",
+    "components: 'package/activity' pairs tried in order ('.Name' is relative to the package). The first installed one is used.",
     "Placeholders: %ROM% absolute path, %ROMURI% file:// uri, %ROMPROVIDER% content:// uri served by MainUI,",
-    "%ROMSAF% Storage Access Framework document uri, %BASENAME% file name without extension,",
-    "%PKG% the installed package, %CORE% libretro core name, %CORE_PATH% core .so path, %RA_CONFIG% retroarch.cfg path.",
-    "Extras prefixed with 'bool:' or 'int:' are typed, everything else is a string.",
-    "ingame.menu: back | key:<KEYCODE_NAME> | none. ingame.save / ingame.load: keys:<KEYCODE_A>+<KEYCODE_B> (needs root) or none."
+    "%ROMSAF% Storage Access Framework document uri (the emulator needs folder access), %BASENAME% file name without",
+    "extension, %GAMEDIR% folder of the rom, %FILECONTENT% first line of the rom file (Vita3K title ids), %PKG%, %CORE%,",
+    "%CORE_PATH%, %RA_CONFIG%. Extras prefixed 'bool:', 'int:' or 'array:' (comma separated) are typed.",
+    "ingame.states: 'api' (RetroArch network commands), 'hotkey' (MainUI injects ingame.save / ingame.load keys with root;",
+    "bind the same keys in the emulator, the in-game menu's 'Bind hotkeys' sends them for you), 'menu' (only through the",
+    "emulator's own menu), 'none' (no save states). ingame.menu: back | key:<KEYCODE> | none."
   ],
   "retroarch": {
     "name": "RetroArch",
@@ -20,150 +24,183 @@
       "QUITFOCUS": ""
     },
     "flags": ["NEW_TASK", "CLEAR_TASK"],
-    "commandPort": 55355
+    "commandPort": 55355,
+    "ingame": { "states": "api" }
   },
   "standalone": [
     {
-      "id": "drastic", "name": "DraStic",
-      "packages": ["com.dsemu.drastic"],
-      "activity": "com.dsemu.drastic.DraSticActivity",
-      "extras": { "GAMEPATH": "%ROM%" },
-      "ingame": { "menu": "back" }
-    },
-    {
-      "id": "melonds", "name": "melonDS",
-      "packages": ["me.magnum.melonds", "me.magnum.melonds.nightly"],
-      "activity": "me.magnum.melonds.ui.emulator.EmulatorActivity",
-      "extras": { "PATH": "%ROM%", "uri": "%ROMSAF%" },
-      "ingame": { "menu": "back" }
-    },
-    {
-      "id": "ppsspp", "name": "PPSSPP",
-      "packages": ["org.ppsspp.ppssppgold", "org.ppsspp.ppsspp"],
-      "activity": "org.ppsspp.ppsspp.PpssppActivity",
-      "action": "android.intent.action.VIEW",
-      "data": "%ROMPROVIDER%",
-      "ingame": { "menu": "back" }
-    },
-    {
-      "id": "duckstation", "name": "DuckStation",
-      "packages": ["com.github.stenzek.duckstation"],
-      "activity": "com.github.stenzek.duckstation.EmulationActivity",
-      "extras": { "bootPath": "%ROMSAF%" },
-      "ingame": { "menu": "back" }
+      "id": "armsx2", "name": "ARMSX2",
+      "components": [
+        "come.nanodata.armsx2/com.armsx2.MainActivity",
+        "com.armsx2/.MainActivity",
+        "com.armsx2.nightly/com.armsx2.MainActivity",
+        "come.nanodata.armsx2/kr.co.iefriends.pcsx2.MainActivity",
+        "come.nanodata.armsx2.debug/kr.co.iefriends.pcsx2.MainActivity"
+      ],
+      "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F3" }
     },
     {
       "id": "nethersx2", "name": "NetherSX2 / AetherSX2",
-      "packages": ["xyz.aethersx2.android", "xyz.aethersx2.custom"],
-      "activity": "xyz.aethersx2.android.EmulationActivity",
-      "extras": { "bootPath": "%ROMSAF%" },
-      "ingame": { "menu": "back" }
+      "components": [
+        "xyz.aethersx2.android/.EmulationActivity",
+        "xyz.aethersx2.tturnip/xyz.aethersx2.android.EmulationActivity",
+        "xyz.aethersx2.cturnip/xyz.aethersx2.android.EmulationActivity"
+      ],
+      "action": "android.intent.action.MAIN", "extras": { "bootPath": "%ROMSAF%" },
+      "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F3" }
+    },
+    {
+      "id": "armsx3", "name": "ARMSX3",
+      "components": ["com.armsx3/com.armsx2.Main", "com.armsx3.play/com.armsx2.Main"],
+      "extras": { "path": "%ROM%" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "none" }
+    },
+    {
+      "id": "vita3k", "name": "Vita3K",
+      "components": ["org.vita3k.emulator/.Emulator", "org.vita3k.emulator.ikhoeyZX/org.vita3k.emulator.Emulator"],
+      "extras": { "AppStartParameters": "array:-r,%FILECONTENT%" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "none" }
+    },
+    {
+      "id": "hakux", "name": "hakuX",
+      "components": ["com.rfandango.haku_x/.LauncherActivity"],
+      "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "menu" }
+    },
+    {
+      "id": "ppsspp", "name": "PPSSPP",
+      "components": ["org.ppsspp.ppssppgold/org.ppsspp.ppsspp.PpssppActivity", "org.ppsspp.ppsspp/.PpssppActivity"],
+      "action": "android.intent.action.VIEW", "category": "android.intent.category.DEFAULT", "data": "%ROMSAF%",
+      "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F2", "load": "keys:KEYCODE_F4" }
+    },
+    {
+      "id": "duckstation", "name": "DuckStation",
+      "components": ["com.github.stenzek.duckstation/.EmulationActivity"],
+      "extras": { "resumeState": "bool:false", "bootPath": "%ROMSAF%" },
+      "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+    },
+    {
+      "id": "drastic", "name": "DraStic",
+      "components": ["com.dsemu.drastic/.DraSticActivity"],
+      "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+    },
+    {
+      "id": "melonds", "name": "melonDS",
+      "components": [
+        "me.magnum.melonds/.ui.emulator.EmulatorActivity",
+        "me.magnum.melondualds/me.magnum.melonds.ui.emulator.EmulatorActivity"
+      ],
+      "action": "me.magnum.melonds.LAUNCH_ROM", "extras": { "uri": "%ROMSAF%" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+    },
+    {
+      "id": "melonds_nightly", "name": "melonDS Nightly",
+      "components": ["me.magnum.melonds.nightly/me.magnum.melonds.ui.emulator.EmulatorActivity"],
+      "action": "me.magnum.melonds.nightly.LAUNCH_ROM", "extras": { "uri": "%ROMSAF%" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "dolphin", "name": "Dolphin",
-      "packages": ["org.dolphinemu.dolphinemu", "org.dolphinemu.dolphinemu.debug"],
-      "activity": "org.dolphinemu.dolphinemu.ui.main.MainActivity",
-      "extras": { "AutoStartFile": "%ROMSAF%" },
-      "ingame": { "menu": "back" }
+      "components": ["org.dolphinemu.dolphinemu/.ui.main.TvMainActivity"],
+      "action": "android.intent.action.MAIN", "category": "android.intent.category.LEANBACK_LAUNCHER",
+      "extras": { "AutoStartFile": "%ROMSAF%" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
-      "id": "dolphin_mmjr", "name": "Dolphin MMJR2",
-      "packages": ["org.dolphinemu.mmjr"],
-      "activity": "org.dolphinemu.dolphinemu.ui.main.MainActivity",
-      "extras": { "AutoStartFile": "%ROM%" },
-      "ingame": { "menu": "back" }
+      "id": "dolphin_mmjr", "name": "Dolphin MMJR / MMJR2",
+      "components": [
+        "org.dolphinemu.mmjr/org.dolphinemu.dolphinemu.ui.main.MainActivity",
+        "org.mm.jr/org.dolphinemu.dolphinemu.ui.main.MainActivity"
+      ],
+      "action": "android.intent.action.VIEW", "extras": { "AutoStartFile": "%ROMSAF%" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "menu" }
     },
     {
       "id": "azahar", "name": "Azahar",
-      "packages": ["org.azahar_emu.azahar"],
-      "activity": "org.citra.citra_emu.activities.EmulationActivity",
-      "extras": { "SelectedGame": "%ROMSAF%" },
-      "ingame": { "menu": "back" }
-    },
-    {
-      "id": "citra", "name": "Citra",
-      "packages": ["org.citra.emu", "org.citra.citra_emu", "org.citra.citra_emu.canary"],
-      "activity": "org.citra.citra_emu.activities.EmulationActivity",
-      "extras": { "SelectedGame": "%ROMSAF%" },
-      "ingame": { "menu": "back" }
+      "components": [
+        "org.azahar_emu.azahar/org.citra.citra_emu.activities.EmulationActivity",
+        "io.github.azaharplus.android/org.citra.citra_emu.activities.EmulationActivity"
+      ],
+      "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "lime3ds", "name": "Lime3DS",
-      "packages": ["io.github.lime3ds.android"],
-      "activity": "io.github.lime3ds.android.activities.EmulationActivity",
-      "extras": { "SelectedGame": "%ROMSAF%" },
-      "ingame": { "menu": "back" }
+      "components": ["io.github.lime3ds.android/.activities.EmulationActivity"],
+      "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+    },
+    {
+      "id": "citra", "name": "Citra",
+      "components": ["org.citra.citra_emu/.activities.EmulationActivity", "org.citra.citra_emu.canary/org.citra.citra_emu.activities.EmulationActivity"],
+      "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+    },
+    {
+      "id": "citra_mmj", "name": "Citra MMJ",
+      "components": ["org.citra.emu/.ui.EmulationActivity"],
+      "extras": { "GamePath": "%ROM%" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "menu" }
     },
     {
       "id": "redream", "name": "Redream",
-      "packages": ["io.recompiled.redream"],
-      "activity": "io.recompiled.redream.MainActivity",
-      "action": "android.intent.action.VIEW",
-      "data": "%ROMPROVIDER%",
-      "ingame": { "menu": "back" }
+      "components": ["io.recompiled.redream/.MainActivity"],
+      "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "menu" }
     },
     {
       "id": "flycast", "name": "Flycast",
-      "packages": ["com.flycast.emulator"],
-      "activity": "com.flycast.emulator.MainActivity",
-      "action": "android.intent.action.VIEW",
-      "data": "%ROMPROVIDER%",
-      "ingame": { "menu": "back" }
+      "components": ["com.flycast.emulator/com.flycast.emulator.MainActivity", "com.flycast.emulator/com.reicast.emulator.MainActivity"],
+      "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "yabasanshiro2", "name": "Yaba Sanshiro 2",
-      "packages": ["org.devmiyax.yabasanshioro2.pro", "org.devmiyax.yabasanshioro2"],
-      "activity": "org.uoyabause.android.Yabause",
-      "extras": { "org.uoyabause.android.FileNameEx": "%ROMSAF%" },
-      "ingame": { "menu": "back" }
+      "components": [
+        "org.devmiyax.yabasanshioro2.pro/org.uoyabause.android.Yabause",
+        "org.devmiyax.yabasanshioro2/org.uoyabause.android.Yabause"
+      ],
+      "action": "android.intent.action.VIEW", "extras": { "org.uoyabause.android.FileNameUri": "%ROMSAF%" },
+      "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
+      "ingame": { "menu": "back", "states": "menu" }
     },
     {
-      "id": "m64plusfz", "name": "Mupen64Plus FZ",
-      "packages": ["org.mupen64plusae.v3.fzurita.pro", "org.mupen64plusae.v3.fzurita"],
-      "activity": "paulscode.android.mupen64plusae.SplashActivity",
-      "action": "android.intent.action.VIEW",
-      "data": "%ROMSAF%",
-      "ingame": { "menu": "back" }
+      "id": "m64plusfz", "name": "M64Plus FZ",
+      "components": [
+        "org.mupen64plusae.v3.fzurita.pro/paulscode.android.mupen64plusae.SplashActivity",
+        "org.mupen64plusae.v3.fzurita/paulscode.android.mupen64plusae.SplashActivity",
+        "org.mupen64plusae.v3.fzurita.amazon/paulscode.android.mupen64plusae.SplashActivity"
+      ],
+      "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "mame4droid", "name": "MAME4droid",
-      "packages": ["com.seleuco.mame4d2024", "com.seleuco.mame4droid"],
-      "activity": "com.seleuco.mame4droid.MAME4droid",
-      "action": "android.intent.action.VIEW",
-      "data": "%ROMSAF%",
-      "ingame": { "menu": "back" }
+      "components": ["com.seleuco.mame4d2024/com.seleuco.mame4droid.MAME4droid", "com.seleuco.mame4droid/.MAME4droid"],
+      "action": "android.intent.action.VIEW", "data": "%ROMPROVIDER%",
+      "extras": { "cli_params": "-rompath '%GAMEDIR%'" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "menu" }
     },
     {
       "id": "eden", "name": "Eden",
-      "packages": ["dev.eden.eden_emulator"],
-      "activity": "org.yuzu.yuzu_emu.activities.EmulationActivity",
-      "action": "android.intent.action.VIEW",
-      "data": "%ROMSAF%",
-      "ingame": { "menu": "back" }
+      "components": [
+        "dev.eden.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity",
+        "dev.legacy.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity",
+        "dev.eden.eden_emulator.nightly/org.yuzu.yuzu_emu.activities.EmulationActivity"
+      ],
+      "action": "android.nfc.action.TECH_DISCOVERED", "data": "%ROMPROVIDER%", "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "none" }
     },
     {
-      "id": "citron", "name": "Citron",
-      "packages": ["org.citron.citron_emu"],
-      "activity": "org.citron.citron_emu.activities.EmulationActivity",
-      "action": "android.intent.action.VIEW",
-      "data": "%ROMSAF%",
-      "ingame": { "menu": "back" }
-    },
-    {
-      "id": "sudachi", "name": "Sudachi",
-      "packages": ["org.sudachi.sudachi_emu"],
-      "activity": "org.sudachi.sudachi_emu.activities.EmulationActivity",
-      "action": "android.intent.action.VIEW",
-      "data": "%ROMSAF%",
-      "ingame": { "menu": "back" }
-    },
-    {
-      "id": "yuzu", "name": "yuzu",
-      "packages": ["org.yuzu.yuzu_emu", "org.yuzu.yuzu_emu.ea"],
-      "activity": "org.yuzu.yuzu_emu.activities.EmulationActivity",
-      "action": "android.intent.action.VIEW",
-      "data": "%ROMSAF%",
-      "ingame": { "menu": "back" }
+      "id": "kenjinx", "name": "Kenji-NX",
+      "components": ["org.kenjinx.android/.MainActivity"],
+      "action": "org.kenjinx.android.LAUNCH_GAME", "extras": { "bootPath": "%ROMSAF%" }, "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "none" }
     }
   ]
 }
