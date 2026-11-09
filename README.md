@@ -215,6 +215,13 @@ Recipes live in `app/src/main/assets/emulators.json`. To fix or add one without 
 copy that file to `MainUI/emulators.json` and edit it (Settings > Emulators & cores, `Y` rescans).
 The file documents every field: launch components, intent action / category / data / extras
 (`array:` extras for Vita3K), and the in-game `states` / `save` / `load` / `menu` behaviour.
+Emulators are recognised by the application ids in their recipes, and also when installed as another
+build: an id that extends a recipe's (`com.rfandango.haku_x.debug`, `org.vita3k.emulator.debug`,
+`com.armsx2.nightly`) or an app named exactly like the emulator, or like it plus a build word
+("hakuX Debug", "ARMSX2 Nightly"; never "Dolphin Browser"). Those builds are launched with the recipe's
+activity classes (they keep their names) or their launcher activity, are never sorted into the
+Android games, and on start any emulator that had been sorted in there is taken out again.
+
 Emulators launched with `%ROMSAF%` (most of them: DuckStation, DraStic, Dolphin...) need to have been
 given access to your rom folder once in their own settings, exactly as with ES-DE. Android only lets
 them open a game through a folder they were given, so MainUI builds the game's link through that

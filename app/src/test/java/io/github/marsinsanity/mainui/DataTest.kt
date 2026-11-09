@@ -4,6 +4,7 @@ import io.github.marsinsanity.mainui.data.GameListXml
 import io.github.marsinsanity.mainui.data.GameRepository
 import io.github.marsinsanity.mainui.scraper.Hashes
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -907,5 +908,24 @@ class DialogSceneTest {
             .onKey(io.github.marsinsanity.mainui.ui.Btn.B, false)
         assertEquals(1, cancelled)
         assertEquals(1, confirmed)
+    }
+}
+
+class EmulatorVariantTest {
+    private fun v(pkgs: List<String>, name: String, id: String, pkg: String, label: String?) =
+        io.github.marsinsanity.mainui.emu.EmulatorManager.isVariant(pkgs, name, id, pkg, label)
+
+    @Test fun otherBuildsOfKnownEmulators() {
+        assertTrue(v(listOf("com.rfandango.haku_x"), "hakuX", "hakux", "com.rfandango.haku_x.debug", "hakuX Debug"))
+        assertTrue(v(listOf("org.vita3k.emulator"), "Vita3K", "vita3k", "org.vita3k.emulator.debug", null))
+        assertTrue(v(listOf("com.armsx2"), "ARMSX2", "armsx2", "io.someone.ps2fork", "ARMSX2 Nightly"))
+        assertTrue(v(listOf("org.vita3k.emulator"), "Vita3K", "vita3k", "com.other.vita", "Vita3K"))
+        assertTrue(v(listOf("com.armsx2"), "ARMSX2", "armsx2", "x.y", "ARMSX2 2.6.1"))
+    }
+
+    @Test fun neverAnUnrelatedApp() {
+        assertFalse(v(listOf("org.dolphinemu.dolphinemu"), "Dolphin", "dolphin", "mobi.mgeek.TunnyBrowser", "Dolphin Browser"))
+        assertFalse(v(listOf("com.rfandango.haku_x"), "hakuX", "hakux", "com.rfandango.haku_xtra", "Haku Xtra"))
+        assertFalse(v(listOf("org.ppsspp.ppsspp"), "PPSSPP", "ppsspp", "com.example.notes", "Notes"))
     }
 }

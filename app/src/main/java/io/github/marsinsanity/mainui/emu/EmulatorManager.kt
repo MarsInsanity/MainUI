@@ -177,17 +177,30 @@ class EmulatorManager(
         fun installed(p: String) = runCatching { pm.getPackageInfo(p, 0); true }.getOrDefault(false)
         installedPkgs.clear()
         installedComponents.clear()
+        fun hasActivity(pkg: String, act: String) = runCatching { pm.getActivityInfo(ComponentName(pkg, act), 0); true }.getOrDefault(false)
+        fun launcherOf(pkg: String) = (pm.getLaunchIntentForPackage(pkg) ?: pm.getLeanbackLaunchIntentForPackage(pkg))?.component?.className
+        // Launchable apps, for emulators installed under an id the recipes don't list.
+        val launchable = runCatching {
+            pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+                .map { it.activityInfo.applicationInfo }.distinctBy { it.packageName }
+                .map { it.packageName to pm.getApplicationLabel(it).toString() }
+        }.getOrDefault(emptyList())
         for ((id, d) in standalone) {
             // First recipe component whose package is installed and whose activity exists.
-            val c = d.components.firstOrNull { (pkg, act) ->
-                installed(pkg) && (act == null || runCatching { pm.getActivityInfo(ComponentName(pkg, act), 0); true }.getOrDefault(false))
-            } ?: d.components.firstOrNull { installed(it.first) }?.let { (pkg, _) ->
-                // Package installed but the recipe's activity was renamed: use its launcher activity.
-                pkg to pm.getLaunchIntentForPackage(pkg)?.component?.className
-            }
+            val c = d.components.firstOrNull { (pkg, act) -> installed(pkg) && (act == null || hasActivity(pkg, act)) }
+                ?: d.components.firstOrNull { installed(it.first) }?.let { (pkg, _) ->
+                    // Package installed but the recipe's activity was renamed: use its launcher activity.
+                    pkg to launcherOf(pkg)
+                }
+                ?: launchable.firstOrNull { (pkg, label) -> variantOf(d, pkg, label) }?.let { (pkg, _) ->
+                    // Another build of it (".debug", ".nightly", a fork): the recipe's activity classes
+                    // keep their names under another application id; else its launcher activity.
+                    pkg to (d.components.mapNotNull { it.second }.distinct().firstOrNull { hasActivity(pkg, it) } ?: launcherOf(pkg))
+                }
             installedPkgs[id] = c?.first
             installedComponents[id] = c
         }
+        variantPkgs = installedPkgs.values.filterNotNull().toSet()
         val ra = settings.raPackageOverride.takeIf { it.isNotBlank() && installed(it) }
             ?: retroarch.packages.firstOrNull { installed(it) }
         raPackage = ra
@@ -282,8 +295,28 @@ class EmulatorManager(
     private fun systemsCoreRefs(): List<String> =
         io.github.marsinsanity.mainui.MainUI.systems.defs.flatMap { d -> d.emulators.filter { it.startsWith("ra:") }.map { it.removePrefix("ra:") } }
 
-    fun isEmulatorPackage(pkg: String): Boolean =
-        pkg in retroarch.packages || standalone.values.any { pkg in it.packages }
+    /** Packages of detected emulators, including builds found by [variantOf]. */
+    @Volatile private var variantPkgs: Set<String> = emptySet()
+
+    /**
+     * Is [pkg] an emulator: a recipe's package, a detected one, or another build of a known
+     * emulator (see [variantOf]; [label] is looked up when not given). Emulators are never
+     * sorted into the Android games.
+     */
+    fun isEmulatorPackage(pkg: String, label: String? = null): Boolean {
+        if (pkg in retroarch.packages || pkg in variantPkgs || standalone.values.any { pkg in it.packages }) return true
+        val l = label ?: runCatching { ctx.packageManager.let { pm -> pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() } }.getOrNull()
+        return standalone.values.any { variantOf(it, pkg, l) } || variantOf(retroarch, pkg, l)
+    }
+
+    /**
+     * [pkg] (an app called [label]) is another build of emulator [d] than its recipe lists:
+     * its id extends one of the recipe's ("com.rfandango.haku_x.debug", "org.vita3k.emulator.debug",
+     * "com.armsx2.nightly"), or the app is named like it ("hakuX Debug", "ARMSX2 Nightly", "Vita3K").
+     */
+    fun variantOf(d: EmuDef, pkg: String, label: String?): Boolean = isVariant(d.packages, d.name, d.id, pkg, label)
+
+
 
     fun standaloneDefs(): Collection<EmuDef> = standalone.values
     fun installedPackage(id: String): String? = installedPkgs[id]
@@ -510,6 +543,23 @@ class EmulatorManager(
     }
 
     companion object {
+        private val BUILD_WORDS = setOf("debug", "nightly", "dev", "beta", "alpha", "canary", "preview", "test", "release", "stable", "unofficial")
+
+        private fun norm(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+
+        /**
+         * [pkg] (an app called [label]) is another build of the emulator with recipe [packages],
+         * [name] and [id]: its id extends a recipe's ("com.rfandango.haku_x.debug"), or it is named
+         * exactly like it or like it plus build words ("hakuX Debug", "ARMSX2 Nightly 2"), never
+         * just starting with the name ("Dolphin Browser" is not Dolphin).
+         */
+        fun isVariant(packages: List<String>, name: String, id: String, pkg: String, label: String?): Boolean {
+            if (packages.any { pkg.startsWith("$it.") }) return true
+            val l = label?.let(::norm) ?: return false
+            val names = listOf(norm(name), norm(id)).filter { it.length >= 4 }.distinct()
+            return names.any { n -> l == n || (l.startsWith("$n ") && l.removePrefix("$n ").split(' ').all { it in BUILD_WORDS || it.any(Char::isDigit) }) }
+        }
+
         /** Bump when [configureRetroArch] writes something new. */
         const val RA_CONFIG_VERSION = 2
         private const val RA_CONFIG_STAMP = "ra_config_stamp"
