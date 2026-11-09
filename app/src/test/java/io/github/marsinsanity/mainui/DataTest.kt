@@ -858,3 +858,18 @@ class ZipImagesTest {
         dir.deleteRecursively()
     }
 }
+
+class UnzipSystemsTest {
+    @Test fun xboxAndGamecubeUnpackZippedImages() {
+        val arr = org.json.JSONObject(File("src/main/assets/systems.json").readText()).getJSONArray("systems")
+        val byId = (0 until arr.length()).map { arr.getJSONObject(it) }.associateBy { it.getString("id") }
+        for ((id, image) in listOf("xbox" to "iso", "gc" to "rvz")) {
+            val o = byId.getValue(id)
+            val exts = (0 until o.getJSONArray("extensions").length()).map { o.getJSONArray("extensions").getString(it) }
+            val unzip = (0 until o.getJSONArray("unzip").length()).map { o.getJSONArray("unzip").getString(it) }
+            assertTrue("$id lists .zip", "zip" in exts)
+            assertTrue("$id unpacks .$image", image in unzip)
+            assertTrue("$id: every unpacked type is listed too", exts.containsAll(unzip))
+        }
+    }
+}
