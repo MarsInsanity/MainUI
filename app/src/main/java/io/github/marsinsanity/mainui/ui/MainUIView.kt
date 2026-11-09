@@ -48,6 +48,10 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     init {
         isFocusable = true
         isFocusableInTouchMode = true
+        // MainUI draws its own selection. Without this, Android lays its translucent
+        // "focused view" highlight over the whole screen whenever a controller is used,
+        // which washes every color out (strongly on some OEM themes).
+        defaultFocusHighlightEnabled = false
         setBackgroundColor(Color.BLACK)
     }
 
