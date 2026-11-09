@@ -50,6 +50,8 @@ data class EmuDef(
     val states: StateSupport,
     val save: String?,
     val load: String?,
+    /** Where to get it ("get" in emulators.json): github, url, page, play, note, buildbot. */
+    val get: Map<String, String> = emptyMap(),
 ) {
     val packages: List<String> get() = components.map { it.first }.distinct()
 }
@@ -155,6 +157,7 @@ class EmulatorManager(
             states = if (id == "retroarch") StateSupport.API else states,
             save = save,
             load = load,
+            get = o.optJSONObject("get")?.let { g -> g.keys().asSequence().associateWith { k -> g.optString(k) } } ?: emptyMap(),
         )
     }
 

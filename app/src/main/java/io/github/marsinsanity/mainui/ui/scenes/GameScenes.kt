@@ -271,7 +271,8 @@ class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val g
         val opts = MainUI.emulators.optionsFor(def)
         var defaultMarked = false
         list.set(opts.map { o ->
-            val canGet = o.installed == false && o.isRetroArch
+            // Missing RetroArch cores download in place; missing emulators open their store page.
+            val canGet = o.installed == false
             val status = when (o.installed) { true -> null; false -> if (canGet) "get" else "not installed"; null -> "?" }
             val isDefault = !defaultMarked && o.installed != false && o.recommended
             if (isDefault) defaultMarked = true
@@ -293,8 +294,13 @@ class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val g
             host.toast("${MainUI.emulators.nameOf(o.ref)} selected")
             close()
         }
-        // A RetroArch core that isn't installed yet: offer to download it first.
-        if (o.isRetroArch && o.installed == false) CoreInstall.offer(host, o.core) { select() } else select()
+        // Not installed yet: download the core, or open the emulator's page in the App Store.
+        when {
+            o.installed != false -> select()
+            o.isRetroArch && MainUI.emulators.raPackage != null -> CoreInstall.offer(host, o.core) { select() }
+            o.isRetroArch -> host.push(EmulatorDetailScene(host, "retroarch"))
+            else -> host.push(EmulatorDetailScene(host, o.ref.removePrefix("sa:")))
+        }
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {

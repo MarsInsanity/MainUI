@@ -202,6 +202,7 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
         val items = mutableListOf<UiItem>()
         val ra = em.raPackage
         val cores = em.raCores
+        items += UiItem("Get emulators...", sub = "F-Droid, GitHub, retroarch.com", onSelect = { host.push(EmulatorStoreScene(host)) })
         items += UiItem("RetroArch cores", sub = when {
             ra == null -> "RetroArch not installed"
             cores == null -> "${cores?.size ?: "?"} (root needed)"
@@ -222,7 +223,8 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
                 io.github.marsinsanity.mainui.emu.StateSupport.MENU -> "own menu"
                 io.github.marsinsanity.mainui.emu.StateSupport.NONE -> "no states"
             }
-            items += UiItem(d.name, sub = (if (pkg == null) "not installed  " else "") + states, disabled = pkg == null)
+            items += UiItem(d.name, sub = (if (pkg == null) "get  " else "") + states,
+                onSelect = { host.push(EmulatorDetailScene(host, d.id)) })
         }
         list.set(items)
     }

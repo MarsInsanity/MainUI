@@ -48,16 +48,35 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         return Theme.load(ctx, dir, storage.themeOverrideDir.takeIf { it.isDirectory }, listOf(dir ?: storage.fontDir, storage.fontDir))
     }
 
-    /** Copies the bundled theme out of the APK once per install / update. */
+    /**
+     * Copies the bundled theme out of the APK. Its config.json carries a content
+     * stamp, so this only happens when the theme itself changed: on the first
+     * start (synchronously, so the first screen has it) or after an update that
+     * changed it (in the background; the previous copy is used until it's done).
+     */
     private fun extractBuiltin(dir: File) {
-        val stamp = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime }.getOrDefault(0L).toString()
-        val marker = File(dir, ".stamp")
-        if (marker.isFile && runCatching { marker.readText() }.getOrNull() == stamp) return
-        runCatching {
-            dir.deleteRecursively()
-            copyAsset("themes/MainUI", dir)
-            marker.writeText(stamp)
-        }
+        val bundled = runCatching { ctx.assets.open("themes/MainUI/config.json").bufferedReader().use { it.readText() } }.getOrNull() ?: return
+        val cfg = File(dir, "config.json")
+        val current = runCatching { cfg.readText() }.getOrNull()
+        if (current == bundled) return
+        if (current == null) { runCatching { copyFresh(dir) }; return }
+        Thread {
+            if (runCatching { copyFresh(dir) }.isSuccess) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { if (settings.themePath.isBlank()) reload() }
+            }
+        }.start()
+    }
+
+    /** Unpacks into a temporary folder, then swaps it in. */
+    private fun copyFresh(dir: File) {
+        val tmp = File(dir.parentFile, dir.name + ".new")
+        tmp.deleteRecursively()
+        copyAsset("themes/MainUI", tmp)
+        val old = File(dir.parentFile, dir.name + ".old")
+        old.deleteRecursively()
+        if (dir.exists() && !dir.renameTo(old)) dir.deleteRecursively()
+        if (!tmp.renameTo(dir)) throw java.io.IOException("Could not install the bundled theme")
+        old.deleteRecursively()
     }
 
     private fun copyAsset(path: String, dest: File) {

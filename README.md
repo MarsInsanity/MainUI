@@ -28,6 +28,10 @@ stock launcher.
 |---|---|---|
 | ![Apps](docs/screenshots/apps.png) | ![App Store](docs/screenshots/app-store.png) | ![Theme downloader](docs/screenshots/theme-downloader.png) |
 
+| App Store > Emulators | An emulator's page |
+|---|---|
+| ![Emulators](docs/screenshots/emulators.png) | ![Emulator page](docs/screenshots/emulator-page.png) |
+
 Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS theme replaces the look.
 
 ## Features
@@ -43,11 +47,11 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
 | 6 | **Rom search** | Search tile in the games grid (or `Y` on most screens): on-screen keyboard, results across every system and Android games. |
 | 7 | **Game Switcher** | Onion's GameSwitcher: full screen screenshots of recent games, `LEFT/RIGHT` browse, `A` resume, `X` remove, `Y` view mode, `SELECT` play time, `UP/DOWN` brightness, `gs-top-bar` / `gs-bottom-bar` / `gs-legend` / `lum0-10` theme art. |
 | 8 | **Apps menu** | Every launchable Android app with its icon. `Y` hides an app; hidden apps live in their own **Hidden apps** menu (with *Edit hidden apps...* to toggle any app). `SELECT` for app info, uninstall, move to Android games. |
-| 9 | **Theme Switcher + downloader** | Full screen previews, applies instantly, installs `.zip` themes dropped into a `Themes` folder. **Theme Downloader** browses the [OnionUI theme repository](https://github.com/OnionUI/Themes) with previews: `A` get, `Y` get and apply. |
+| 9 | **Theme Switcher + downloader** | Full screen previews, applies instantly, installs `.zip` themes dropped into a `Themes` folder. **Theme Downloader** browses the [OnionUI theme repository](https://github.com/OnionUI/Themes) on GitHub (200+ themes, the repository's featured ones first) with previews: `A` get, `Y` get and apply, `START` refresh. |
 | 10 | **Android system** | An "Android" system for native games. Add games by hand or let MainUI sort apps that declare themselves games into it automatically on install. |
 | 11 | **Process manager** | Lists apps MainUI launched first (current game marked), with memory and CPU. Switch to, force stop one, or stop everything MainUI launched (root). |
 | 12 | **In-game menu** | Press **Home** in a game: the game is paused, then a Miyoo style menu appears over it (one press, flush with the top of the screen) with **Continue, Save / Load, Native Menu, Game Switcher, Exit Game**. Hold Home for the Game Switcher; both are configurable, also for Home inside MainUI. See [Emulators](#emulators) for what Save/Load can do per emulator. |
-| 13 | **App Store** | F-Droid compatible repositories (F-Droid and IzzyOnDroid by default, add your own with `?fingerprint=`). Signed index verification, search, categories, updates, install (silent with root, otherwise Android's installer). |
+| 13 | **App Store** | Controller driven client for F-Droid compatible repositories (F-Droid and IzzyOnDroid by default, add your own with `?fingerprint=`): signed index verification, search, categories, updates, install (silent with root, otherwise Android's installer). Its **Emulators** section lists every emulator MainUI can launch, what it runs, and installs it from the best source: an F-Droid repository (RetroArch, PPSSPP, Dolphin...), the project's latest GitHub release (Azahar, Flycast, melonDS, MAME4droid, hakuX, Vita3K), or retroarch.com; otherwise it opens the Google Play page or website. Launching a game whose emulator is missing offers its page. |
 | 14 | **About** | Device, chipset, CPU, display, RAM and storage use, battery, MainUI / Android / kernel versions, root and RetroArch status. *Build number* opens Developer options (turning them on first with root). |
 | 15 | **Touch** | Tap to select / open, tap the button hints (`B BACK` etc.), drag to scroll, swipe to change page. |
 
@@ -215,6 +219,23 @@ root `getevent`. It adds no latency, but the game also receives the buttons.
 Accessibility key filtering sends every key press through the service before it reaches the game.
 The handler returns straight away for anything but Home; if you ever notice input lag, set both
 Home actions to "Go to MainUI" (the service then stops consuming keys) and use the combo trigger.
+
+## Getting emulators
+
+Apps > App Store > **Emulators** (also Settings > Emulators & cores > *Get emulators*, the core picker,
+and the prompt when a game's emulator is missing). For each emulator, in order:
+
+1. **F-Droid compatible repository**: if any enabled repository has the package (found by package
+   name in the signed index; F-Droid itself has RetroArch, PPSSPP, Dolphin, Mupen64Plus AE, Lemuroid).
+2. **GitHub**: the APK of the project's latest release (`api.github.com`, no account needed; 60
+   requests per hour). The APK matching the device's CPU is picked; store and debug flavours are skipped,
+   and GitHub's SHA-256 digest is checked when the release has one.
+3. **retroarch.com** for RetroArch (the 64-bit build on arm64 devices).
+4. Otherwise **Google Play** or the project's **website** is opened.
+
+Sources live in `emulators.json` (`"get"`), so they can be fixed in `MainUI/emulators.json` without
+an update. An app installed from one source can't be updated from another (Android checks the
+signature); MainUI says so instead of offering it.
 
 ## RetroArch cores
 

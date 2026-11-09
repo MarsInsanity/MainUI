@@ -31,7 +31,9 @@ object AppStore {
         fun json() = JSONObject().put("address", address).put("name", name).put("fingerprint", fingerprint).put("enabled", enabled)
     }
 
-    data class Apk(val versionCode: Long, val versionName: String, val apkName: String, val size: Long, val sha256: String?)
+    /** [signer]: SHA-256 of the signing certificate (index-v1 "signer"), to spot builds from another source. */
+    data class Apk(val versionCode: Long, val versionName: String, val apkName: String, val size: Long, val sha256: String?,
+                   val signer: String? = null)
 
     data class App(
         val pkg: String, val name: String, val summary: String, val description: String,
@@ -117,7 +119,7 @@ object AppStore {
         for (a in apps) arr.put(JSONObject().apply {
             put("p", a.pkg); put("n", a.name); put("s", a.summary); put("d", a.description); put("i", a.icon)
             put("c", JSONArray(a.categories)); put("l", a.license); put("u", a.lastUpdated)
-            a.apk?.let { put("vc", it.versionCode); put("vn", it.versionName); put("an", it.apkName); put("sz", it.size); put("h", it.sha256) }
+            a.apk?.let { put("vc", it.versionCode); put("vn", it.versionName); put("an", it.apkName); put("sz", it.size); put("h", it.sha256); put("sg", it.signer) }
         })
         compactFile(r).writeText(JSONObject().put("repo", r.address).put("apps", arr).toString())
         appsCache = null
@@ -138,7 +140,8 @@ object AppStore {
                 val a = arr.getJSONObject(i)
                 val pkg = a.getString("p")
                 if (out.containsKey(pkg)) continue
-                val apk = if (a.has("an")) Apk(a.getLong("vc"), a.optString("vn"), a.getString("an"), a.optLong("sz"), a.optString("h").ifEmpty { null }) else null
+                val apk = if (a.has("an")) Apk(a.getLong("vc"), a.optString("vn"), a.getString("an"), a.optLong("sz"), a.optString("h").ifEmpty { null },
+                    a.optString("sg").ifEmpty { null }) else null
                 val cats = a.optJSONArray("c")?.let { c -> (0 until c.length()).map { c.getString(it) } } ?: emptyList()
                 out[pkg] = App(pkg, a.optString("n", pkg), a.optString("s"), a.optString("d"), a.optString("i").ifEmpty { null },
                     cats, a.optString("l"), a.optLong("u"), apk, r.address)
@@ -248,7 +251,7 @@ object AppStore {
     }
 
     private fun readApk(r: JsonReader, abis: Set<String>): Pair<Apk, Boolean> {
-        var vc = 0L; var vn = ""; var an = ""; var size = 0L; var hash: String? = null; var minSdk = 1
+        var vc = 0L; var vn = ""; var an = ""; var size = 0L; var hash: String? = null; var minSdk = 1; var signer: String? = null
         val native = ArrayList<String>()
         r.beginObject()
         while (r.hasNext()) {
@@ -258,6 +261,7 @@ object AppStore {
                 "apkName" -> an = r.nextString()
                 "size" -> size = r.nextLong()
                 "hash" -> hash = r.nextString()
+                "signer" -> signer = r.nextString()
                 "minSdkVersion" -> minSdk = r.nextString().toIntOrNull() ?: runCatching { r.nextInt() }.getOrDefault(1)
                 "nativecode" -> { r.beginArray(); while (r.hasNext()) native += r.nextString(); r.endArray() }
                 else -> r.skipValue()
@@ -265,10 +269,20 @@ object AppStore {
         }
         r.endObject()
         val ok = an.isNotEmpty() && minSdk <= Build.VERSION.SDK_INT && (native.isEmpty() || native.any { it in abis })
-        return Apk(vc, vn, an, size, hash) to ok
+        return Apk(vc, vn, an, size, hash, signer) to ok
     }
 
     // ---- install ---------------------------------------------------------------------
+
+    /** SHA-256 of the installed app's signing certificate, lower case hex. */
+    fun installedSigner(pkg: String): String? = runCatching {
+        val pm = MainUI.app.packageManager
+        @Suppress("DEPRECATION")
+        val sig = if (Build.VERSION.SDK_INT >= 28) pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+            .signingInfo?.apkContentsSigners?.firstOrNull()
+        else pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_SIGNATURES).signatures?.firstOrNull()
+        sig?.toByteArray()?.let { sha256(it) }
+    }.getOrNull()
 
     fun installedVersion(pkg: String): Long? = runCatching {
         MainUI.app.packageManager.getPackageInfo(pkg, 0).longVersionCode
@@ -285,7 +299,15 @@ object AppStore {
         Http.download("${app.repo}/${apk.apkName}", file) { done, total ->
             progress("Downloading ${app.name}: ${formatBytes(done)}" + if (total > 0) " / ${formatBytes(total)}" else "")
         }
-        apk.sha256?.let { expected ->
+        return installFile(file, app.name, apk.sha256, progress)
+    }
+
+    /**
+     * Checks [file] against [sha256] (when known) and installs it: silently with
+     * root, otherwise through Android's package installer (asks the user).
+     */
+    fun installFile(file: File, name: String, sha256: String?, progress: (String) -> Unit = {}): String {
+        sha256?.let { expected ->
             progress("Verifying...")
             val actual = file.inputStream().use { input ->
                 val md = MessageDigest.getInstance("SHA-256"); val buf = ByteArray(1 shl 16)
@@ -294,12 +316,22 @@ object AppStore {
             }
             if (!actual.equals(expected, true)) { file.delete(); return "Download corrupted (checksum mismatch)" }
         }
-        progress("Installing ${app.name}...")
-        if (Root.knownAvailable()) {
+        progress("Installing $name...")
+        if (Root.knownAvailable() || Root.available()) {
             file.setReadable(true, false)
-            val r = Root.exec("pm install -r ${Root.q(file.absolutePath)}", timeoutSec = 180)
+            val r = Root.exec("pm install -r ${Root.q(file.absolutePath)}", timeoutSec = 300)
             file.delete()
-            return if (r.ok && r.out.contains("Success")) "${app.name} installed" else "Install failed: ${r.out.ifBlank { r.err }.take(120)}"
+            if (r.ok && r.out.contains("Success")) return "$name installed"
+            val why = (r.out + r.err).let { o ->
+                when {
+                    o.contains("UPDATE_INCOMPATIBLE") -> "a version from another source (different signature) is installed; uninstall it first"
+                    o.contains("NO_MATCHING_ABIS") -> "this build is not for this device's CPU"
+                    o.contains("OLDER_SDK") -> "needs a newer Android version"
+                    o.contains("VERSION_DOWNGRADE") -> "a newer version is already installed"
+                    else -> o.ifBlank { "unknown error" }.trim().take(120)
+                }
+            }
+            return "Install failed: $why"
         }
         val uri = MainUI.emulators.providerUri(file)
         val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")

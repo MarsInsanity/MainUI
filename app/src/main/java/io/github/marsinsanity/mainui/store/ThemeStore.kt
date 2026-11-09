@@ -25,7 +25,7 @@ object ThemeStore {
         }.getOrNull()?.takeIf { it.startsWith("http") } ?: DEFAULT_RAW
     }
 
-    data class Entry(val name: String, val remixed: Boolean) {
+    data class Entry(val name: String, val remixed: Boolean, val featured: Boolean = false) {
         /** "Blueprint by Aemiii91" -> author "Aemiii91" */
         val title get() = name.substringBefore(" by ").trim()
         val author get() = name.substringAfter(" by ", "").trim()
@@ -45,14 +45,17 @@ object ThemeStore {
         val text = if (!refresh && fresh) cache.readText() else {
             val custom = Http.text("$RAW/.github/data/custom.txt")
             val remixed = runCatching { Http.text("$RAW/.github/data/remixed.txt") }.getOrDefault("")
-            val t = custom.lines().map { "C|$it" }.plus(remixed.lines().map { "R|$it" }).joinToString("\n")
-            cache.writeText(t)
-            t
+            val featured = runCatching { Http.text("$RAW/.github/data/featured.txt") }.getOrDefault("")
+            val t = custom.lines().map { "C|$it" } + remixed.lines().map { "R|$it" } + featured.lines().map { "F|$it" }
+            cache.writeText(t.joinToString("\n"))
+            t.joinToString("\n")
         }
-        return text.lines().mapNotNull { l ->
+        val featured = text.lines().filter { it.startsWith("F|") }.map { it.substringAfter('|').trim().lowercase() }.toSet()
+        // The repository's featured themes first (as on its README), then A-Z.
+        return text.lines().filter { !it.startsWith("F|") }.mapNotNull { l ->
             val name = l.substringAfter('|').trim()
-            if (name.isEmpty() || name.startsWith("#")) null else Entry(name, l.startsWith("R|"))
-        }.distinctBy { it.name.lowercase() }.sortedBy { it.name.lowercase() }
+            if (name.isEmpty() || name.startsWith("#")) null else Entry(name, l.startsWith("R|"), name.lowercase() in featured)
+        }.distinctBy { it.name.lowercase() }.sortedWith(compareBy({ !it.featured }, { it.name.lowercase() }))
     }
 
     /** Preview image, downloaded once into MainUI/cache/themestore. */

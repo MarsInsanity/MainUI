@@ -47,6 +47,7 @@
     "mainui": {
         "accent": "#3A96FF",
         "panel": "#F0122A5A",
-        "background": "#050C1E"
+        "background": "#050C1E",
+        "stamp": "62c12e3c10929537"
     }
 }
