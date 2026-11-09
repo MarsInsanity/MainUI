@@ -78,7 +78,9 @@ object EmulatorStore {
         }
     }
 
-    data class Release(val version: String, val apkName: String, val url: String, val size: Long, val sha256: String?)
+    data class Release(val version: String, val apkName: String, val url: String, val size: Long, val sha256: String?,
+                       /** When it was published (ms since 1970), 0 when unknown. */
+                       val published: Long = 0)
 
     /** The APK of the newest GitHub release of [repo] ("owner/name") that has one. */
     fun latestGithub(repo: String): Release {
@@ -93,8 +95,9 @@ object EmulatorStore {
         for (rel in candidates) {
             val a = pickApk(rel.optJSONArray("assets")) ?: continue
             val digest = a.optString("digest").takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:")
+            val published = runCatching { java.time.Instant.parse(rel.optString("published_at")).toEpochMilli() }.getOrDefault(0L)
             return Release(rel.optString("tag_name").ifEmpty { rel.optString("name") }, a.getString("name"),
-                a.getString("browser_download_url"), a.optLong("size"), digest)
+                a.getString("browser_download_url"), a.optLong("size"), digest, published)
         }
         throw IOException("No APK in the releases of $repo")
     }
