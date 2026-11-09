@@ -120,8 +120,9 @@ Differences from a Miyoo Mini, due to the screen:
 - Systems whose folders are empty stay hidden (unless *Show empty systems*), but a folder with files
   MainUI can't play is shown as "no playable files", and opening it lists what it found and what that
   system takes ("Found: 2 .7z, 1 .xbe / XBOX games must be: .iso .xiso .cso .cci .zip").
-- **Xbox games in .zip files**: hakuX opens .iso / .xiso / .cso / .cci images but no archives, so the
-  first time a zipped game is started MainUI offers to unpack its image next to the zip
+- **Xbox and GameCube games in .zip files**: hakuX opens .iso / .xiso / .cso / .cci images and Dolphin
+  (standalone or RetroArch core) .iso / .gcm / .rvz / .gcz / .wia / .wbfs / .ciso..., but neither opens
+  archives, so the first time a zipped game is started MainUI offers to unpack its image next to the zip
   (`Halo.zip` -> `Halo.iso`; progress on screen, B stops, free space checked first, never a half
   written image left behind), then asks whether to delete the zip, and launches. From then on the
   image is launched and the zip is no longer listed. Systems opt in with `"unzip"` in systems.json.

@@ -1140,7 +1140,12 @@
     "rvz",
     "wad",
     "wbfs",
-    "wia"
+    "wia",
+    "gcm",
+    "ciso",
+    "tgc",
+    "dol",
+    "zip"
    ],
    "emulators": [
     "sa:dolphin",
@@ -1151,7 +1156,19 @@
    "icons": [
     "gc"
    ],
-   "short": "GC"
+   "short": "GC",
+   "unzip": [
+    "iso",
+    "gcm",
+    "rvz",
+    "gcz",
+    "wia",
+    "wbfs",
+    "ciso",
+    "tgc",
+    "dol",
+    "elf"
+   ]
   },
   {
    "id": "megadrive",

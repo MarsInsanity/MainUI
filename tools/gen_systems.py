@@ -83,6 +83,15 @@ EXTRA_STANDALONE = {
     'arcade': ['mame4droid'], 'mame': ['mame4droid'],
 }
 
+# Extra file types per dArkOS folder (what the Android emulators open beyond dArkOS's list), and
+# image types MainUI unpacks from a .zip before launching, for emulators that open no archives.
+EXTRA_EXT = {
+    'gc': ['gcm', 'ciso', 'tgc', 'dol', 'zip'],
+}
+UNZIP = {
+    'gc': ['iso', 'gcm', 'rvz', 'gcz', 'wia', 'wbfs', 'ciso', 'tgc', 'dol', 'elf'],
+}
+
 # Extra RetroArch for Android cores per dArkOS folder.
 EXTRA_CORES = {
     '3ds': ['citra'],
@@ -258,6 +267,11 @@ def main():
             emulators=emus, screenscraper=SSID.get(sid), icons=list(dict.fromkeys(icons)),
             short=SHORT.get(sid, sid.split('/')[0][:4].upper()),
         ))
+        for e in EXTRA_EXT.get(sid, []):
+            if e not in systems[-1]['extensions']:
+                systems[-1]['extensions'].append(e)
+        if sid in UNZIP:
+            systems[-1]['unzip'] = UNZIP[sid]
     for x in ANDROID_EXTRA_SYSTEMS:
         systems.append(dict(
             id=x['id'], name=x['name'], folders=x['folders'], extensions=parse_ext(x['ext']),
