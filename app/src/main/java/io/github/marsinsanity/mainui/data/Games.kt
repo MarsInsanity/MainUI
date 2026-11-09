@@ -181,6 +181,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
 
     fun countGames(system: GameSystem): Int {
         var n = 0
+        val others = HashMap<String, Int>()
         fun walk(d: File, depth: Int, gl: MetaLookup) {
             val files = d.listFiles() ?: return
             val hidden = discFilesToHide(files)
@@ -192,9 +193,12 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
                     }
                 } else if (system.def.accepts(f) && f.name != "gamelist.xml" && !f.name.endsWith(".dat", true) && f.name.lowercase() !in hidden &&
                     gl.get(f)?.hidden != true) n++
+                else if (f.extension.isNotEmpty() && f.name != "gamelist.xml" && f.extension.lowercase() !in NOT_GAMES)
+                    others.merge(f.extension.lowercase(), 1, Int::plus)
             }
         }
         system.dirs.forEach { walk(it, 0, meta(it)) }
+        system.otherFiles = others
         system.gameCount = n
         return n
     }
@@ -270,6 +274,9 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             "downloaded_images", "boxart")
         val IMAGE_SUFFIXES = listOf("", "-image", "-thumb", "-boxart")
         val IMAGE_EXTS = listOf("png", "jpg", "jpeg", "webp")
+        /** Files that are never games, left out of "no playable files" hints. */
+        val NOT_GAMES = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "txt", "nfo", "xml", "dat", "bak", "tmp", "md",
+            "pdf", "htm", "html", "db", "ini", "cfg", "log", "srm", "sav", "state", "auto", "ds_store")
 
         private val TAGS = Regex("\\s*[\\(\\[][^\\)\\]]*[\\)\\]]")
 

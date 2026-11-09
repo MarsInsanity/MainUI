@@ -77,9 +77,11 @@ object HomeScenes {
             SearchFlow.start(host)
         }
         for (sys in systems) {
-            if (!s.showEmptySystems && sys.gameCount == 0) continue
+            // Empty folders stay hidden; a folder with files MainUI can't play is shown so it can say why.
+            val unplayable = sys.unplayableSummary
+            if (!s.showEmptySystems && sys.gameCount == 0 && unplayable == null) continue
             out += Tile(sys.id, sys.name, "game", icons = sys.def.icons, short = sys.def.short,
-                sub = if (sys.gameCount >= 0) plural(sys.gameCount, "game") else null, system = sys,
+                sub = when { unplayable != null -> "no playable files"; sys.gameCount >= 0 -> plural(sys.gameCount, "game"); else -> null }, system = sys,
                 open = { host.push(GameListScene(host, sys, null)) },
                 options = { systemOptions(host, sys) })
         }

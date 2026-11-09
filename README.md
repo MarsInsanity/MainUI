@@ -117,6 +117,10 @@ Differences from a Miyoo Mini, due to the screen:
 - The Retroid Pocket Mini V2 screen (1240x1080) is narrower than 4:3. MainUI keeps the theme's
   640 px width and gains about 77 px of height (a 640x557 canvas). Header and footer stay at the
   top and bottom, content is centred, and lists show one extra row.
+- Systems whose folders are empty stay hidden (unless *Show empty systems*), but a folder with files
+  MainUI can't play is shown as "no playable files", and opening it lists what it found and what that
+  system takes ("Found: 2 .7z, 1 .xbe / XBOX games must be: .iso .xiso"): hakuX, the Xbox emulator,
+  only opens ISO / XISO images, not archives or extracted games.
 - The top bar clock (Settings > User interface > *Show clock*) is 24-hour, 12-hour or like Android's
   own setting (*Clock format*).
 - Backgrounds are cropped to fill the screen by default (Settings > User interface > Background fit:
@@ -328,8 +332,9 @@ small, installs three at a time, and B stops it after the cores in progress.
 
 **Yabadabadoo** (a Saturn core tuned for the Miyoo Mini) isn't on the buildbot, and its own releases are
 Miyoo (Linux) builds Android can't load, so MainUI's GitHub Actions build it for Android from its source
-(`.github/workflows/cores.yml`, weekly and on demand) into this repository's **`cores`** release; MainUI
-downloads it from there like any other core. Other cores that aren't on the buildbot can be installed
+(`.github/workflows/cores.yml`, weekly and on demand) into this repository's **`cores`** release
+(`yabadabadoo_libretro_android-<abi>.zip`); MainUI downloads it from there like any other core.
+(Up to 0.1.33 MainUI asked for `..._android.so-<abi>.zip`, which doesn't exist: HTTP 404.) Other cores that aren't on the buildbot can be installed
 from **`MainUI/cores`**: drop `<name>_libretro_android.so` (or a `.zip` of it, optionally with
 `<name>_libretro.info`) there and it appears in the list.
 

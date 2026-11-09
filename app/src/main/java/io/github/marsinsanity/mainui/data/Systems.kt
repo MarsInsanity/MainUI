@@ -40,6 +40,13 @@ data class GameSystem(val def: SystemDef, val dirs: List<File>) {
     val id get() = def.id
     val name get() = def.name
     @Volatile var gameCount: Int = -1
+    /** Files in its folders MainUI can't play here (lowercase extension -> count), from the last count. */
+    @Volatile var otherFiles: Map<String, Int> = emptyMap()
+
+    /** "3 .7z, 1 .zip" for a system that has files but none MainUI plays; null otherwise. */
+    val unplayableSummary: String?
+        get() = if (gameCount != 0 || otherFiles.isEmpty()) null
+        else otherFiles.entries.sortedByDescending { it.value }.take(3).joinToString(", ") { "${it.value} .${it.key}" }
 }
 
 class SystemRegistry(ctx: Context, private val storage: Storage) {
