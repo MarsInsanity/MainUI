@@ -217,6 +217,8 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         val top = stack.lastOrNull() ?: return
         if (top.onKey(b, repeat)) {
             if (!repeat || b.isDirection) MainUI.themes.click()
+            if (b.isDirection || b == Btn.L1 || b == Btn.R1 || b == Btn.L2 || b == Btn.R2) io.github.marsinsanity.mainui.core.Haptics.move()
+            else if (!repeat) io.github.marsinsanity.mainui.core.Haptics.press()
             invalidate()
         }
     }
@@ -317,7 +319,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
             val x = toLogical(e.x); val y = toLogical(e.y)
             val top = stack.lastOrNull() ?: return false
             gfx.hintAt(x, y)?.let { b -> dispatch(b, false); return true }
-            if (top.onTap(x, y)) { MainUI.themes.click(); invalidate(); return true }
+            if (top.onTap(x, y)) { MainUI.themes.click(); io.github.marsinsanity.mainui.core.Haptics.press(); invalidate(); return true }
             if (y < Gfx.HEADER && x < logicalWidth * 0.25f && stack.size > 1 && !top.isOverlay) {
                 dispatch(Btn.B, false); return true
             }
@@ -342,7 +344,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
             val lvx = toLogical(vx); val lvy = toLogical(vy)
             if (dragHandled) { if (top.onFling(lvx, lvy)) invalidate(); return true }
             val b = if (abs(vx) > abs(vy)) (if (vx < 0) Btn.RIGHT else Btn.LEFT) else (if (vy < 0) Btn.DOWN else Btn.UP)
-            if (top.onSwipe(b)) { MainUI.themes.click(); invalidate() }
+            if (top.onSwipe(b)) { MainUI.themes.click(); io.github.marsinsanity.mainui.core.Haptics.move(); invalidate() }
             return true
         }
     })
@@ -357,7 +359,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
             if (dragging && !flung && !dragHandled && event.actionMasked == MotionEvent.ACTION_UP && top != null &&
                 maxOf(abs(dragX), abs(dragY)) > SWIPE_MIN) {
                 val b = if (abs(dragX) > abs(dragY)) (if (dragX < 0) Btn.RIGHT else Btn.LEFT) else (if (dragY < 0) Btn.DOWN else Btn.UP)
-                if (top.onSwipe(b)) { MainUI.themes.click(); invalidate() }
+                if (top.onSwipe(b)) { MainUI.themes.click(); io.github.marsinsanity.mainui.core.Haptics.move(); invalidate() }
             }
             dragging = false
         }
