@@ -20,6 +20,9 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from system_glyphs import GLYPHS, Pen, glyph  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "app/src/main/assets"
 FONT = ASSETS / "fonts/Exo-2-Bold-Italic.ttf"
@@ -254,227 +257,33 @@ def g_sliders(d, cx, cy, s, c, w):
         circle(d, x, cy + k * s, s * 0.22, fill=c)
 
 
-# ---- system device glyphs (draw inside a ~100x90 box centred on cx, cy) ---------------
-
-def dev_handheld_v(d, cx, cy, c, w, v=None):
-    rrect(d, (cx - 27, cy - 40, cx + 27, cy + 40), 7, c, w)
-    rrect(d, (cx - 18, cy - 31, cx + 18, cy - 2), 3, c, w * 0.8)
-    dpad(d, cx - 11, cy + 18, 6, c, w * 0.8)
-    buttons(d, cx + 12, cy + 17, 9, c)
-    if v == "duck":
-        line(d, [(cx - 6, cy + 33), (cx + 6, cy + 33)], c, w * 0.6)
-
-
-def dev_handheld_h(d, cx, cy, c, w, v=None):
-    if v == "slim":          # PSP / Vita
-        rrect(d, (cx - 46, cy - 21, cx + 46, cy + 21), 19, c, w)
-        rrect(d, (cx - 25, cy - 14, cx + 25, cy + 14), 3, c, w * 0.8)
-        dpad(d, cx - 35, cy - 2, 5, c, w * 0.7)
-        buttons(d, cx + 35, cy - 2, 8, c)
-        return
-    if v == "hybrid":        # Switch: tablet and two joy-cons
-        rrect(d, (cx - 46, cy - 25, cx + 46, cy + 25), 12, c, w)
-        line(d, [(cx - 30, cy - 25), (cx - 30, cy + 25)], c, w * 0.8)
-        line(d, [(cx + 30, cy - 25), (cx + 30, cy + 25)], c, w * 0.8)
-        rrect(d, (cx - 24, cy - 18, cx + 24, cy + 18), 2, c, w * 0.7)
-        circle(d, cx - 38, cy - 9, 4, c, w * 0.7)
-        circle(d, cx + 38, cy + 9, 4, c, w * 0.7)
-        return
-    if v == "phone":         # J2ME / Palm / P/ECE: tall device with keypad
-        rrect(d, (cx - 22, cy - 42, cx + 22, cy + 42), 9, c, w)
-        rrect(d, (cx - 15, cy - 33, cx + 15, cy - 5), 2, c, w * 0.8)
-        for j in range(3):
-            for i in range(3):
-                circle(d, cx - 10 + i * 10, cy + 6 + j * 10, 2.4, fill=c)
-        return
-    rrect(d, (cx - 46, cy - 26, cx + 46, cy + 26), 14 if v != "boxy" else 6, c, w)
-    rrect(d, (cx - 22, cy - 18, cx + 22, cy + 16), 3, c, w * 0.8)
-    dpad(d, cx - 34, cy, 6, c, w * 0.75)
-    buttons(d, cx + 34, cy, 9, c)
-
-
-def dev_clamshell(d, cx, cy, c, w, v=None):
-    rrect(d, (cx - 34, cy - 42, cx + 34, cy - 3), 6, c, w)
-    rrect(d, (cx - 22, cy - 35, cx + 22, cy - 10), 2, c, w * 0.7)
-    rrect(d, (cx - 34, cy + 3, cx + 34, cy + 42), 6, c, w)
-    rrect(d, (cx - 18, cy + 9, cx + 18, cy + 34), 2, c, w * 0.7)
-    dpad(d, cx - 26, cy + 20, 4, c, w * 0.6)
-    circle(d, cx + 26, cy + 20, 3, fill=c)
-
-
-def dev_cart(d, cx, cy, c, w, v=None):
-    top = cy - 6 if v != "tall" else cy - 14
-    rrect(d, (cx - 46, top, cx + 46, cy + 30), 7, c, w)
-    rrect(d, (cx - 20, top - 22, cx + 20, top + 4), 3, c, w)            # cartridge
-    line(d, [(cx - 12, top - 13), (cx + 12, top - 13)], c, w * 0.6)
-    line(d, [(cx - 36, cy + 18), (cx - 20, cy + 18)], c, w * 0.7)
-    circle(d, cx + 26, cy + 18, 3.5, fill=c)
-    circle(d, cx + 36, cy + 18, 3.5, fill=c)
-
-
-def dev_disc(d, cx, cy, c, w, v=None):
-    if v == "tower":         # PS2 / PS3 / Xbox / Wii: standing console
-        rrect(d, (cx - 22, cy - 42, cx + 22, cy + 42), 6, c, w)
-        line(d, [(cx - 14, cy - 28), (cx + 14, cy - 28)], c, w * 0.7)
-        circle(d, cx, cy + 6, 12, c, w * 0.8)
-        circle(d, cx, cy + 6, 2.5, fill=c)
-        circle(d, cx + 12, cy + 32, 2.5, fill=c)
-        return
-    if v == "cube":          # GameCube
-        rrect(d, (cx - 36, cy - 36, cx + 36, cy + 36), 8, c, w)
-        circle(d, cx, cy - 4, 18, c, w * 0.8)
-        line(d, [(cx - 22, cy + 26), (cx + 22, cy + 26)], c, w * 0.7)
-        return
-    rrect(d, (cx - 46, cy - 22, cx + 46, cy + 30), 9, c, w)
-    circle(d, cx - 6, cy + 4, 18, c, w * 0.8)
-    circle(d, cx - 6, cy + 4, 3, fill=c)
-    circle(d, cx + 32, cy - 6, 3.5, fill=c)
-    circle(d, cx + 32, cy + 8, 3.5, fill=c)
-
-
-def dev_computer(d, cx, cy, c, w, v=None):
-    rrect(d, (cx - 36, cy - 42, cx + 36, cy + 8), 5, c, w)
-    rrect(d, (cx - 28, cy - 35, cx + 28, cy + 1), 2, c, w * 0.7)
-    line(d, [(cx - 8, cy + 8), (cx - 10, cy + 16)], c, w * 0.8)
-    line(d, [(cx + 8, cy + 8), (cx + 10, cy + 16)], c, w * 0.8)
-    poly(d, [(cx - 40, cy + 20), (cx + 40, cy + 20), (cx + 46, cy + 40), (cx - 46, cy + 40)], c, w)
-    for i in range(7):
-        circle(d, cx - 27 + i * 9, cy + 30, 2, fill=c)
-
-
-def dev_arcade(d, cx, cy, c, w, v=None):
-    pts = [(cx - 26, cy - 44), (cx + 26, cy - 44), (cx + 26, cy - 30), (cx + 20, cy - 2),
-           (cx + 34, cy + 10), (cx + 30, cy + 44), (cx - 30, cy + 44), (cx - 34, cy + 10),
-           (cx - 20, cy - 2), (cx - 26, cy - 30)]
-    line(d, pts + [pts[0]], c, w)
-    line(d, [(cx - 26, cy - 34), (cx + 26, cy - 34)], c, w * 0.7)
-    rrect(d, (cx - 16, cy - 27, cx + 16, cy - 6), 2, c, w * 0.7)
-    line(d, [(cx - 14, cy + 15), (cx - 14, cy + 5)], c, w * 0.8)
-    circle(d, cx - 14, cy + 4, 4, fill=c)
-    circle(d, cx + 6, cy + 13, 3, fill=c)
-    circle(d, cx + 16, cy + 13, 3, fill=c)
-
-
-def dev_fantasy(d, cx, cy, c, w, v=None):
-    rows = [".XX.XX.", "XXXXXXX", "XXXXXXX", ".XXXXX.", "..XXX..", "...X..."]
-    rrect(d, (cx - 40, cy - 40, cx + 40, cy + 40), 10, c, w)
-    px = 8
-    x0, y0 = cx - px * 3.5, cy - px * 3
-    for j, row in enumerate(rows):
-        for i, ch in enumerate(row):
-            if ch == "X":
-                d.rectangle((S(x0 + i * px + 0.7), S(y0 + j * px + 0.7), S(x0 + (i + 1) * px - 0.7), S(y0 + (j + 1) * px - 0.7)), fill=c)
-
-
-def dev_engine(d, cx, cy, c, w, v=None):
-    """Ports and game engines: an arcade stick."""
-    ellipse(d, (cx - 40, cy + 12, cx + 40, cy + 40), c, w)
-    line(d, [(cx - 6, cy + 24), (cx - 2, cy - 18)], c, w * 1.2)
-    circle(d, cx - 2, cy - 26, 13, fill=c)
-    circle(d, cx + 26, cy + 24, 4, fill=c)
-
-
-def dev_vectrex(d, cx, cy, c, w, v=None):
-    rrect(d, (cx - 28, cy - 44, cx + 28, cy + 30), 8, c, w)
-    rrect(d, (cx - 20, cy - 36, cx + 20, cy + 14), 3, c, w * 0.7)
-    line(d, [(cx - 12, cy - 18), (cx, cy - 26), (cx + 12, cy - 4), (cx - 6, cy + 4)], c, w * 0.6)
-    rrect(d, (cx - 24, cy + 32, cx + 24, cy + 44), 4, c, w * 0.8)
-
-
-def dev_goggles(d, cx, cy, c, w, v=None):
-    rrect(d, (cx - 44, cy - 30, cx + 44, cy + 4), 12, c, w)
-    circle(d, cx - 20, cy - 13, 9, c, w * 0.8)
-    circle(d, cx + 20, cy - 13, 9, c, w * 0.8)
-    line(d, [(cx - 18, cy + 4), (cx - 24, cy + 42)], c, w)
-    line(d, [(cx + 18, cy + 4), (cx + 24, cy + 42)], c, w)
-
-
-def dev_lcd(d, cx, cy, c, w, v=None):
-    """Game & Watch / Tiger: landscape LCD with two buttons."""
-    rrect(d, (cx - 46, cy - 28, cx + 46, cy + 28), 8, c, w)
-    rrect(d, (cx - 24, cy - 18, cx + 24, cy + 18), 2, c, w * 0.8)
-    line(d, [(cx - 18, cy - 4), (cx - 8, cy - 10), (cx + 4, cy + 2), (cx + 16, cy - 6)], c, w * 0.6)
-    circle(d, cx - 36, cy + 10, 5, fill=c)
-    circle(d, cx + 36, cy + 10, 5, fill=c)
-
-
-def dev_android(d, cx, cy, c, w, v=None):
-    d.pieslice((S(cx - 34), S(cy - 30), S(cx + 34), S(cy + 38)), 180, 360, fill=c)
-    for ex in (-13, 13):
-        circle(d, cx + ex, cy - 8, 4.5, fill=(12, 28, 64, 255))
-    line(d, [(cx - 20, cy - 26), (cx - 30, cy - 42)], c, w)
-    line(d, [(cx + 20, cy - 26), (cx + 30, cy - 42)], c, w)
-    rrect(d, (cx - 34, cy + 10, cx + 34, cy + 40), 6, fill=c)
-
-
-def dev_search(d, cx, cy, c, w, v=None):
-    g_search(d, cx, cy, 38, c, w * 1.2)
-
-
-def dev_disk(d, cx, cy, c, w, v=None):
-    """Visual novels / RPG makers: a book."""
-    line(d, [(cx, cy - 26), (cx, cy + 38)], c, w)
-    for side in (-1, 1):
-        line(d, [(cx, cy - 26), (cx + side * 42, cy - 34), (cx + side * 42, cy + 30), (cx, cy + 38)], c, w)
-    for k in (-14, -2, 10):
-        line(d, [(cx - 32, cy + k), (cx - 10, cy + k + 2)], c, w * 0.5)
-        line(d, [(cx + 10, cy + k + 2), (cx + 32, cy + k)], c, w * 0.5)
-
-
-DEVICES = {
-    "hv": dev_handheld_v, "hh": dev_handheld_h, "clam": dev_clamshell, "cart": dev_cart, "disc": dev_disc,
-    "pc": dev_computer, "arcade": dev_arcade, "fantasy": dev_fantasy, "engine": dev_engine,
-    "vectrex": dev_vectrex, "goggles": dev_goggles, "lcd": dev_lcd, "android": dev_android,
-    "search": dev_search, "book": dev_disk,
+# system id -> name badge under the picture (None: no badge)
+BADGES = {
+    "3do": "3DO", "3ds": "3DS", "advision": "A-VISION", "alg": "ALG", "amiga": "AMIGA", "amigacd32": "CD32",
+    "amstradcpc": "CPC", "gx4000": "GX4000", "apple2": "APPLE II", "vmac": "MAC", "piece": "P/ECE",
+    "arcade": "ARCADE", "arduboy": "ARDUBOY", "astrocde": "ASTRO", "atari2600": "2600", "atari5200": "5200",
+    "atari7800": "7800", "atari800": "800", "atarijaguar": "JAGUAR", "atarilynx": "LYNX", "atarist": "ST",
+    "atarixegs": "XEGS", "atomiswave": "AWAVE", "bbcmicro": "BBC", "cavestory": "CAVE", "cdimono1": "CD-i",
+    "coleco": "COLECO", "c128": "C128", "c16": "C16", "c64": "C64", "vic20": "VIC-20", "cps1": "CPS1",
+    "cps2": "CPS2", "cps3": "CPS3", "daphne": "LASER", "doom": "DOOM", "dragon32": "DRAGON", "dreamcast": "DC",
+    "vmu": "VMU", "easyrpg": "RPG", "enterprise": "ENT", "channelf": "CHAN-F", "fds": "FDS", "gameandwatch": "G&W",
+    "gb": "GB", "gba": "GBA", "gbc": "GBC", "gamegear": "GG", "gc": "GC", "megadrive": "MD", "intellivision": "INTV",
+    "j2me": "J2ME", "lowresnx": "LOWRES", "mame2003": "MAME 2003", "mame": "MAME", "mastersystem": "SMS",
+    "megaduck": "DUCK", "msumd": "MSU-MD", "xbox": "XBOX", "mv": "MICROV", "msx": "MSX", "msx2": "MSX2",
+    "naomi": "NAOMI", "neogeo": "NEO GEO", "neogeocd": "NEO CD", "ngp": "NGP", "ngpc": "NGPC", "n64": "N64",
+    "n64dd": "64DD", "nds": "NDS", "nes": "NES", "switch": "SWITCH", "wii": "Wii", "odyssey2": "ODYSSEY",
+    "openbor": "BOR", "palm": "PALM", "dos": "DOS", "pcenginecd": "PCE-CD", "pcengine": "PCE", "pcfx": "PC-FX",
+    "pc98": "PC-98", "pico-8": "PICO-8", "psx": "PS1", "ps2": "PS2", "ps3": "PS3", "psp": "PSP", "pspminis": "MINIS",
+    "psvita": "VITA", "pokemonmini": "MINI", "puzzlescript": "PUZZLE", "satellaview": "BS-X", "scummvm": "SCUMM",
+    "sega32x": "32X", "segacd": "SEGA CD", "pico": "PICO", "saturn": "SATURN", "sg-1000": "SG-1000", "x1": "X1",
+    "x68000": "X68K", "solarus": "SOLARUS", "sufami": "SUFAMI", "scv": "SCV", "sgb": "SGB", "supergrafx": "SGX",
+    "snes": "SNES", "snes-hacks": "HACKS", "snesmsu1": "MSU-1", "coco3": "COCO3", "thomson": "MO/TO",
+    "ti99": "TI-99", "tic80": "TIC-80", "tigerlcd": "TIGER", "uzebox": "UZEBOX", "vectrex": "VECTREX",
+    "videopac": "G7000", "tvc": "TVC", "vircon32": "VIRCON", "virtualboy": "VB", "onscripter": "ONS",
+    "wasm4": "WASM-4", "supervision": "SV", "wolf": "WOLF3D", "wonderswan": "WS", "wonderswancolor": "WSC",
+    "zxspectrum": "ZX", "zx81": "ZX81", "android": "ANDROID", "search": None,
 }
 
-# system id -> (device, variant, badge)
-SYSTEMS = {
-    "3do": ("disc", None, "3DO"), "3ds": ("clam", None, "3DS"), "advision": ("cart", "tall", "A-VISION"),
-    "alg": ("arcade", None, "ALG"), "amiga": ("pc", None, "AMIGA"), "amigacd32": ("disc", None, "CD32"),
-    "amstradcpc": ("pc", None, "CPC"), "gx4000": ("cart", None, "GX4000"), "apple2": ("pc", None, "APPLE II"),
-    "vmac": ("pc", None, "MAC"), "piece": ("hh", "phone", "P/ECE"), "arcade": ("arcade", None, "ARCADE"),
-    "arduboy": ("hv", None, "ARDUBOY"), "astrocde": ("cart", None, "ASTRO"), "atari2600": ("cart", None, "2600"),
-    "atari5200": ("cart", None, "5200"), "atari7800": ("cart", None, "7800"), "atari800": ("pc", None, "800"),
-    "atarijaguar": ("cart", None, "JAGUAR"), "atarilynx": ("hh", "boxy", "LYNX"), "atarist": ("pc", None, "ST"),
-    "atarixegs": ("pc", None, "XEGS"), "atomiswave": ("arcade", None, "AWAVE"), "bbcmicro": ("pc", None, "BBC"),
-    "cavestory": ("engine", None, "CAVE"), "cdimono1": ("disc", None, "CD-i"), "coleco": ("cart", None, "COLECO"),
-    "c128": ("pc", None, "C128"), "c16": ("pc", None, "C16"), "c64": ("pc", None, "C64"), "vic20": ("pc", None, "VIC-20"),
-    "cps1": ("arcade", None, "CPS1"), "cps2": ("arcade", None, "CPS2"), "cps3": ("arcade", None, "CPS3"),
-    "daphne": ("arcade", None, "LASER"), "doom": ("engine", None, "DOOM"), "dragon32": ("pc", None, "DRAGON"),
-    "dreamcast": ("disc", None, "DC"), "vmu": ("hv", None, "VMU"), "easyrpg": ("book", None, "RPG"),
-    "enterprise": ("pc", None, "ENT"), "channelf": ("cart", None, "CHAN-F"), "fds": ("disc", None, "FDS"),
-    "gameandwatch": ("lcd", None, "G&W"), "gb": ("hv", None, "GB"), "gba": ("hh", None, "GBA"), "gbc": ("hv", None, "GBC"),
-    "gamegear": ("hh", None, "GG"), "gc": ("disc", "cube", "GC"), "megadrive": ("cart", None, "MD"),
-    "intellivision": ("cart", None, "INTV"), "j2me": ("hh", "phone", "J2ME"), "lowresnx": ("fantasy", None, "LOWRES"),
-    "mame2003": ("arcade", None, "MAME"), "mame": ("arcade", None, "MAME"), "mastersystem": ("cart", None, "SMS"),
-    "megaduck": ("hv", "duck", "DUCK"), "msumd": ("cart", None, "MSU-MD"), "xbox": ("disc", "tower", "XBOX"),
-    "mv": ("hv", None, "MICROV"), "msx": ("pc", None, "MSX"), "msx2": ("pc", None, "MSX2"),
-    "naomi": ("arcade", None, "NAOMI"), "neogeo": ("arcade", None, "NEO GEO"), "neogeocd": ("disc", None, "NEO CD"),
-    "ngp": ("hh", None, "NGP"), "ngpc": ("hh", None, "NGPC"), "n64": ("cart", None, "N64"), "n64dd": ("disc", None, "64DD"),
-    "nds": ("clam", None, "NDS"), "nes": ("cart", None, "NES"), "switch": ("hh", "hybrid", "SWITCH"),
-    "wii": ("disc", "tower", "Wii"), "odyssey2": ("cart", None, "ODYSSEY"), "openbor": ("engine", None, "BOR"),
-    "palm": ("hh", "phone", "PALM"), "dos": ("pc", None, "DOS"), "pcenginecd": ("disc", None, "PCE-CD"),
-    "pcengine": ("cart", None, "PCE"), "pcfx": ("disc", "tower", "PC-FX"), "pc98": ("pc", None, "PC-98"),
-    "pico-8": ("fantasy", None, "PICO-8"), "psx": ("disc", None, "PS1"), "ps2": ("disc", "tower", "PS2"),
-    "ps3": ("disc", "tower", "PS3"), "psp": ("hh", "slim", "PSP"), "pspminis": ("hh", "slim", "MINIS"),
-    "psvita": ("hh", "slim", "VITA"), "pokemonmini": ("hv", None, "MINI"), "puzzlescript": ("fantasy", None, "PUZZLE"),
-    "satellaview": ("cart", None, "BS-X"), "scummvm": ("book", None, "SCUMM"), "sega32x": ("cart", "tall", "32X"),
-    "segacd": ("disc", None, "SEGA CD"), "pico": ("cart", None, "PICO"), "saturn": ("disc", None, "SATURN"),
-    "sg-1000": ("cart", None, "SG-1000"), "x1": ("pc", None, "X1"), "x68000": ("pc", None, "X68K"),
-    "solarus": ("engine", None, "SOLARUS"), "sufami": ("cart", None, "SUFAMI"), "scv": ("cart", None, "SCV"),
-    "sgb": ("hv", None, "SGB"), "supergrafx": ("cart", None, "SGX"), "snes": ("cart", None, "SNES"),
-    "snes-hacks": ("cart", None, "HACKS"), "snesmsu1": ("cart", None, "MSU-1"), "coco3": ("pc", None, "COCO3"),
-    "thomson": ("pc", None, "MO/TO"), "ti99": ("pc", None, "TI-99"), "tic80": ("fantasy", None, "TIC-80"),
-    "tigerlcd": ("lcd", None, "TIGER"), "uzebox": ("cart", None, "UZEBOX"), "vectrex": ("vectrex", None, "VECTREX"),
-    "videopac": ("cart", None, "G7000"), "tvc": ("pc", None, "TVC"), "vircon32": ("fantasy", None, "VIRCON"),
-    "virtualboy": ("goggles", None, "VB"), "onscripter": ("book", None, "ONS"), "wasm4": ("fantasy", None, "WASM-4"),
-    "supervision": ("hv", None, "SV"), "wolf": ("engine", None, "WOLF3D"), "wonderswan": ("hh", "boxy", "WS"),
-    "wonderswancolor": ("hh", "boxy", "WSC"), "zxspectrum": ("pc", None, "ZX"), "zx81": ("pc", None, "ZX81"),
-    "android": ("android", None, "ANDROID"), "search": ("search", None, None),
-}
-# Fallback for systems added to systems.json later.
-GUESS = [("cd", "disc"), ("arcade", "arcade"), ("pc", "pc"), ("lcd", "lcd")]
 
 
 # --------------------------------------------------------------------------------------
@@ -661,13 +470,14 @@ def battery_icon(level, charging=False):
 
 
 def system_icon(sid, selected):
-    dev, variant, badge = SYSTEMS.get(sid) or (next((v for k, v in GUESS if k in sid), "cart"), None, sid[:6].upper())
+    badge = BADGES.get(sid, sid[:7].upper())
     w, h = 120, 130
     im = canvas(w, h)
     d = ImageDraw.Draw(im)
     col = TEXT + (255,) if selected else GLYPH_N + (240,)
-    cy = 50 if badge else 62
-    DEVICES[dev](d, w / 2, cy, col, 3.6, variant)
+    cy = 52 if badge else 62
+    draw = GLYPHS.get(sid) or GLYPHS["fallback"]
+    draw(Pen(d, w / 2, cy, col, SS))
     out = finish(im)
     if selected:
         glow = Image.new("RGBA", out.size, (0, 0, 0, 0))
@@ -802,7 +612,7 @@ def main():
 
     systems = json.loads((ASSETS / "systems.json").read_text())["systems"]
     ids = [s["id"] for s in systems] + ["android", "search"]
-    missing = [i for i in ids if i not in SYSTEMS]
+    missing = [i for i in ids if i not in GLYPHS]
     for sid in ids:
         save(system_icon(sid, False), out / "icons" / f"{sid}.png")
         save(system_icon(sid, True), out / "icons/sel" / f"{sid}.png")
@@ -838,7 +648,7 @@ def main():
     (out / "readme.txt").write_text(
         "MainUI theme - generated by tools/theme/make_mainui_theme.py.\n"
         "Includes an icon for every system MainUI knows. Works as an OnionOS theme too.\n")
-    print(f"wrote {out} ({len(ids)} system icons{', guessed: ' + ', '.join(missing) if missing else ''})")
+    print(f"wrote {out} ({len(ids)} system icons{', generic picture for: ' + ', '.join(missing) if missing else ''})")
 
 
 if __name__ == "__main__":
