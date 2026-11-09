@@ -6,9 +6,20 @@ Android does well (fast standalone emulators, RetroArch, Android games and apps)
 and puts a Miyoo Mini style interface in front of it, so you rarely need the
 stock launcher.
 
-> Status: first public version. It builds and the unit tests pass, but it has
-> not been tested on real Retroid hardware yet. The emulator launch recipes in
-> particular need checking on a device; see [Known limitations](#known-limitations).
+> Status: first version. It builds, the unit tests pass, and the UI, theme loading,
+> game lists, search, Game Switcher and the Home-button in-game overlay were exercised
+> on an Android 11 emulator at the Mini V2's 1240x1080 resolution. It has **not** been
+> run on real Retroid hardware or with real emulators yet; see [Known limitations](#known-limitations).
+
+| Main menu | Games | Game list with box art |
+|---|---|---|
+| ![Main menu](docs/screenshots/main-menu.png) | ![Games grid](docs/screenshots/games-grid.png) | ![Game list](docs/screenshots/game-list.png) |
+
+| In-game menu (Home in a game) | Game Switcher |
+|---|---|
+| ![In-game menu](docs/screenshots/ingame-menu.png) | ![Game Switcher](docs/screenshots/game-switcher.png) |
+
+Screenshots use the built-in theme and placeholder roms; any OnionOS theme replaces the look.
 
 ## Features
 
@@ -177,9 +188,12 @@ The release APK is signed with the debug key so it can be sideloaded directly:
 
 ## Known limitations
 
-- **Not yet tested on hardware.** In particular the standalone emulator recipes (activity names and
-  extras) are based on what those emulators publicly document and on other frontends' configs. Some
-  will need adjusting; use `MainUI/emulators.json`.
+- **Not yet tested on hardware or with real emulators.** The standalone emulator recipes (activity
+  names and extras) are based on what those emulators publicly document and on other frontends'
+  configs. Some will need adjusting; use `MainUI/emulators.json`. The RetroArch UDP control path
+  (pause, save/load slots, quit) is implemented but was not tested against a running RetroArch.
+- Retroid's Home button must arrive as a normal `KEYCODE_HOME` key for the overlay to catch it.
+  Keys injected with `adb shell input` skip accessibility filters, so test with the real button.
 - ScreenScraper system IDs in `systems.json` were mapped by hand; a few rare systems may be wrong
   or missing (`null` = not scraped).
 - RetroArch core detection needs root (cores live in RetroArch's private storage). Without root every

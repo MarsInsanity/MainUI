@@ -58,7 +58,7 @@ open class ListScene(
         val itemH = if (list.large) 90f else 60f
         val bottom = host.logicalHeight - Gfx.FOOTER
         val rows = maxOf(1, ((bottom - Gfx.HEADER) / itemH).toInt())
-        val startY = bottom - rows * itemH
+        val startY = Gfx.HEADER + ((bottom - Gfx.HEADER) - rows * itemH) / 2f
         if (y < startY || y > bottom) {
             if (y > bottom) { activate(); return true }
             return false
@@ -185,7 +185,7 @@ class KeyboardScene(
         g.text(shown, g.theme.list, bx + 20f - scrollX, panelTop + 30f, color = textColor)
         if ((g.now / 500) % 2 == 0L) g.fillRect(bx + 20f + tw - scrollX, panelTop + 14f, 3f, 32f, textColor)
         g.c.restore()
-        g.wantsFrame = true
+        g.redrawAfter(500 - g.now % 500) // cursor blink
 
         val keyW = 52f; val keyH = 52f; val gap = 6f
         var y = panelTop + 80f
@@ -243,5 +243,4 @@ class KeyboardScene(
         return true
     }
 
-    override fun animating(now: Long) = true
 }

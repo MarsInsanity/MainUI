@@ -69,6 +69,7 @@ class OverlayService : AccessibilityService() {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName || pkg == "com.android.systemui" || pkg.contains("inputmethod")) return
+        if (pkg != foregroundPackage) Log.d(TAG, "foreground: $pkg")
         foregroundPackage = pkg
     }
 
@@ -84,7 +85,10 @@ class OverlayService : AccessibilityService() {
             if (event.action == KeyEvent.ACTION_UP) overlay?.dispatch(io.github.marsinsanity.mainui.ui.Btn.B, false)
             return true
         }
-        if (MainUI.settings.ingameTrigger != "home" || !gameInFront()) return false
+        if (MainUI.settings.ingameTrigger != "home" || !gameInFront()) {
+            if (event.action == KeyEvent.ACTION_DOWN) Log.d(TAG, "HOME passed through (fg=$foregroundPackage, session=${MainUI.sessions.active?.pkg})")
+            return false
+        }
         when (event.action) {
             KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) {
                 homeDownAt = event.eventTime
@@ -103,6 +107,7 @@ class OverlayService : AccessibilityService() {
     fun showMenu() {
         val s = MainUI.sessions.active ?: return
         if (overlay != null) return
+        Log.d(TAG, "showing in-game menu for ${s.name}")
         capture { bmp -> main.post { addOverlay { view -> InGameMenuScene(view, s, bmp, overlayMode = true) } } }
     }
 
@@ -147,12 +152,19 @@ class OverlayService : AccessibilityService() {
             PixelFormat.OPAQUE,
         ).apply {
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            // Cover the status / navigation bar area too so the screenshot lines up 1:1 with the game.
+            if (Build.VERSION.SDK_INT >= 30) fitInsetsTypes = 0
+            flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
         }
         runCatching {
             getSystemService(WindowManager::class.java).addView(view, lp)
             overlay = view
             view.setRoot(scene(view))
             view.requestFocus()
+            if (Build.VERSION.SDK_INT >= 30) view.windowInsetsController?.let {
+                it.hide(android.view.WindowInsets.Type.systemBars())
+                it.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
             MainUI.themes.pauseBgm()
         }.onFailure { Log.e(TAG, "addView failed", it) }
     }

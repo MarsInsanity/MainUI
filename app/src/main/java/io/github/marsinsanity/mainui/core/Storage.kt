@@ -57,16 +57,17 @@ class Storage(private val ctx: Context, private val settings: Settings) {
     /** All rom root folders that exist, SD card first. */
     fun romRoots(): List<File> {
         val roots = mutableListOf<File>()
+        // Shared storage is case-insensitive on Android, so probing "roms", "ROMs"...
+        // one by one would return the same folder several times. Use the real listing.
+        fun add(f: File) {
+            val key = f.canonicalPathOrSelf().lowercase()
+            if (f.isDirectory && roots.none { it.canonicalPathOrSelf().lowercase() == key }) roots += f
+        }
         for (v in volumes()) {
-            for (name in listOf("roms", "roms2", "ROMs", "Roms", "ROMS")) {
-                val f = File(v.dir, name)
-                if (f.isDirectory && roots.none { it.canonicalPathOrSelf() == f.canonicalPathOrSelf() }) roots += f
-            }
+            val children = v.dir.listFiles() ?: continue
+            for (name in listOf("roms", "roms2")) children.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let(::add)
         }
-        settings.extraRomRoots.lines().map { it.trim() }.filter { it.isNotEmpty() }.forEach {
-            val f = File(it)
-            if (f.isDirectory && roots.none { r -> r.canonicalPathOrSelf() == f.canonicalPathOrSelf() }) roots += f
-        }
+        settings.extraRomRoots.lines().map { it.trim() }.filter { it.isNotEmpty() }.forEach { add(File(it)) }
         return roots
     }
 

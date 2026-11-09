@@ -135,19 +135,20 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
 
     fun countGames(system: GameSystem): Int {
         var n = 0
-        fun walk(d: File, depth: Int) {
+        fun walk(d: File, depth: Int, gl: GameListXml) {
             val files = d.listFiles() ?: return
             val hidden = discFilesToHide(files)
             for (f in files) {
                 if (f.name.startsWith(".")) continue
                 if (f.isDirectory) {
                     if (depth < 3 && f.name.lowercase() !in MEDIA_FOLDERS && f.name.lowercase() !in SystemRegistry.IGNORED_FOLDERS) {
-                        if (f.extension.isNotEmpty() && system.def.accepts(f)) n++ else walk(f, depth + 1)
+                        if (f.extension.isNotEmpty() && system.def.accepts(f)) n++ else walk(f, depth + 1, gl)
                     }
-                } else if (system.def.accepts(f) && f.name != "gamelist.xml" && f.name.lowercase() !in hidden) n++
+                } else if (system.def.accepts(f) && f.name != "gamelist.xml" && f.name.lowercase() !in hidden &&
+                    gl.get(f)?.hidden != true) n++
             }
         }
-        system.dirs.forEach { walk(it, 0) }
+        system.dirs.forEach { walk(it, 0, gamelist(it)) }
         system.gameCount = n
         return n
     }

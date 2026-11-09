@@ -36,6 +36,8 @@ class Tile(
     val open: () -> Unit,
 )
 
+fun plural(n: Int, word: String) = if (n == 1) "1 $word" else "$n ${word}s"
+
 object HomeScenes {
     fun root(host: SceneHost): Scene =
         if (MainUI.settings.homeLayout == "carousel") CarouselScene(host, null, home = true) else MainMenuScene(host)
@@ -75,14 +77,14 @@ object HomeScenes {
         for (sys in systems) {
             if (!s.showEmptySystems && sys.gameCount == 0) continue
             out += Tile(sys.id, sys.name, "game", icons = sys.def.icons, short = sys.def.short,
-                sub = if (sys.gameCount >= 0) "${sys.gameCount} games" else null, system = sys,
+                sub = if (sys.gameCount >= 0) plural(sys.gameCount, "game") else null, system = sys,
                 open = { host.push(GameListScene(host, sys, null)) },
                 options = { systemOptions(host, sys) })
         }
         if (s.showAndroidSystem) {
             val n = MainUI.library.androidGames().size
             out += Tile("android", "Android", "android", icons = SystemDef.ANDROID.icons, short = "APK",
-                sub = "$n games", open = { host.push(AndroidGamesScene(host)) })
+                sub = plural(n, "game"), open = { host.push(AndroidGamesScene(host)) })
         }
         return out
     }
@@ -94,7 +96,7 @@ object HomeScenes {
             UiItem("Scrape artwork", onSelect = { host.push(ScraperScene(host, listOf(sys.id))) }),
             UiItem("Rescan folder", onSelect = {
                 MainUI.games.invalidate()
-                host.io({ MainUI.games.countGames(sys) }) { host.toast("${sys.name}: $it games") }
+                host.io({ MainUI.games.countGames(sys) }) { host.toast("${sys.name}: ${plural(it, "game")}") }
             }),
         )))
     }

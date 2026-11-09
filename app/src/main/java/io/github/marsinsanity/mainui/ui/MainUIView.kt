@@ -123,6 +123,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         }
         val now = System.currentTimeMillis()
         if (gfx.wantsFrame || stack.any { it.animating(now) }) postInvalidateOnAnimation()
+        else if (gfx.redrawIn > 0) postInvalidateDelayed(gfx.redrawIn)
     }
 
     // ---- battery --------------------------------------------------------------------------
@@ -167,10 +168,14 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         }
     }
 
-    private fun press(b: Btn) {
+    /**
+     * [timerRepeat]: synthesize auto-repeat ourselves. Only needed for axis input
+     * (hat / stick); key events already get Android's own key repeat.
+     */
+    private fun press(b: Btn, timerRepeat: Boolean) {
         if (!held.add(b)) return
         dispatch(b, false)
-        if (b.isDirection || b == Btn.L1 || b == Btn.R1) {
+        if (timerRepeat && (b.isDirection || b == Btn.L1 || b == Btn.R1)) {
             repeatBtn = b
             handler.removeCallbacks(repeatRunnable)
             handler.postDelayed(repeatRunnable, REPEAT_DELAY)
@@ -221,7 +226,10 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val b = mapKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
         when (event.action) {
-            KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) press(b)
+            KeyEvent.ACTION_DOWN -> when {
+                event.repeatCount == 0 -> press(b, timerRepeat = false)
+                b.isDirection || b == Btn.L1 || b == Btn.R1 -> dispatch(b, true)
+            }
             KeyEvent.ACTION_UP -> release(b)
         }
         return true
@@ -253,7 +261,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     private fun axis(b: Btn, down: Boolean) {
         if (axisState[b] == down) return
         axisState[b] = down
-        if (down) press(b) else release(b)
+        if (down) press(b, timerRepeat = true) else release(b)
     }
 
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
