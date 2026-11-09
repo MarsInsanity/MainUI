@@ -1,0 +1,29 @@
+{
+    "name": "MainUI Default",
+    "author": "MainUI",
+    "description": "Built-in theme. Drop OnionOS themes into <storage>/Themes to replace it.",
+    "hideLabels": { "icons": false, "hints": false },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "Exo-2-Bold-Italic.ttf",
+        "size": 20,
+        "color": "#FFFFFF",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": { "font": "Exo-2-Bold-Italic.ttf", "size": 32, "color": "#FFFFFF" },
+    "hint": { "font": "Exo-2-Bold-Italic.ttf", "size": 34, "color": "#FFFFFF" },
+    "currentpage": { "color": "#C8312B" },
+    "total": { "color": "#FFFFFF" },
+    "grid": {
+        "font": "Exo-2-Bold-Italic.ttf",
+        "grid1x4": 26,
+        "grid3x4": 18,
+        "color": "#8A8A8A",
+        "selectedcolor": "#FFFFFF"
+    },
+    "list": { "font": "BPreplayBold.otf", "size": 26, "color": "#FFFFFF" },
+    "mainui": { "accent": "#C8312B", "panel": "#EB18181A", "background": "#1E1E20" }
+}

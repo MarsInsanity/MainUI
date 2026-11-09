@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- roms can live on any volume (internal storage or SD card) -->
+    <root-path name="root" path="/" />
+    <external-path name="external" path="." />
+</paths>
