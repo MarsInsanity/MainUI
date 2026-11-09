@@ -106,7 +106,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val cached = dirCache[dir.absolutePath]
         if (cached != null && cached.mtime == dir.lastModified() && cached.metaStamp == stamp) return cached.games
         val files = dir.listFiles() ?: return emptyList()
-        val hiddenByCue = discFilesToHide(files)
+        val hiddenByCue = discFilesToHide(files) + unpackedZips(system, files)
         val out = ArrayList<Game>(files.size)
         for (f in files) {
             val n = f.name
@@ -154,6 +154,15 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
     fun systemRootFor(system: GameSystem, dir: File): File =
         system.dirs.firstOrNull { dir.absolutePath == it.absolutePath || dir.absolutePath.startsWith(it.absolutePath + "/") } ?: dir
 
+    /** Zips whose image was unpacked beside them for launching (Xbox, see ZipImages): only the image is listed. */
+    private fun unpackedZips(system: GameSystem, files: Array<File>): Set<String> {
+        val types = system.def.unzip
+        if (types.isEmpty()) return emptySet()
+        val names = files.mapTo(HashSet()) { it.name.lowercase() }
+        return files.filter { f -> f.extension.equals("zip", true) && types.any { t -> "${f.nameWithoutExtension}.$t".lowercase() in names } }
+            .mapTo(HashSet()) { it.name.lowercase() }
+    }
+
     /** Hide .bin/.img tracks referenced by .cue and discs referenced by .m3u. */
     private fun discFilesToHide(files: Array<File>): Set<String> {
         val hide = HashSet<String>()
@@ -184,7 +193,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val others = HashMap<String, Int>()
         fun walk(d: File, depth: Int, gl: MetaLookup) {
             val files = d.listFiles() ?: return
-            val hidden = discFilesToHide(files)
+            val hidden = discFilesToHide(files) + unpackedZips(system, files)
             for (f in files) {
                 if (f.name.startsWith(".")) continue
                 if (f.isDirectory) {

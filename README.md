@@ -119,8 +119,12 @@ Differences from a Miyoo Mini, due to the screen:
   top and bottom, content is centred, and lists show one extra row.
 - Systems whose folders are empty stay hidden (unless *Show empty systems*), but a folder with files
   MainUI can't play is shown as "no playable files", and opening it lists what it found and what that
-  system takes ("Found: 2 .7z, 1 .xbe / XBOX games must be: .iso .xiso"): hakuX, the Xbox emulator,
-  only opens ISO / XISO images, not archives or extracted games.
+  system takes ("Found: 2 .7z, 1 .xbe / XBOX games must be: .iso .xiso .cso .cci .zip").
+- **Xbox games in .zip files**: hakuX opens .iso / .xiso / .cso / .cci images but no archives, so the
+  first time a zipped game is started MainUI offers to unpack its image next to the zip
+  (`Halo.zip` -> `Halo.iso`; progress on screen, B stops, free space checked first, never a half
+  written image left behind), then asks whether to delete the zip, and launches. From then on the
+  image is launched and the zip is no longer listed. Systems opt in with `"unzip"` in systems.json.
 - The top bar clock (Settings > User interface > *Show clock*) is 24-hour, 12-hour or like Android's
   own setting (*Clock format*).
 - Backgrounds are cropped to fill the screen by default (Settings > User interface > Background fit:

@@ -17,6 +17,8 @@ data class SystemDef(
     /** Theme icon basenames to try, in order (dArkOS name first, Onion alias second). */
     val icons: List<String>,
     val short: String,
+    /** Image types its emulators open that MainUI unpacks from a .zip before launching (Xbox). */
+    val unzip: Set<String> = emptySet(),
 ) {
     fun accepts(file: File): Boolean {
         if (extensions.isEmpty()) return true
@@ -69,6 +71,7 @@ class SystemRegistry(ctx: Context, private val storage: Storage) {
                 screenscraperId = if (o.isNull("screenscraper")) null else o.optInt("screenscraper"),
                 icons = o.getJSONArray("icons").strings(),
                 short = o.optString("short", o.getString("id").uppercase()),
+                unzip = o.optJSONArray("unzip")?.strings()?.map { it.lowercase() }?.toSet() ?: emptySet(),
             )
         }
         defs = list

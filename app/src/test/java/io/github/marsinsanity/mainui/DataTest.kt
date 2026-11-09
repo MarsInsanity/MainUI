@@ -820,3 +820,41 @@ class ExtraCoreUrlTest {
             io.github.marsinsanity.mainui.emu.RetroArchCores.extraZip("yabadabadoo", "arm64-v8a"))
     }
 }
+
+class ZipImagesTest {
+    private val z = io.github.marsinsanity.mainui.emu.ZipImages
+    private val types = setOf("iso", "xiso", "cso", "cci")
+
+    private fun zip(dir: File, name: String, entries: Map<String, Int>): File {
+        val f = File(dir, name)
+        java.util.zip.ZipOutputStream(f.outputStream()).use { out ->
+            for ((n, size) in entries) { out.putNextEntry(java.util.zip.ZipEntry(n)); out.write(ByteArray(size) { (it % 251).toByte() }); out.closeEntry() }
+        }
+        return f
+    }
+
+    @Test fun unpacksTheImageBesideTheZipOnce() {
+        val dir = java.nio.file.Files.createTempDirectory("zi").toFile()
+        val f = zip(dir, "Halo.zip", mapOf("readme.txt" to 10, "Halo - Combat Evolved (USA).iso" to 300_000))
+        assertNull(z.unpacked(f, types))
+        assertEquals("Halo - Combat Evolved (USA).iso" to 300_000L, z.entry(f, types))
+        val img = z.unpack(f, types, { _, _ -> }, { false })
+        assertEquals("Halo.iso", img.name)
+        assertEquals(300_000L, img.length())
+        assertEquals(img, z.unpacked(f, types))
+        assertTrue(dir.list()!!.none { it.endsWith(".part") })
+        dir.deleteRecursively()
+    }
+
+    @Test fun stoppedOrWrongZipsLeaveNothingBehind() {
+        val dir = java.nio.file.Files.createTempDirectory("zi").toFile()
+        val f = zip(dir, "Fable.zip", mapOf("Fable.xiso" to 3_000_000))
+        val stopped = runCatching { z.unpack(f, types, { _, _ -> }, { true }) }
+        assertTrue(stopped.isFailure)
+        assertEquals(listOf("Fable.zip"), dir.list()!!.toList())
+        val none = zip(dir, "Docs.zip", mapOf("manual.pdf" to 100))
+        assertNull(z.entry(none, types))
+        assertTrue(runCatching { z.unpack(none, types, { _, _ -> }, { false }) }.exceptionOrNull()!!.message!!.contains("holds no"))
+        dir.deleteRecursively()
+    }
+}

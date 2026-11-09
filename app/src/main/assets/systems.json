@@ -1355,7 +1355,16 @@
    ],
    "extensions": [
     "iso",
-    "xiso"
+    "xiso",
+    "cso",
+    "cci",
+    "zip"
+   ],
+   "unzip": [
+    "iso",
+    "xiso",
+    "cso",
+    "cci"
    ],
    "emulators": [
     "sa:hakux"
