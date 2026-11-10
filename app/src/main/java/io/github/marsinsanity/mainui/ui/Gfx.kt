@@ -72,6 +72,13 @@ class Gfx {
     val cx0 get() = (W - 640f) / 2f
 
     companion object {
+        /** How many items one page dot stands for so [count] dots of [step] px fit in [room] px. */
+        fun dotsPerGroup(count: Int, step: Float, room: Float): Int {
+            if (count <= 0 || step <= 0f) return 1
+            val fit = kotlin.math.max(1, (room / step).toInt())
+            return kotlin.math.max(1, (count + fit - 1) / fit)
+        }
+
         const val HEADER = 60f
         const val FOOTER = 60f
         /** Smallest gap between the battery indicator and the right edge of the screen. */
@@ -463,11 +470,18 @@ class Gfx {
     }
 
     /** Page dots (dot-a / dot-n). */
-    fun dots(count: Int, active: Int, cy: Float) {
-        if (count <= 1) return
+    /**
+     * Page dots, one per item. When they don't fit in [maxW] (a long row of systems), one dot
+     * stands for a group of items, like pages.
+     */
+    fun dots(itemCount: Int, activeItem: Int, cy: Float, maxW: Float = W - 40f) {
         val a = skin("dot-a"); val n = skin("dot-n")
         val dw = (a?.width ?: 14).toFloat()
         val gap = 10f
+        val per = dotsPerGroup(itemCount, dw + gap, maxW + gap)
+        val count = (itemCount + per - 1) / per
+        val active = activeItem / per
+        if (count <= 1) return
         val total = count * dw + (count - 1) * gap
         var x = W / 2 - total / 2
         for (i in 0 until count) {
@@ -656,10 +670,15 @@ class Gfx {
 
     /** Main menu tile replacement for ic-<name>-n/f (156x278). */
     fun menuTile(kind: String, x: Float, y: Float, w: Float, h: Float, selected: Boolean) {
-        val bgCol = if (selected) withAlpha(theme.accent, 235) else Color.argb(38, 255, 255, 255)
-        fillRect(x + 6, y + 6, w - 12, h - 12, bgCol, 18f)
+        menuTileBox(x, y, w, h, selected)
         val cx = x + w / 2; val cy = y + h * 0.36f
         glyph(kind, cx, cy, w * 0.26f, if (selected) Color.WHITE else Color.argb(200, 255, 255, 255))
+    }
+
+    /** The rounded box of a top-level page tile (accent when selected). */
+    fun menuTileBox(x: Float, y: Float, w: Float, h: Float, selected: Boolean) {
+        val bgCol = if (selected) withAlpha(theme.accent, 235) else Color.argb(38, 255, 255, 255)
+        fillRect(x + 6, y + 6, w - 12, h - 12, bgCol, 18f)
     }
 
     /** Simple vector glyphs for built-in tiles and app icons. */

@@ -69,12 +69,17 @@ object HomeScenes {
         if (err != null) host.toast(err)
     }
 
-    /** Tiles for the systems grid / row: Search, every system with games, Android. */
+    /** Tiles for the systems grid / row: Search, Android, then every system with games. */
     fun systemTiles(host: SceneHost, systems: List<GameSystem>, includeSearch: Boolean): List<Tile> {
         val s = MainUI.settings
         val out = mutableListOf<Tile>()
         if (includeSearch && s.showSearchTile) out += Tile("search", "Search", "search", icons = listOf("search"), short = "?") {
             SearchFlow.start(host)
+        }
+        if (s.showAndroidSystem) {
+            val n = MainUI.library.androidGames().size
+            out += Tile("android", "Android", "android", icons = SystemDef.ANDROID.icons, short = "APK",
+                sub = plural(n, "game"), open = { host.push(AndroidGamesScene(host)) })
         }
         for (sys in systems) {
             // Empty folders stay hidden; a folder with files MainUI can't play is shown so it can say why,
@@ -91,11 +96,6 @@ object HomeScenes {
                 }, system = sys,
                 open = { host.push(GameListScene(host, sys, null)) },
                 options = { systemOptions(host, sys) })
-        }
-        if (s.showAndroidSystem) {
-            val n = MainUI.library.androidGames().size
-            out += Tile("android", "Android", "android", icons = SystemDef.ANDROID.icons, short = "APK",
-                sub = plural(n, "game"), open = { host.push(AndroidGamesScene(host)) })
         }
         return out
     }
@@ -157,6 +157,96 @@ object HomeScenes {
 }
 
 /**
+ * The top-level page's row of tall tiles: [VISIBLE] side by side, the window sliding smoothly
+ * to keep the selection in view, page dots below (one per tile, or per group when they don't
+ * fit). Used by the top-level page and the Games screen's row view, so both look the same.
+ */
+class TileStrip {
+    /** The leftmost tile in view. */
+    var first = 0
+        private set
+    /** Follows [first] smoothly, in tiles. */
+    private var scroll = Float.NaN
+    private var lastFrame = 0L
+
+    fun follow(index: Int, count: Int) {
+        if (index < first) first = index
+        if (index >= first + VISIBLE) first = index - VISIBLE + 1
+        first = first.coerceIn(0, max(0, count - VISIBLE))
+    }
+
+    /** Fewer tiles than the window: centered. */
+    private fun x0(width: Float, count: Int) =
+        (width - 640f) / 2f + 8f + if (count < VISIBLE) (VISIBLE - count) * TILE_W / 2 else 0f
+
+    fun draw(g: Gfx, count: Int, index: Int, tile: (idx: Int, x: Float, y: Float, w: Float, h: Float, sel: Boolean) -> Unit) {
+        val y = TOP + g.cy0
+        val x0 = x0(g.W, count)
+        // Ease towards the target window (about 120 ms), then stop redrawing.
+        if (scroll.isNaN()) scroll = first.toFloat()
+        val dt = if (lastFrame == 0L) 16L else (g.now - lastFrame).coerceIn(1L, 50L)
+        lastFrame = g.now
+        val target = first.toFloat()
+        scroll += (target - scroll) * (1f - Math.pow(0.001, dt / 120.0).toFloat())
+        if (kotlin.math.abs(target - scroll) < 0.01f) { scroll = target; lastFrame = 0L } else g.redrawAfter(16)
+
+        val from = kotlin.math.floor(scroll).toInt().coerceAtLeast(0)
+        val to = min(count - 1, kotlin.math.ceil(scroll).toInt() + VISIBLE - 1)
+        for (idx in from..to) {
+            val x = x0 + (idx - scroll) * TILE_W
+            if (x + TILE_W < 0f || x > g.W) continue
+            tile(idx, x, y, TILE_W, TILE_H, idx == index)
+        }
+        // So it's clear more tiles are to the side.
+        if (count > VISIBLE) g.dots(count, index, DOTS_Y + g.cy0)
+    }
+
+    /** The tile at [x] (a tap), or null. */
+    fun hit(x: Float, width: Float, count: Int): Int? {
+        val col = kotlin.math.floor((x - x0(width, count)) / TILE_W).toInt()
+        if (col !in 0 until VISIBLE) return null
+        return (first + col).takeIf { it in 0 until count }
+    }
+
+    companion object {
+        const val VISIBLE = 4
+        const val TILE_W = 156f
+        const val TILE_H = 278f
+        const val TOP = 90f
+        const val DOTS_Y = 396f
+
+        /**
+         * A system (or Search / Android) as a top-level page tile: the same rounded box, its theme
+         * icon in it (or the built-in system tile), the label in the grid1x4 font, its game count.
+         */
+        fun drawSystem(g: Gfx, t: Tile, x: Float, y: Float, w: Float, h: Float, sel: Boolean) {
+            val img = t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
+            if (img != null) g.bmp(img, x, y, w, h)
+            else {
+                g.menuTileBox(x, y, w, h, sel)
+                val cx = x + w / 2; val cy = y + h * 0.36f
+                val box = w * 0.66f
+                val icon = HomeScenes.tileIcon(g, t, sel)
+                when {
+                    icon != null -> g.bmpFit(icon, cx - box / 2, cy - box / 2, box, box)
+                    t.glyph == "game" -> g.systemTile(t.short, cx - box / 2, cy - box * 0.38f, box, box * 0.76f, sel)
+                    else -> g.glyph(t.glyph, cx, cy, w * 0.26f, if (sel) Color.WHITE else Color.argb(200, 255, 255, 255))
+                }
+            }
+            if (g.theme.hideIconLabels) return
+            val gs = g.theme.grid
+            g.text(t.label, io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size1x4, gs.color),
+                x + w / 2, y + 195f, Align.CENTER, maxW = w - 12f, color = if (sel) gs.selectedColor else gs.color, marquee = sel)
+            t.sub?.let { sub ->
+                g.text(sub, io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size3x4 * 0.8f, gs.color),
+                    x + w / 2, y + 226f, Align.CENTER, maxW = w - 12f,
+                    color = if (sel) gs.selectedColor else Color.argb(170, Color.red(gs.color), Color.green(gs.color), Color.blue(gs.color)))
+            }
+        }
+    }
+}
+
+/**
  * OnionOS main menu: 4 tiles per page (ic-*-n / ic-*-f), labels in the grid1x4
  * font, page dots, logo in the header.
  */
@@ -167,18 +257,11 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
     /**
      * The tiles sit in one continuous row and a window of [VISIBLE] slides along it
      * to keep the selection in view (instead of OnionOS's pages of four, which left
-     * a mostly empty last page). [first] is the leftmost visible tile; [scroll]
-     * follows it smoothly, in tiles.
+     * a mostly empty last page).
      */
-    private var first = 0
-    private var scroll = Float.NaN
-    private var lastFrame = 0L
+    private val strip = TileStrip()
 
-    private fun follow() {
-        if (index < first) first = index
-        if (index >= first + VISIBLE) first = index - VISIBLE + 1
-        first = first.coerceIn(0, max(0, tiles.size - VISIBLE))
-    }
+    private fun follow() = strip.follow(index, tiles.size)
 
     init { follow(); checkForUpdate() }
 
@@ -209,26 +292,8 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
     override fun draw(g: Gfx) {
         g.background()
         g.header(null, logo = true)
-        val tileW = TILE_W; val tileH = 278f
-        val y = 90f + g.cy0
-        // Fewer tiles than the window: center them.
-        val x0 = g.cx0 + 8f + if (tiles.size < VISIBLE) (VISIBLE - tiles.size) * tileW / 2 else 0f
-
-        // Ease towards the target window (about 120 ms), then stop redrawing.
-        if (scroll.isNaN()) scroll = first.toFloat()
-        val dt = if (lastFrame == 0L) 16L else (g.now - lastFrame).coerceIn(1L, 50L)
-        lastFrame = g.now
-        val target = first.toFloat()
-        scroll += (target - scroll) * (1f - Math.pow(0.001, dt / 120.0).toFloat())
-        if (kotlin.math.abs(target - scroll) < 0.01f) { scroll = target; lastFrame = 0L } else g.redrawAfter(16)
-
-        val from = kotlin.math.floor(scroll).toInt().coerceAtLeast(0)
-        val to = min(tiles.size - 1, kotlin.math.ceil(scroll).toInt() + VISIBLE - 1)
-        for (idx in from..to) {
+        strip.draw(g, tiles.size, index) { idx, x, y, tileW, tileH, sel ->
             val t = tiles[idx]
-            val sel = idx == index
-            val x = x0 + (idx - scroll) * tileW
-            if (x + tileW < 0f || x > g.W) continue
             val img = t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
             if (img != null) g.bmp(img, x, y, tileW, tileH) else g.menuTile(t.glyph, x, y, tileW, tileH, sel)
             if (!g.theme.hideIconLabels) {
@@ -238,8 +303,6 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
                     color = if (sel) gs.selectedColor else gs.color)
             }
         }
-        // One dot per tile, so it's clear more tiles are to the side.
-        if (tiles.size > VISIBLE) g.dots(tiles.size, index, 396f + g.cy0)
         g.footer("SELECT", null)
     }
 
@@ -266,19 +329,14 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
     }
 
     override fun onTap(x: Float, y: Float): Boolean {
-        val w = host.logicalWidth
-        val x0 = (w - 640f) / 2f + 8f + if (tiles.size < VISIBLE) (VISIBLE - tiles.size) * TILE_W / 2 else 0f
-        val col = kotlin.math.floor((x - x0) / TILE_W).toInt()
-        if (col !in 0 until VISIBLE) return false
-        val idx = first + col
-        if (idx !in tiles.indices) return false
+        val idx = strip.hit(x, host.logicalWidth, tiles.size) ?: return false
         if (idx == index) tiles[idx].open() else { index = idx; follow(); MainUI.settings.mainMenuIndex = index }
         return true
     }
 
     companion object {
-        const val VISIBLE = 4
-        const val TILE_W = 156f
+        const val VISIBLE = TileStrip.VISIBLE
+        const val TILE_W = TileStrip.TILE_W
     }
 }
 
@@ -373,15 +431,18 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
 }
 
 /**
- * Row view: the games grid's own cells (bg-game-item-f/n, icon, label) in a
- * single row that scrolls sideways. [home] = top level screen (main menu
- * entries + systems), otherwise systems only. Replaces the old carousel.
+ * Row view: a single row of tiles that scrolls sideways. [home] = top level screen (main menu
+ * entries + systems) in the games grid's own cells (bg-game-item-f/n, icon, label). Otherwise
+ * the Games screen: systems as the top-level page's tall tiles with its page dots ([TileStrip]).
+ * Replaces the old carousel.
  */
 class RowScene(host: SceneHost, private val title: String?, private val home: Boolean) : Scene(host) {
     private var tiles: List<Tile> = emptyList()
     private var index = if (home) MainUI.settings.mainMenuIndex else MainUI.settings.systemsIndex
     private var first = 0
     private var loading = true
+    /** The Games screen looks like the top-level page. */
+    private val strip = if (home) null else TileStrip()
 
     override fun onEnter() = reload(false)
     override fun onResume() = reload(false)
@@ -400,7 +461,7 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
         }
     }
 
-    private fun visible(w: Float) = max(1, ((w - 20f) / HomeScenes.CELL_W).toInt())
+    private fun visible(w: Float) = if (strip != null) TileStrip.VISIBLE else max(1, ((w - 20f) / HomeScenes.CELL_W).toInt())
 
     private fun scrollTo(vis: Int) {
         if (index < first) first = index
@@ -415,6 +476,12 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
             g.text(if (loading) "Loading..." else "No roms found. Put games in <storage>/roms/<system>/",
                 g.theme.list, g.W / 2, g.H / 2, Align.CENTER, maxW = g.W - 40f)
             g.footer(null, if (home) null else "BACK"); return
+        }
+        if (strip != null) {
+            strip.follow(index, tiles.size)
+            strip.draw(g, tiles.size, index) { idx, x, y, w, h, sel -> TileStrip.drawSystem(g, tiles[idx], x, y, w, h, sel) }
+            g.footer("SELECT", "BACK")
+            return
         }
         val vis = visible(g.W)
         scrollTo(vis)
@@ -456,9 +523,10 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
     /** Dragging the row moves the selection a cell at a time. */
     override fun onDrag(dx: Float, dy: Float): Boolean {
         if (dragAcc == 0f && kotlin.math.abs(dy) > kotlin.math.abs(dx)) return false
+        val step = (if (strip != null) TileStrip.TILE_W else HomeScenes.CELL_W) / 2
         dragAcc += dx
-        while (dragAcc <= -HomeScenes.CELL_W / 2) { if (index < tiles.size - 1) index++; dragAcc += HomeScenes.CELL_W / 2 }
-        while (dragAcc >= HomeScenes.CELL_W / 2) { if (index > 0) index--; dragAcc -= HomeScenes.CELL_W / 2 }
+        while (dragAcc <= -step) { if (index < tiles.size - 1) index++; dragAcc += step }
+        while (dragAcc >= step) { if (index > 0) index--; dragAcc -= step }
         return true
     }
 
@@ -467,6 +535,11 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
 
     override fun onTap(x: Float, y: Float): Boolean {
         if (tiles.isEmpty()) return false
+        if (strip != null) {
+            val idx = strip.hit(x, host.logicalWidth, tiles.size) ?: return false
+            if (idx == index) tiles[idx].open() else { index = idx; MainUI.settings.systemsIndex = index }
+            return true
+        }
         val vis = visible(host.logicalWidth)
         val count = min(vis, tiles.size)
         val x0 = (host.logicalWidth - count * HomeScenes.CELL_W) / 2

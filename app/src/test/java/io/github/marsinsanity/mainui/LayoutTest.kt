@@ -22,4 +22,14 @@ class LayoutTest {
         assertEquals(480f, h, 0.01f)
         assertEquals(853.3f, w, 0.1f)
     }
+
+    @Test fun pageDotsGroupTilesOnlyWhenTheyDontFit() {
+        // Dots 14 px + 10 px gap on a 600 px wide row: 25 fit.
+        assertEquals(1, Gfx.dotsPerGroup(6, 24f, 610f))
+        assertEquals(1, Gfx.dotsPerGroup(25, 24f, 610f))
+        assertEquals(2, Gfx.dotsPerGroup(26, 24f, 610f))
+        assertEquals(2, Gfx.dotsPerGroup(50, 24f, 610f))
+        assertEquals(3, Gfx.dotsPerGroup(51, 24f, 610f))
+        assertEquals(1, Gfx.dotsPerGroup(0, 24f, 610f))
+    }
 }
