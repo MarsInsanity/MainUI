@@ -35,7 +35,7 @@
   "standalone": [
     {
       "id": "armsx2", "name": "ARMSX2",
-      "get": { "page": "https://armsx2.net", "play": "come.nanodata.armsx2" },
+      "get": { "github": "ARMSX2/ARMSX2", "page": "https://armsx2.net" },
       "components": [
         "come.nanodata.armsx2/com.armsx2.MainActivity",
         "com.armsx2/.MainActivity",
