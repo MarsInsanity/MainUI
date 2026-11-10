@@ -15,6 +15,11 @@ import java.net.SocketTimeoutException
 interface GameController {
     /** Blocking capability probe (network). Called before [states] is read; never on the UI thread. */
     fun prepare() {}
+    /**
+     * [prepare] ahead of time, as soon as the game is in front (it may still be starting up, so
+     * an answer that it isn't there yet must not be taken as final).
+     */
+    fun warmUp() = prepare()
     val states: StateSupport
     /** True when save/load can address slots 0-9 (RetroArch). */
     val hasSlots: Boolean
@@ -158,8 +163,14 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     private var frozenGen = -1
 
     override fun prepare() {
-        if (reachable == null) reachable = probe()
+        if (reachable == null) reachable = probe(rememberNo = true)
         // Official builds: keyboard hotkeys through MainUI's virtual keyboard (needs root).
+        if (reachable == false && Root.available()) io.github.marsinsanity.mainui.core.VirtualKeys.warmUp()
+    }
+
+    /** Right after the game appears RetroArch may not listen yet: a "no" isn't remembered then. */
+    override fun warmUp() {
+        if (reachable == null) reachable = probe(rememberNo = false)
         if (reachable == false && Root.available()) io.github.marsinsanity.mainui.core.VirtualKeys.warmUp()
     }
     private val api get() = reachable == true
@@ -209,12 +220,12 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
      * port: every menu open makes a new controller, and official builds never answer, so asking
      * each time would hold every HOME press up by the full timeout.
      */
-    private fun probe(): Boolean {
+    private fun probe(rememberNo: Boolean): Boolean {
         val key = "$pkg:$port"
         val now = android.os.SystemClock.elapsedRealtime()
         probes[key]?.let { (ok, at) -> if (now - at < if (ok) 30 * 60_000L else 10 * 60_000L) return ok }
         val ok = status() != null
-        probes[key] = ok to now
+        if (ok || rememberNo) probes[key] = ok to now
         return ok
     }
 

@@ -169,8 +169,10 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
                 legendUntil = System.currentTimeMillis() + 2000
             }
             Btn.UP, Btn.DOWN -> {
-                brightness = (brightness + if (b == Btn.UP) 1 else -1).coerceIn(1, 10) // 10%..100%, as Settings > Device
-                Brightness.set(ctx, brightness)
+                // 10%..100%, as Settings > Device. Below 10% already (dimmed in Android): DOWN
+                // leaves it alone rather than raising it to 10%.
+                val next = (brightness + if (b == Btn.UP) 1 else -1).coerceIn(1, 10)
+                if (b == Btn.UP || next < brightness) { brightness = next; Brightness.set(ctx, brightness) }
                 brightnessUntil = System.currentTimeMillis() + 1500
             }
             else -> return false

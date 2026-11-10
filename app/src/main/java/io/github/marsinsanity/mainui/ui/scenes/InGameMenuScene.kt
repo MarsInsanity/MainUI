@@ -285,8 +285,10 @@ class InGameMenuScene(
     private fun leaveThen(delayMs: Long, after: () -> Unit) {
         resumeOnce()
         closeMenu()
-        if (!overlayMode) MainUI.sessions.resume()
         Thread {
+            // Fallback menu: bring the game back first (off the UI thread resume() finishes the
+            // task switch before returning), so the delay counts from when the game is in front.
+            if (!overlayMode) MainUI.sessions.resume()
             Thread.sleep(delayMs)
             runCatching(after).onFailure { Log.w("MainUI.InGame", "action failed", it) }
         }.start()

@@ -89,8 +89,12 @@ class SessionManager(
     }.getOrNull()?.takeIf { it.startedAt >= bootTime() - 60_000 }
         private set
 
-    /** The last thing MainUI started was the game session (not another app): HOME then means "in the game". */
-    @Volatile var lastStartWasSession = active != null
+    /**
+     * When MainUI last brought the session's game to the front (started or resumed it), uptime ms.
+     * MainActivity compares it with its own pause to tell "left for the game" from "left for
+     * another app" (any other app MainUI opens: settings panels, the process manager...).
+     */
+    @Volatile var shownAt = 0L
         private set
 
     private fun bootTime() = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()
@@ -132,7 +136,6 @@ class SessionManager(
         return try {
             ctx.startActivity(intent)
             launchedPackages += pkg
-            if (!asGame) lastStartWasSession = false
             if (asGame) {
                 val g = Game(SystemDef.ANDROID.id, null, label, pkg = pkg)
                 endActive()
@@ -148,7 +151,7 @@ class SessionManager(
 
     private fun begin(s: Session) {
         synchronized(this) { active = s }
-        lastStartWasSession = true
+        shownAt = android.os.SystemClock.uptimeMillis()
         launchedPackages += s.pkg
         persist()
     }
@@ -177,7 +180,7 @@ class SessionManager(
      */
     fun resume(): Boolean {
         val s = active ?: return false
-        lastStartWasSession = true
+        shownAt = android.os.SystemClock.uptimeMillis()
         // The task lookup runs root commands: never on the UI thread (it can wait seconds for the shell).
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
             Thread({ resumeSession(s) }, "resume").start()

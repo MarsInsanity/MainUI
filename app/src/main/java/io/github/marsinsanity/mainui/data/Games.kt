@@ -130,7 +130,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val cached = dirCache[dir.absolutePath]
         if (cached != null && cached.mtime == dir.lastModified() && cached.metaStamp == stamp) return cached.games
         val files = dir.listFiles() ?: return emptyList()
-        val hiddenByCue = discFilesToHide(files) + unpackedZips(system, files)
+        val hiddenByCue = discFilesToHide(system, files) + unpackedZips(system, files)
         val out = ArrayList<Game>(files.size)
         for (f in files) {
             val n = f.name
@@ -188,7 +188,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
     }
 
     /** Hide .bin/.img tracks referenced by .cue and discs referenced by .m3u. */
-    private fun discFilesToHide(files: Array<File>): Set<String> {
+    private fun discFilesToHide(system: GameSystem, files: Array<File>): Set<String> {
         val hide = HashSet<String>()
         for (f in files) {
             val ext = f.extension.lowercase()
@@ -202,6 +202,10 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
                         }
                     }
                 }
+            } else if ((ext == "ccd" || ext == "mds") && system.def.accepts(f)) {
+                // CloneCD (.ccd + .img + .sub) and Alcohol (.mds + .mdf): the descriptor is the game.
+                val base = f.nameWithoutExtension.lowercase()
+                if (ext == "ccd") { hide += "$base.img"; hide += "$base.sub" } else hide += "$base.mdf"
             } else if (ext == "m3u") {
                 runCatching {
                     f.useLines { lines -> lines.take(50).map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
@@ -217,7 +221,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val others = HashMap<String, Int>()
         fun walk(d: File, depth: Int, gl: MetaLookup) {
             val files = d.listFiles() ?: return
-            val hidden = discFilesToHide(files) + unpackedZips(system, files)
+            val hidden = discFilesToHide(system, files) + unpackedZips(system, files)
             for (f in files) {
                 if (f.name.startsWith(".")) continue
                 if (f.isDirectory) {

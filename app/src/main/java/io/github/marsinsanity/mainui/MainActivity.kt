@@ -27,6 +27,9 @@ class MainActivity : Activity() {
         private set
     private var resumed = false
     private var leftForSession = false
+    /** The last pause was MainUI bringing the game to the front (see SessionManager.shownAt). */
+    private var leftForGame = false
+    private var resumedAt = 0L
     /** Set when we were brought forward on purpose while the game keeps running. */
     private var keepSession = false
 
@@ -83,7 +86,7 @@ class MainActivity : Activity() {
             // With the overlay running, HOME only gets here when the game wasn't in front (it
             // handles HOME in games itself), and after starting another app it isn't "in the game".
             // (Long presses can't be told apart here: Android only delivers the HOME intent.)
-            if (OverlayService.instance == null && MainUI.sessions.lastStartWasSession) {
+            if (OverlayService.instance == null && leftForGame) {
                 when (MainUI.settings.homePress) {
                     "menu" -> showInGameMenuFallback()
                     "gs" -> view.push(GameSwitcherScene(view))
@@ -120,6 +123,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        resumedAt = android.os.SystemClock.uptimeMillis()
         io.github.marsinsanity.mainui.emu.Freezer.thawAll()
         // Cores downloaded in RetroArch while MainUI was in the background.
         MainUI.worker.execute { runCatching { MainUI.emulators.refreshCoresIfStale(15_000) } }
@@ -139,6 +143,9 @@ class MainActivity : Activity() {
         super.onPause()
         resumed = false
         leftForSession = MainUI.sessions.active != null
+        // Paused because MainUI just started / resumed the game (since it came to the front)?
+        val shown = MainUI.sessions.shownAt
+        leftForGame = leftForSession && shown >= resumedAt && android.os.SystemClock.uptimeMillis() - shown < 15_000
         MainUI.themes.pauseBgm()
     }
 

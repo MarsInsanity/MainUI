@@ -79,12 +79,22 @@ class LogiqxDat(val file: File) : MetaLookup {
 
     val dir: File get() = file.parentFile ?: file
 
-    fun load(): LogiqxDat {
+    /** Loaded with everything kept for writing back ([load] keepRaw): only such a DAT may be saved. */
+    private var keptRaw = false
+
+    /**
+     * Reads the DAT. [keepRaw]: also keep what MainUI doesn't use (every rom attribute, other
+     * elements as written) so [save] can write it back; off for DATs that are only read for
+     * names (an arcade DAT has 100 000+ roms: that would cost tens of MB).
+     */
+    fun load(keepRaw: Boolean = false): LogiqxDat {
+        keptRaw = keepRaw
         games.clear(); header.clear(); byFile.clear(); byName.clear(); byCrc.clear()
         headerRaw.clear(); others.clear(); parseError = null
         loadedMtime = file.lastModified()
         if (!file.isFile) return this
-        val raw = runCatching { file.readText() }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
+        // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
+        val raw = runCatching { file.readText().removePrefix("\uFEFF") }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
         if (GameListXml.isEmptyXml(raw)) return this
         val p = GameListXml.newParser()
         p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
@@ -108,14 +118,16 @@ class LogiqxDat(val file: File) : MetaLookup {
                                 game = Game(p.getAttributeValue(null, "name") ?: "", isMachine = tag == "machine")
                                 for (i in 0 until p.attributeCount) game.attrs[p.getAttributeName(i)] = p.getAttributeValue(i)
                             }
-                            depth == 2 && tag != "header" -> { others += GameListXml.readElement(p).raw; depth-- }
+                            depth == 2 && tag != "header" -> { GameListXml.readElement(p).let { if (keepRaw) others += it.raw }; depth-- }
                             depth == 3 && inHeader -> {
                                 val el = GameListXml.readElement(p); depth--
-                                if (el.simple && tag !in header) header[tag] = el.text else headerRaw += el.raw
+                                if (!keepRaw) header[tag] = el.text
+                                else if (el.simple && tag !in header) header[tag] = el.text else headerRaw += el.raw
                             }
                             depth == 3 && game != null && (tag == "rom" || tag == "disk") -> {
-                                val attrs = LinkedHashMap<String, String>()
-                                for (i in 0 until p.attributeCount) attrs[p.getAttributeName(i)] = p.getAttributeValue(i)
+                                val attrs = if (!keepRaw) null else LinkedHashMap<String, String>().also { a ->
+                                    for (i in 0 until p.attributeCount) a[p.getAttributeName(i)] = p.getAttributeValue(i)
+                                }
                                 game.roms += Rom(
                                     p.getAttributeValue(null, "name") ?: "",
                                     p.getAttributeValue(null, "size")?.toLongOrNull(),
@@ -127,7 +139,9 @@ class LogiqxDat(val file: File) : MetaLookup {
                             }
                             depth == 3 && game != null -> {
                                 val el = GameListXml.readElement(p); depth--
-                                if (el.simple && tag !in game.fields) game.fields[tag] = el.text else game.raw += el.raw
+                                // Read only: the text, as before (an attributed <description> still names the game).
+                                if (!keepRaw) game.fields[tag] = el.text
+                                else if (el.simple && tag !in game.fields) game.fields[tag] = el.text else game.raw += el.raw
                             }
                         }
                     }
@@ -223,6 +237,7 @@ class LogiqxDat(val file: File) : MetaLookup {
      */
     fun save() {
         parseError?.let { throw java.io.IOException("${file.path} could not be read ($it): not overwriting it") }
+        if (!keptRaw) throw IllegalStateException("${file.name} was loaded read-only (load(keepRaw = true) to write it)")
         val esc = GameListXml::escape
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\"?>\n")
@@ -306,9 +321,9 @@ class LogiqxDat(val file: File) : MetaLookup {
          * <folder>.mainui.dat next to it, so the user's own DAT is never overwritten.
          */
         fun forWriting(dir: File): LogiqxDat {
-            locate(dir)?.let { f -> LogiqxDat(f).load().let { if (it.parseError == null) return it } }
+            locate(dir)?.let { f -> LogiqxDat(f).load(keepRaw = true).let { if (it.parseError == null) return it } }
             val own = File(dir, "${dir.name}.dat").takeUnless { it.exists() } ?: File(dir, "${dir.name}.mainui.dat")
-            return LogiqxDat(own).load().also { located.remove(dir.absolutePath) }
+            return LogiqxDat(own).load(keepRaw = true).also { located.remove(dir.absolutePath) }
         }
     }
 }

@@ -38,6 +38,7 @@ class DeviceScene(host: SceneHost) : ListScene(host, "Device") {
         // Brightness, 10-100% in tens (Onion's steps; no 0%: a black screen can't be undone by looking).
         val levels = (1..10).map { it.toString() to "${it * 10}%" }
         items += multi("Brightness", levels, { Brightness.get(ctx).coerceAtLeast(1).toString() }) { Brightness.set(ctx, it.toInt()) }
+            .apply { wrap = false } // scales stop at their ends: never 10% -> 100% (or Muted -> full) in one press
         val auto = runCatching { AndroidSettings.System.getInt(cr, AndroidSettings.System.SCREEN_BRIGHTNESS_MODE) == 1 }.getOrDefault(false)
         items += toggle("Auto brightness", { auto }) { on -> putSystem(AndroidSettings.System.SCREEN_BRIGHTNESS_MODE, if (on) 1 else 0) }
 
@@ -48,7 +49,7 @@ class DeviceScene(host: SceneHost) : ListScene(host, "Device") {
             val vols = (0..max).map { it.toString() to if (it == 0) "Muted" else "${it * 100 / max}%" }
             items += multi("Volume", vols, { am.getStreamVolume(AudioManager.STREAM_MUSIC).toString() }) {
                 runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, it.toInt(), 0) }
-            }
+            }.apply { wrap = false }
         }
 
         // Screen timeout.
@@ -57,7 +58,7 @@ class DeviceScene(host: SceneHost) : ListScene(host, "Device") {
         val nearest = timeouts.minByOrNull { kotlin.math.abs(it - cur) } ?: 60_000
         items += multi("Screen timeout", timeouts.map { it.toString() to timeoutLabel(it) }, { nearest.toString() }) {
             putSystem(AndroidSettings.System.SCREEN_OFF_TIMEOUT, it.toInt())
-        }
+        }.apply { wrap = false }
 
         // Radios and battery saver: switched with root, else Android's panel.
         val wifi = runCatching { ctx.applicationContext.getSystemService(WifiManager::class.java)?.isWifiEnabled == true }.getOrDefault(false)

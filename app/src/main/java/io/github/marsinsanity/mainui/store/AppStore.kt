@@ -80,10 +80,18 @@ object AppStore {
     }
     private val configLock = Any()
 
-    fun saveRepos(list: List<Repo>) {
+    /**
+     * Writes repos.json. A key pinned there meanwhile (a refresh on another thread trusted it) is
+     * kept even if [list] was read before that: a pin is never replaced by "none".
+     */
+    fun saveRepos(list: List<Repo>) = synchronized(configLock) {
         appsCache = null
+        val pinned = runCatching { repos() }.getOrDefault(mutableListOf())
+            .filter { it.fingerprint != null }.associate { it.address.trimEnd('/') to it.fingerprint }
+        for (r in list) if (r.fingerprint == null) pinned[r.address.trimEnd('/')]?.let { r.fingerprint = it }
         runCatching { configFile.writeText(JSONArray(list.map { it.json() }).toString(1)) }
             .onFailure { Log.w(TAG, "could not save ${configFile.path}", it) }
+        Unit
     }
 
     /** "f-droid.org/repo", "https://host/fdroid/repo?fingerprint=..." -> normalised Repo. */
@@ -138,6 +146,10 @@ object AppStore {
     private val repoLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
 
     private fun refreshLocked(r: Repo, progress: (String) -> Unit): Int {
+        // Pinned since this Repo was read (by a refresh elsewhere): check against that key.
+        if (r.fingerprint == null) synchronized(configLock) {
+            repos().firstOrNull { it.address.trimEnd('/') == r.address.trimEnd('/') }?.fingerprint?.let { r.fingerprint = it }
+        }
         val jar = File(cacheDir, "${repoKey(r)}-index-v1.jar")
         val meta = readMeta(r)
         val haveIndex = compactFile(r).isFile && meta != null

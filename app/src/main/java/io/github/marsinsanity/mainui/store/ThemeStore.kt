@@ -193,6 +193,12 @@ object Http {
 
     private class PieceMismatch(msg: String) : IOException(msg)
 
+    /**
+     * Thrown from a progress callback to stop a download (Stop pressed). Its own type: a socket
+     * timeout is an InterruptedIOException too, and that one is retried.
+     */
+    class Cancelled : java.io.InterruptedIOException("cancelled")
+
     private fun streamTo(c: HttpURLConnection, tmp: File, startDone: Long, total: Long, progress: (Long, Long) -> Unit) {
         c.inputStream.use { input ->
             tmp.outputStream().use { out ->
@@ -285,7 +291,7 @@ object Http {
                                 break
                             } catch (e: PieceMismatch) {
                                 error.compareAndSet(null, e); break
-                            } catch (e: java.io.InterruptedIOException) {
+                            } catch (e: Cancelled) {
                                 error.compareAndSet(null, e); break // cancelled (from progress): no retries
                             } catch (e: IOException) {
                                 // Network hiccup: retry this piece a couple of times.
