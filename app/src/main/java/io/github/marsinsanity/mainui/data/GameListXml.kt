@@ -38,6 +38,8 @@ class GameListXml(val dir: File) : MetaLookup {
     private val entries = LinkedHashMap<String, Entry>()
     /** Top-level elements other than games / folders, as written. */
     private val others = mutableListOf<String>()
+    /** Elements beside <gameList> at the top (ES-DE's <alternativeEmulator>), written back before it. */
+    private val prelude = mutableListOf<String>()
     var loaded = false
         private set
     /** Why the file couldn't be read completely (null = it was): then it is never overwritten. */
@@ -47,11 +49,12 @@ class GameListXml(val dir: File) : MetaLookup {
     fun load(): GameListXml {
         entries.clear()
         others.clear()
+        prelude.clear()
         parseError = null
         loaded = true
         if (!file.isFile) return this
         // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
-        val raw = runCatching { file.readText().removePrefix("\uFEFF") }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
+        val raw = runCatching { readXmlText(file) }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
         // An empty file (or just the XML declaration) is an empty list, not a broken one.
         if (isEmptyXml(raw)) return this
         val parser = newParser()
@@ -68,7 +71,10 @@ class GameListXml(val dir: File) : MetaLookup {
                         depth++
                         if (depth == 1) sawRoot = true
                         val tag = parser.name
-                        if (depth == 2 && (tag == "game" || tag == "folder")) {
+                        if (depth == 1 && !tag.equals("gameList", true)) {
+                            prelude += readElement(parser).raw
+                            depth-- // consumed its END_TAG
+                        } else if (depth == 2 && (tag == "game" || tag == "folder")) {
                             val attrs = LinkedHashMap<String, String>()
                             for (i in 0 until parser.attributeCount) attrs[parser.getAttributeName(i)] = parser.getAttributeValue(i)
                             current = Entry("", tag == "folder", attrs = attrs)
@@ -97,6 +103,8 @@ class GameListXml(val dir: File) : MetaLookup {
             }
             // Text that isn't XML at all (a clrmamepro DAT, some other file): not ours to rewrite.
             if (!sawRoot) throw org.xmlpull.v1.XmlPullParserException("no XML elements in it")
+            // Cut short (a copy that didn't finish): the parser just stops, with elements still open.
+            if (depth != 0) throw org.xmlpull.v1.XmlPullParserException("unexpected end of file")
         } catch (e: Exception) {
             parseError = e.message ?: e.javaClass.simpleName
             runCatching { android.util.Log.w("MainUI.GameList", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
@@ -141,7 +149,9 @@ class GameListXml(val dir: File) : MetaLookup {
     fun save() {
         parseError?.let { throw java.io.IOException("${file.path} could not be read ($it): not overwriting it") }
         val sb = StringBuilder()
-        sb.append("<?xml version=\"1.0\"?>\n<gameList>\n")
+        sb.append("<?xml version=\"1.0\"?>\n")
+        for (p in prelude) sb.append(p).append('\n')
+        sb.append("<gameList>\n")
         for (o in others) sb.append('\t').append(o).append('\n')
         for (e in entries.values) {
             val tag = if (e.isFolder) "folder" else "game"
@@ -227,7 +237,47 @@ class GameListXml(val dir: File) : MetaLookup {
         private val BARE_AMP = Regex("&(?!(?:amp|lt|gt|quot|apos|#\\d+|#x[0-9a-fA-F]+);)")
         private val BAD_CHARS = Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]")
 
-        fun sanitize(s: String): String = BAD_CHARS.replace(BARE_AMP.replace(s, "&amp;"), "")
+        private val CDATA = Regex("<!\\[CDATA\\[.*?]]>", RegexOption.DOT_MATCHES_ALL)
+
+        /** Bare "&" escaped and control characters dropped, outside CDATA sections (their text is literal). */
+        fun sanitize(s: String): String {
+            if (!s.contains("<![CDATA[")) return BAD_CHARS.replace(BARE_AMP.replace(s, "&amp;"), "")
+            val sb = StringBuilder(s.length)
+            var i = 0
+            for (m in CDATA.findAll(s)) {
+                sb.append(BARE_AMP.replace(s.substring(i, m.range.first), "&amp;"))
+                sb.append(m.value)
+                i = m.range.last + 1
+            }
+            sb.append(BARE_AMP.replace(s.substring(i), "&amp;"))
+            return BAD_CHARS.replace(sb, "")
+        }
+
+        private val DECLARED = Regex("""^\s*<\?xml[^>]*encoding\s*=\s*["']([A-Za-z0-9._-]+)["']""")
+
+        /**
+         * The file's text: UTF-8, else the encoding its declaration names, else Windows' "ANSI"
+         * (Notepad), never UTF-8 with replacement characters, which a save would then make permanent.
+         */
+        fun readXmlText(f: File): String {
+            val bytes = f.readBytes()
+            val utf8 = runCatching {
+                java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+            }.getOrNull()
+            val text = utf8 ?: run {
+                val head = String(bytes, 0, minOf(bytes.size, 200), Charsets.ISO_8859_1)
+                val cs = DECLARED.find(head)?.groupValues?.get(1)?.let { n -> runCatching { java.nio.charset.Charset.forName(n) }.getOrNull() }
+                    ?.takeUnless { it == Charsets.UTF_8 } ?: runCatching { java.nio.charset.Charset.forName("windows-1252") }.getOrDefault(Charsets.ISO_8859_1)
+                String(bytes, cs)
+            }
+            // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
+            // A declaration naming another encoding no longer applies to the decoded text (saved as UTF-8).
+            val t = text.removePrefix("\uFEFF")
+            return if (utf8 == null) t.replaceFirst(Regex("""(<\?xml[^>]*?)\s+encoding\s*=\s*["'][^"']*["']"""), "$1") else t
+        }
 
         fun escape(s: String): String = buildString(s.length) {
             for (c in s) when (c) {

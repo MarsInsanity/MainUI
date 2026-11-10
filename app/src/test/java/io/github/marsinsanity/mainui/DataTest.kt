@@ -1522,3 +1522,67 @@ class RomUnzipTest {
         } finally { dir.deleteRecursively() }
     }
 }
+
+class BugHuntFixesTest {
+    private val m = io.github.marsinsanity.mainui.scraper.BoxArtMatch
+    private val id = io.github.marsinsanity.mainui.scraper.RomIdent
+
+    @Test fun titleWithAmpersandMatchesThumbnailNames() {
+        // libretro's thumbnail names have "_" for "&": the title fallback must still find them.
+        val available = setOf("Mario _ Luigi - Superstar Saga (USA)", "Mario _ Luigi - Superstar Saga (Europe) (En,Fr,De,Es,It)")
+        assertEquals("Mario _ Luigi - Superstar Saga (USA)",
+            m.pick(emptyList(), "Mario & Luigi - Superstar Saga", available, listOf("USA")))
+    }
+
+    private fun withDir(block: (File) -> Unit) {
+        GameListXml.newParser = { org.kxml2.io.KXmlParser() }
+        val dir = java.nio.file.Files.createTempDirectory("gl").toFile()
+        try { block(dir) } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun truncatedGamelistIsNeverOverwritten() = withDir { dir ->
+        File(dir, "gamelist.xml").writeText("<?xml version=\"1.0\"?>\n<gameList>\n<game><path>./a.sfc</path></game>\n<game><path>./b.sfc</path>")
+        val gl = GameListXml(dir).load()
+        assertTrue(gl.parseError != null)
+    }
+
+    @Test fun cdataKeepsItsAmpersand() {
+        assertEquals("<desc><![CDATA[Tom & Jerry]]></desc> &amp; x", GameListXml.sanitize("<desc><![CDATA[Tom & Jerry]]></desc> & x"))
+    }
+
+    @Test fun latin1GamelistIsReadNotMangled() = withDir { dir ->
+        File(dir, "gamelist.xml").writeBytes("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n<gameList><game><path>./p.gb</path><name>Pok\u00e9mon</name></game></gameList>"
+            .toByteArray(Charsets.ISO_8859_1))
+        val gl = GameListXml(dir).load()
+        assertNull(gl.parseError)
+        assertEquals("Pok\u00e9mon", gl.get(File(dir, "p.gb"))?.name)
+    }
+
+    @Test fun topLevelAlternativeEmulatorKept() = withDir { dir ->
+        val f = File(dir, "gamelist.xml")
+        f.writeText("<?xml version=\"1.0\"?>\n<alternativeEmulator><label>Snes9x - Current</label></alternativeEmulator>\n<gameList><game><path>./a.sfc</path><name>A</name></game></gameList>\n")
+        val gl = GameListXml(dir).load()
+        assertNull(gl.parseError)
+        assertEquals("A", gl.get(File(dir, "a.sfc"))?.name)
+        gl.save()
+        val t = f.readText()
+        assertTrue(t, t.indexOf("<alternativeEmulator><label>Snes9x - Current</label></alternativeEmulator>") in 0 until t.indexOf("<gameList>"))
+    }
+
+    @Test fun softwareListDatKeepsItsRoot() = withDir { dir ->
+        val f = File(dir, "nes.dat")
+        f.writeText("<?xml version=\"1.0\"?>\n<softwarelist name=\"nes\" description=\"NES cartridges\">\n<software name=\"smb\"><description>Super Mario Bros.</description></software>\n</softwarelist>\n")
+        val d = io.github.marsinsanity.mainui.data.LogiqxDat(f).load(keepRaw = true)
+        assertNull(d.parseError)
+        d.save()
+        val t = f.readText()
+        assertTrue(t, t.contains("<softwarelist name=\"nes\" description=\"NES cartridges\">") && t.contains("<software name=\"smb\">") && t.trimEnd().endsWith("</softwarelist>"))
+        assertFalse(t, t.contains("<!DOCTYPE"))
+    }
+
+    @Test fun megaCdSerialKeepsLeadingZero() {
+        fun sector(header: String) = ("SEGADISCSYSTEM  " + " ".repeat(100) + header + " ".repeat(64)).toByteArray(Charsets.ISO_8859_1)
+        assertEquals("T-06204", id.megaCdSerial(sector("GM T-06204 -00")))
+        assertEquals("T-93175", id.megaCdSerial(sector("GM T-93175-00")))
+    }
+}

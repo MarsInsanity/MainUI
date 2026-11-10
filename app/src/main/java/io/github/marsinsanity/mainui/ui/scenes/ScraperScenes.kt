@@ -29,9 +29,11 @@ class ScraperScene(host: SceneHost, private val systems: List<String>?) :
     private fun build() {
         val s = MainUI.settings
         val devFromBuild = BuildConfig.SS_DEV_ID.isNotBlank()
+        // As the list shows it: a run that ended since then is shown, not started again.
+        val wasRunning = ScrapeState.running
         val items = mutableListOf(
-            UiItem(if (ScrapeState.running) "Show progress" else "Start scraping", onSelect = {
-                if (!ScrapeState.running) {
+            UiItem(if (wasRunning) "Show progress" else "Start scraping", onSelect = {
+                if (!wasRunning && !ScrapeState.running) {
                     val sources = s.artSources.split(',').filter { it.isNotBlank() }
                     if (sources.isEmpty()) { host.toast("Turn on a box art source first", 2500); return@UiItem }
                     if (sources == listOf("ss") && !ScreenScraper.hasDevCredentials()) {
@@ -42,8 +44,8 @@ class ScraperScene(host: SceneHost, private val systems: List<String>?) :
                 host.push(ScraperProgressScene(host))
             }),
         )
-        if (ScrapeState.running) items += UiItem(if (Scraper.stopping) "Stopping..." else "Stop scraping",
-            disabled = Scraper.stopping, onSelect = { ScraperProgressScene.confirmStop(host) { build() } })
+        if (wasRunning) items += UiItem(if (Scraper.stopping) "Stopping..." else "Stop scraping",
+            disabled = Scraper.stopping, onSelect = { if (ScrapeState.running) ScraperProgressScene.confirmStop(host) { build() } else build() })
         items += listOf(
             action("Box art sources", ArtSourcesScene.summary()) { host.push(ArtSourcesScene(host)) },
             action("Username", s.ssUser.ifBlank { "(anonymous: 1 thread)" }) {

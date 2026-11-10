@@ -400,15 +400,19 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
             if (e.buildbot) items += UiItem((if (e.installed != null) "Update from" else "Download from") + " retroarch.com", sub = "latest stable",
                 preview = preview, onSelect = {
                     run("Checking retroarch.com...") {
-                        val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestRetroArch()
-                        io.github.marsinsanity.mainui.store.EmulatorStore.install("RetroArch ${r.version}", r) { busy = it; host.invalidate() }
+                        // The build of the installed package (RetroArch.apk for com.retroarch, ...), never a second RetroArch.
+                        val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestRetroArch(e.installed)
+                        io.github.marsinsanity.mainui.store.EmulatorStore.install("RetroArch ${r.version}", r, e.installed) { busy = it; host.invalidate() }
                     }
                 })
             e.github?.let { repo ->
-                items += UiItem((if (e.installed != null) "Update from" else "Download from") + " GitHub", sub = repo, preview = preview, onSelect = {
+                // An update only for the package the repository publishes; with a fork / other build
+                // installed it is a download of the original beside it.
+                val updates = e.installed != null && e.installed == e.def.packages.first()
+                items += UiItem((if (updates) "Update from" else "Download from") + " GitHub", sub = repo, preview = preview, onSelect = {
                     run("Checking GitHub...") {
                         val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestGithub(repo)
-                        io.github.marsinsanity.mainui.store.EmulatorStore.install("${e.def.name} ${r.version}", r) { busy = it; host.invalidate() }
+                        io.github.marsinsanity.mainui.store.EmulatorStore.install("${e.def.name} ${r.version}", r, if (updates) e.installed else null) { busy = it; host.invalidate() }
                     }
                 })
             }

@@ -168,7 +168,8 @@ object Http {
             open(url).let { (c2, u) -> c = c2; finalUrl = u }
             total = null
         }
-        try {
+        // A failed or stopped download leaves no "<file>.part" behind (a parallel one is full size already).
+        try { try {
             if (c.responseCode != 206 || total == null || total <= PIECE) {
                 // No ranges (or a small file): one stream.
                 val size = if (c.responseCode == 206 && total != null) total else c.contentLengthLong
@@ -185,7 +186,7 @@ object Http {
             try { streamTo(c2, tmp, 0L, c2.contentLengthLong, progress) } finally { c2.disconnect() }
         } finally {
             c.disconnect()
-        }
+        } } catch (t: Throwable) { tmp.delete(); throw t }
         if (dest.exists()) dest.delete()
         if (!tmp.renameTo(dest)) { tmp.copyTo(dest, true); tmp.delete() }
         return Info(false, etag, lastModified, dest.length())
@@ -266,8 +267,7 @@ object Http {
             var s = PIECE
             while (s < total) { pieces += s..minOf(total - 1, s + PIECE - 1); s += PIECE }
             val error = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
-            val workers = (1..minOf(CONNECTIONS, pieces.size)).map {
-                Thread {
+            fun work() {
                     while (error.get() == null) {
                         val p = pieces.poll() ?: break
                         var attempt = 0
@@ -300,10 +300,13 @@ object Http {
                             }
                         }
                     }
-                }.apply { isDaemon = true; start() }
             }
-            // The first piece arrives on the first connection while the others already run.
-            try { readPiece(first, 0, PIECE - 1) } catch (e: IOException) { error.compareAndSet(null, e) }
+            val workers = (1..minOf(CONNECTIONS, pieces.size)).map { Thread { work() }.apply { isDaemon = true; start() } }
+            // The first piece arrives on the first connection while the others already run. When that
+            // connection fails it is fetched again like any other piece (with its retries).
+            try { readPiece(first, 0, PIECE - 1) }
+            catch (e: Cancelled) { error.compareAndSet(null, e) }
+            catch (e: IOException) { pieces += 0L..(PIECE - 1); work() }
             workers.forEach { it.join() }
             error.get()?.let { throw it }
             progress(total, total)

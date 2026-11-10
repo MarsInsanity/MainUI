@@ -108,9 +108,10 @@ object EmulatorUpdates {
         val pm = MainUI.app.packageManager
         val previous = known().associateBy { it.id }
         progress("Refreshing app repositories...")
-        runCatching { AppStore.refreshAll(AppStore.repos().filter { it.enabled }) {} }
+        // A repository that couldn't be reached (offline at boot) makes it a failed check, retried soon.
+        val repoErrors = runCatching { AppStore.refreshAll(AppStore.repos().filter { it.enabled }) {} }.getOrElse { listOf(it.message.orEmpty()) }
         val out = ArrayList<Update>()
-        var failed = 0
+        var failed = if (repoErrors.isNotEmpty()) 1 else 0
         val entries = EmulatorStore.entries().filter { it.installed != null }
         for ((i, e) in entries.withIndex()) {
             val pkg = e.installed ?: continue
@@ -140,12 +141,13 @@ object EmulatorUpdates {
             return if (apk.versionCode > code) Update(e.def.id, e.def.name, pkg, installedName, apk.versionName, Source.FDROID, app.repo) else null
         }
         // 2. RetroArch's own builds.
-        if (e.buildbot && (pkg == "com.retroarch.aarch64" || pkg == "com.retroarch")) {
-            val r = EmulatorStore.latestRetroArch()
+        if (e.buildbot && (pkg == "com.retroarch.aarch64" || pkg == "com.retroarch" || pkg == "com.retroarch.ra32")) {
+            val r = EmulatorStore.latestRetroArch(pkg)
             return if (isNewer(r.version, installedName) == true) Update(e.def.id, e.def.name, pkg, installedName, r.version, Source.RETROARCH, "retroarch.com") else null
         }
         // 3. GitHub releases.
-        val repo = e.github ?: return null
+        // (Only for the package it publishes: a fork / other build listed beside it isn't updated by it.)
+        val repo = e.github?.takeIf { pkg == e.def.packages.first() } ?: return null
         val r = EmulatorStore.latestGithub(repo)
         val newer = isNewer(r.version, installedName) ?: buildNumberNewer(r.version, installedName, code)
             ?: (r.published > installedAt + 3_600_000L)
@@ -161,15 +163,17 @@ object EmulatorUpdates {
     /** Downloads and installs [u] from where it was found. Returns a message for the UI. */
     fun install(u: Update, progress: (String) -> Unit): String {
         val e = EmulatorStore.entries().firstOrNull { it.def.id == u.id } ?: return "${u.name} is no longer known"
+        val before = runCatching { MainUI.app.packageManager.getPackageInfo(u.pkg, 0).lastUpdateTime }.getOrNull()
         val msg = when (u.source) {
             Source.FDROID -> e.fdroid?.let { AppStore.install(it, progress) } ?: "${u.name} is no longer in the repository"
-            Source.RETROARCH -> EmulatorStore.latestRetroArch().let { EmulatorStore.install("${u.name} ${it.version}", it, progress) }
-            Source.GITHUB -> EmulatorStore.latestGithub(u.from).let { EmulatorStore.install("${u.name} ${it.version}", it, progress) }
+            Source.RETROARCH -> EmulatorStore.latestRetroArch(u.pkg).let { EmulatorStore.install("${u.name} ${it.version}", it, u.pkg, progress) }
+            Source.GITHUB -> EmulatorStore.latestGithub(u.from).let { EmulatorStore.install("${u.name} ${it.version}", it, u.pkg, progress) }
         }
-        // Done (or asked Android to install it): drop it from the list unless it's still old.
+        // Done (or asked Android to install it): drop it from the list unless it's still old
+        // (a nightly keeping its version name counts as done once it was installed again).
         runCatching {
-            val now = MainUI.app.packageManager.getPackageInfo(u.pkg, 0).versionName ?: ""
-            if (now != u.installed) synchronized(this) {
+            val info = MainUI.app.packageManager.getPackageInfo(u.pkg, 0)
+            if ((info.versionName ?: "") != u.installed || (before != null && info.lastUpdateTime != before)) synchronized(this) {
                 // Only the list: when the last check ran (and whether it failed) stays as it was.
                 MainUI.settings.prefs.edit().putString("emu_updates",
                     JSONArray().apply { known().filter { it.id != u.id }.forEach { put(it.json()) } }.toString()).apply()

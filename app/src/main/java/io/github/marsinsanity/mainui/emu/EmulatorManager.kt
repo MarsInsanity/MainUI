@@ -121,6 +121,9 @@ class EmulatorManager(
     @Volatile private var coresComplete = false
     @Volatile var raCoreDir: String? = null
         private set
+    /** Where this RetroArch reads core .info files (libretro_info_path), from the last core scan. */
+    @Volatile var raInfoDir: String? = null
+        private set
     @Volatile private var lastCoreScan = 0L
     /** core basename -> display name / supported extensions read from RetroArch .info files (root). */
     private val coreInfo = HashMap<String, Pair<String, Set<String>>>()
@@ -240,7 +243,7 @@ class EmulatorManager(
         val ra = raPackage
         lastCoreScan = android.os.SystemClock.uptimeMillis()
         if (ra == null) {
-            raCores = null; corePaths = emptyMap(); coresComplete = false; raCoreDir = null
+            raCores = null; corePaths = emptyMap(); coresComplete = false; raCoreDir = null; raInfoDir = null
             return
         }
         val cfg = if (Root.knownAvailable() || Root.available()) Root.readFile(raConfigPath(ra))
@@ -249,6 +252,7 @@ class EmulatorManager(
         corePaths = scan.cores
         coresComplete = scan.complete
         raCoreDir = scan.coreDir
+        raInfoDir = scan.infoDir
         raCores = if (scan.complete || scan.cores.isNotEmpty()) scan.cores.keys else null
         // .info files give us names + extensions so cores we don't know still show up.
         val info = HashMap<String, Pair<String, Set<String>>>()
@@ -290,8 +294,9 @@ class EmulatorManager(
         val ra = raPackage ?: throw IllegalStateException("RetroArch is not installed")
         val dir = raCoreDir ?: "/data/data/$ra/cores"
         val local = localCores()[core]
-        if (local != null) RetroArchCores.installFile(ctx, ra, dir, local, core, progress)
-        else RetroArchCores.install(ctx, ra, dir, core, progress)
+        val infoDir = raInfoDir ?: "/data/data/$ra/info"
+        if (local != null) RetroArchCores.installFile(ctx, ra, dir, local, core, progress, infoDir)
+        else RetroArchCores.install(ctx, ra, dir, core, progress, infoDir)
         if (rescan) refreshCores()
         "${coreDisplayName(core)} installed"
     }

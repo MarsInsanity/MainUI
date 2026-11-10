@@ -187,7 +187,8 @@ object RomIdent {
     fun megaCdSerial(sector0: ByteArray): String? {
         val s = String(sector0, Charsets.ISO_8859_1)
         if (!s.contains("SEGADISCSYSTEM") && !s.contains("SEGABOOTDISC")) return null
-        return megaCd.find(s)?.groupValues?.get(1)?.replace(" ", "")?.substringBefore("-0")
+        // Only a version suffix ("T-93175-00") goes; "T-06204" keeps its leading zero.
+        return megaCd.find(s)?.groupValues?.get(1)?.replace(" ", "")?.replace(Regex("-0\\d$"), "")
     }
 
     /** Dreamcast .gdi: the file of track 3 (the first data track, which holds IP.BIN). */

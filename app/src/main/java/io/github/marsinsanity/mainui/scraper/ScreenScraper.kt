@@ -70,14 +70,16 @@ class ScreenScraper(
             if (code !in 200..299) throw ApiException(code, body.take(200).ifBlank { "HTTP $code" })
             // The API answers some errors with HTTP 200 and plain text
             if (!body.trimStart().startsWith("{")) throw ApiException(if (body.contains("non trouv", true)) 404 else 500, body.take(200))
-            return JSONObject(body)
+            // Cut short or malformed: an API error (handled like the others), never a JSONException.
+            return try { JSONObject(body) } catch (e: org.json.JSONException) { throw ApiException(500, "invalid JSON from ScreenScraper") }
         } finally {
             c.disconnect()
         }
     }
 
     fun userInfo(): UserInfo {
-        val r = get(base("ssuserInfos.php").toString()).getJSONObject("response").getJSONObject("ssuser")
+        val r = get(base("ssuserInfos.php").toString()).optJSONObject("response")?.optJSONObject("ssuser")
+            ?: throw ApiException(500, "no user info in ScreenScraper's answer")
         fun int(k: String, d: Int) = r.optString(k).toIntOrNull() ?: d
         return UserInfo(r.optString("id"), int("niveau", 0), int("maxthreads", 1), int("requeststoday", 0),
             int("maxrequestsperday", 20000), int("maxrequestspermin", 0), int("maxdownloadspeed", 0))
@@ -90,7 +92,7 @@ class ScreenScraper(
         if (hashes != null) u.append("&crc=").append(hashes.crc).append("&md5=").append(hashes.md5).append("&sha1=").append(hashes.sha1)
         val resp = try { get(u.toString()) } catch (e: ApiException) { if (e.notFound) return null else throw e }
         val jeu = resp.optJSONObject("response")?.optJSONObject("jeu") ?: return null
-        return parse(jeu, lang, regions)
+        return try { parse(jeu, lang, regions) } catch (e: org.json.JSONException) { throw ApiException(500, "unexpected answer from ScreenScraper") }
     }
 
     private fun parse(j: JSONObject, lang: String, regions: List<String>): GameInfo {
