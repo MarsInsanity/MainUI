@@ -163,13 +163,21 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
                 // Say why: the folder has files, but not of a kind this system's emulators open.
                 val exts = sys.def.extensions.sorted().joinToString(" ") { ".$it" }
                 val found = sys.unplayableSummary
+                // Zipped games of a system that can't open zips: one button unzips them all.
+                val zips = UnzipFlow.zips(sys)
                 list.set(top + listOfNotNull(
                     UiItem("No games found", disabled = true),
                     found?.let { UiItem("Found: $it", disabled = true) },
                     UiItem("${sys.def.short} games must be: $exts", disabled = true),
+                    if (zips > 0) UiItem("Unzip all ${zips} .zip ${if (zips == 1) "file" else "files"}",
+                        onSelect = { UnzipFlow.start(host, sys) { reload() } }) else null,
                     // No folder yet (listed for its menu): where its games go.
                     if (sys.dirs.isEmpty()) menu.firstOrNull()?.file?.parentFile?.let { UiItem("Put them in ${it.path}", disabled = true) } else null,
-                ), false)
+                ), keepIndex = loaded)
+                // Start on something that can be chosen (Unzip all, Splore), not on a message.
+                if (!loaded || list.current?.disabled == true) {
+                    (0 until list.size).firstOrNull { list.items[it].disabled.not() }?.let { list.active = it }
+                }
             } else list.set(top + games.map { GameItems.item(host, sys, it) }, keepIndex = loaded)
             menuKeys = menu.map { it.key }.toSet()
             loaded = true
@@ -185,7 +193,9 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
     }
 
     override fun activate() {
-        val game = list.current?.data as? Game ?: return
+        val cur = list.current ?: return
+        if (cur.disabled) return
+        val game = cur.data as? Game ?: run { cur.onSelect?.invoke(cur); return } // (Unzip all)
         if (game.isFolder) host.push(GameListScene(host, sys, game.file)) else Launch.game(host, game)
     }
 

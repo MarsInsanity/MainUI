@@ -1343,3 +1343,80 @@ class SystemMenuTest {
         assertEquals("splore.p8", menu.single().rom.lowercase())
     }
 }
+
+class RomUnzipTest {
+    private val u = io.github.marsinsanity.mainui.data.RomUnzip
+    private val mgw = { n: String -> n.lowercase().endsWith(".mgw") }
+
+    private fun zip(f: File, vararg entries: Pair<String, String>) {
+        java.util.zip.ZipOutputStream(f.outputStream()).use { z ->
+            for ((n, text) in entries) { z.putNextEntry(java.util.zip.ZipEntry(n)); z.write(text.toByteArray()); z.closeEntry() }
+        }
+    }
+
+    private fun temp() = kotlin.io.path.createTempDirectory("unzip").toFile()
+
+    @Test
+    fun picksGameZipsAndLeavesReadmesOut() {
+        val (files, games) = u.pick(listOf("Ball.mgw" to 10L, "readme.txt" to 5L, "__MACOSX/._Ball.mgw" to 1L, "art/" to 0L), mgw)
+        assertEquals(listOf("Ball.mgw"), files.map { it.first })
+        assertEquals(1, games)
+        assertEquals(0, u.pick(listOf("readme.txt" to 5L), mgw).second)
+    }
+
+    @Test
+    fun unzipsGamesNextToTheirZipAndDeletesThem() {
+        val dir = temp()
+        try {
+            zip(File(dir, "Ball.zip"), "Ball.mgw" to "ball", "readme.txt" to "hi")
+            zip(File(dir, "Notes.zip"), "notes.txt" to "no games here")
+            zip(File(dir, "Evil.zip"), "../escaped.mgw" to "x", "Sub/Fire.mgw" to "fire")
+            File(dir, "Imgs").mkdirs(); zip(File(dir, "Imgs/Art.zip"), "Art.mgw" to "skip me")
+            val plan = u.scan(listOf(dir), mgw) { it == "imgs" }
+            assertEquals(listOf("Ball.zip", "Evil.zip"), plan.archives.map { it.zip.name })
+            assertEquals(3, plan.games)
+            val r = u.unpack(plan, deleteZips = true, progress = { _, _, _ -> }, cancelled = { false })
+            assertEquals("ball", File(dir, "Ball.mgw").readText())
+            assertEquals("fire", File(dir, "Sub/Fire.mgw").readText())
+            assertFalse(File(dir, "readme.txt").exists())
+            assertFalse(File(dir.parentFile, "escaped.mgw").exists()) // never outside the folder
+            assertEquals(2, r.unpacked); assertEquals(2, r.zipsDeleted)
+            assertFalse(File(dir, "Ball.zip").exists())
+            assertTrue(File(dir, "Notes.zip").exists())            // no games: untouched
+            assertTrue(dir.walkTopDown().none { it.name.endsWith(".part") })
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun neverOverwritesAndKeepsZipsWhoseFilesDiffer() {
+        val dir = temp()
+        try {
+            zip(File(dir, "Ball.zip"), "Ball.mgw" to "ball")
+            zip(File(dir, "Fire.zip"), "Fire.mgw" to "fire")
+            File(dir, "Ball.mgw").writeText("ball")          // unpacked before: same size
+            File(dir, "Fire.mgw").writeText("my own fire!") // a different file of that name
+            val r = u.unpack(u.scan(listOf(dir), mgw), deleteZips = true, progress = { _, _, _ -> }, cancelled = { false })
+            assertEquals(0, r.unpacked); assertEquals(1, r.existing)
+            assertEquals("my own fire!", File(dir, "Fire.mgw").readText())
+            assertFalse(File(dir, "Ball.zip").exists())
+            assertTrue(File(dir, "Fire.zip").exists())
+            assertEquals(listOf("Fire.zip"), r.failed.map { it.first.name })
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun stopsWhenAskedAndNeedsRoomForTheBiggestZipWhenDeleting() {
+        val dir = temp()
+        try {
+            zip(File(dir, "A.zip"), "A.mgw" to "a"); zip(File(dir, "B.zip"), "B.mgw" to "b")
+            val plan = u.scan(listOf(dir), mgw)
+            var n = 0
+            val r = u.unpack(plan, deleteZips = false, progress = { _, _, _ -> n++ }, cancelled = { n >= 1 })
+            assertTrue(r.stopped); assertTrue(File(dir, "B.zip").exists()); assertFalse(File(dir, "B.mgw").exists())
+            val big = io.github.marsinsanity.mainui.data.RomUnzip.Archive(File(dir, "x.zip"), listOf("x"), 300, 1)
+            val small = io.github.marsinsanity.mainui.data.RomUnzip.Archive(File(dir, "y.zip"), listOf("y"), 100, 1)
+            assertEquals(300 + u.MARGIN, u.spaceNeeded(listOf(big, small), keepZips = false))
+            assertEquals(400 + u.MARGIN, u.spaceNeeded(listOf(big, small), keepZips = true))
+        } finally { dir.deleteRecursively() }
+    }
+}
