@@ -319,8 +319,9 @@ class OverlayService : AccessibilityService() {
                     if (settleMs > 0) Thread.sleep(settleMs)
                     val ok = c.save(0)
                     io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save for ${s.name}: ${if (ok) "done" else "FAILED ${c.saveProblem ?: ""}"}")
-                    if (ok) Thread.sleep(800)
-                    else MainUI.sessions.toast("${s.name} wasn't saved: ${c.saveProblem ?: "the save key failed"}")
+                    // RetroArch's save is checked (written and copied by now); others get time to write.
+                    if (ok && c !is io.github.marsinsanity.mainui.emu.RetroArchController) Thread.sleep(800)
+                    else if (!ok) MainUI.sessions.toast("${s.name} wasn't saved: ${c.saveProblem ?: "the save key failed"}")
                 } else io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: no save for ${s.name} (states ${c.states})")
             }.onFailure { Log.w(TAG, "save before Game Switcher failed", it); io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save failed: $it") }
             main.post { startGameSwitcher() }

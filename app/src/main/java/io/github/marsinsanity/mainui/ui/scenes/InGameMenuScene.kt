@@ -219,11 +219,12 @@ class InGameMenuScene(
                     // OnionOS: leaving a game for the Game Switcher saves it (RetroArch: its auto
                     // slot, loaded by itself when the game starts again).
                     val ctx = host.hostContext
-                    leaveThen(500) {
+                    leaveThen(keyDelay) {
                         val ok = controller.save(0)
                         io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher (menu): save for ${session.name}: ${if (ok) "done" else "FAILED ${controller.saveProblem ?: ""}"}")
-                        if (ok) Thread.sleep(800)
-                        else MainUI.sessions.toast("${session.name} wasn't saved: ${controller.saveProblem ?: "the save key failed"}")
+                        // RetroArch's save is checked (written and copied by now); others get time to write.
+                        if (ok && controller !is io.github.marsinsanity.mainui.emu.RetroArchController) Thread.sleep(800)
+                        else if (!ok) MainUI.sessions.toast("${session.name} wasn't saved: ${controller.saveProblem ?: "the save key failed"}")
                         main.post {
                             ctx.startActivity(Intent(ctx, MainActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
@@ -295,9 +296,21 @@ class InGameMenuScene(
      * Hotkey emulators: the key must reach the emulator's window, so close the
      * menu, unfreeze the game, let it regain focus, then inject the key.
      */
+    /**
+     * How long after the menu closes before a key is pressed: the game needs its window's focus
+     * back (Android hands it over within a frame or two and holds keys meanwhile), and a frozen
+     * standalone emulator must be running again (see [leaveThen]) and get settled. The fallback
+     * menu brings the game's task back first, which takes longer.
+     */
+    private val keyDelay: Long get() = when {
+        !overlayMode -> 450L
+        controller is io.github.marsinsanity.mainui.emu.RetroArchController -> 150L
+        else -> 250L
+    }
+
     private fun hotkeyAction(what: String, work: () -> Boolean) {
         val ctx = host.hostContext
-        leaveThen(450) {
+        leaveThen(keyDelay) {
             val ok = work()
             val problem = if (what == "Save") controller.saveProblem else null
             io.github.marsinsanity.mainui.core.SessionLog.log("menu $what for ${session.name}: ${if (ok) "ok" else "FAILED ${problem ?: ""}"}")
@@ -317,7 +330,11 @@ class InGameMenuScene(
             // Fallback menu: bring the game back first (off the UI thread resume() finishes the
             // task switch before returning), so the delay counts from when the game is in front.
             if (!overlayMode) MainUI.sessions.resume()
-            Thread.sleep(delayMs)
+            val t0 = android.os.SystemClock.uptimeMillis()
+            // A frozen game must be running before its key: a key sent while frozen arrives
+            // pressed and released at once, and the game can miss it. The delay counts from then.
+            unpausing?.join(3000)
+            Thread.sleep((delayMs - (android.os.SystemClock.uptimeMillis() - t0)).coerceAtLeast(0))
             runCatching(after).onFailure { Log.w("MainUI.InGame", "action failed", it) }
         }.start()
     }
@@ -327,10 +344,13 @@ class InGameMenuScene(
     }
 
     /** Unpause exactly once, whatever path leaves the menu. */
+    /** The thread unpausing (thawing) the game, see [leaveThen]. */
+    @Volatile private var unpausing: Thread? = null
+
     private fun resumeOnce() {
         if (resumed) return
         resumed = true
-        Thread { runCatching { controller.unpause() } }.start()
+        unpausing = Thread { runCatching { controller.unpause() } }.also { it.start() }
     }
 
     private fun continueGame() {
