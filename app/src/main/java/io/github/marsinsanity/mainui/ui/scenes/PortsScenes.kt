@@ -109,18 +109,17 @@ object Ports {
     )
 }
 
-/** Picks an installed app to put into Games > Ports. */
-class PortAppPickerScene(host: SceneHost, private val added: () -> Unit) : ListScene(host, "Add to Ports", large = true) {
+/** Picks an installed app ([candidates], read off the UI thread) for [pick]: Add to Ports / Android games. */
+class AppPickerScene(
+    host: SceneHost, title: String,
+    private val candidates: () -> List<Apps.AppInfo>,
+    private val pick: (Apps.AppInfo) -> Unit,
+) : ListScene(host, title, large = true) {
     override var aLabel: String? = "ADD"
     override val showPreview = false
 
     override fun onEnter() {
-        host.io({
-            // Apps and Android games (hidden apps stay hidden; ports are already there).
-            val ports = MainUI.games.portPackages()
-            (MainUI.apps.visibleApps() + MainUI.apps.androidGames()).filter { it.pkg !in ports }
-                .distinctBy { it.pkg }.sortedBy { it.label.lowercase() }
-        }) { apps ->
+        host.io({ candidates().distinctBy { it.pkg }.sortedBy { it.label.lowercase() } }) { apps ->
             list.set(if (apps.isEmpty()) listOf(UiItem("No apps to add", disabled = true)) else apps.map { a ->
                 UiItem(a.label, icon = { MainUI.apps.icon(a.pkg, 96) }, data = a,
                     sub = if (MainUI.library.isAndroidGame(a.pkg)) "Android game" else null)
@@ -131,6 +130,79 @@ class PortAppPickerScene(host: SceneHost, private val added: () -> Unit) : ListS
     override fun activate() {
         val a = list.current?.data as? Apps.AppInfo ?: return
         close()
-        Ports.add(host, a.label, a.pkg, added)
+        pick(a)
+    }
+
+    companion object {
+        /** Apps and Android games into Games > Ports (hidden apps stay hidden; ports are there already). */
+        fun ports(host: SceneHost, added: () -> Unit) = AppPickerScene(host, "Add to Ports", {
+            val ports = MainUI.games.portPackages()
+            (MainUI.apps.visibleApps() + MainUI.apps.androidGames()).filter { it.pkg !in ports }
+        }) { a -> Ports.add(host, a.label, a.pkg, added) }
+
+        /** Apps (and ports) into Games > Android. */
+        fun android(host: SceneHost, added: () -> Unit) = AppPickerScene(host, "Add to Android", {
+            val ports = MainUI.games.portPackages()
+            MainUI.apps.visibleApps() + MainUI.apps.all().filter { it.pkg in ports }
+        }) { a ->
+            if (a.pkg in MainUI.games.portPackages()) Ports.remove(host, a.label, a.pkg, toAndroid = true, done = added)
+            else {
+                MainUI.library.setAndroidGame(a.pkg, true); MainUI.library.setHidden(a.pkg, false)
+                host.toast("${a.label} moved to Games > Android"); added()
+            }
+        }
+    }
+}
+
+/** Android's own uninstall (it asks first) for an app or game. */
+fun uninstallApp(host: SceneHost, pkg: String) {
+    runCatching {
+        host.hostContext.startActivity(android.content.Intent(android.content.Intent.ACTION_DELETE, android.net.Uri.parse("package:$pkg"))
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure { host.toast("Can't uninstall: ${it.message}") }
+}
+
+/**
+ * The Emulators menu (main menu): the emulator apps, like Games > Ports for ports. Installed
+ * emulators MainUI knows are here by themselves; any app can be put here from Apps (SELECT >
+ * Move to Emulators) and moved back. They aren't listed in Apps.
+ */
+class EmulatorAppsScene(host: SceneHost) : ListScene(host, "Emulators", large = true) {
+    override var aLabel: String? = "OPEN"
+    override val showPreview = false
+
+    override fun onEnter() = reload()
+    override fun onResume() = reload()
+
+    private fun reload() {
+        host.io({ MainUI.apps.emulatorApps() }) { apps ->
+            list.set(if (apps.isEmpty()) listOf(
+                UiItem("No emulators yet", disabled = true),
+                UiItem("App Store > Emulators gets them", disabled = true),
+                UiItem("Apps: SELECT on an app > Move to Emulators", disabled = true),
+            ) else apps.map { a -> UiItem(a.label, icon = { MainUI.apps.icon(a.pkg, 96) }, data = a) }, keepIndex = true)
+        }
+    }
+
+    override fun activate() {
+        val a = list.current?.data as? Apps.AppInfo ?: return
+        MainUI.sessions.launchApp(a.pkg, a.label, asGame = false)?.let { host.toast(it) }
+    }
+
+    override fun onKey(b: io.github.marsinsanity.mainui.ui.Btn, repeat: Boolean): Boolean {
+        val a = list.current?.data as? Apps.AppInfo
+        if (b == io.github.marsinsanity.mainui.ui.Btn.SELECT) {
+            if (!repeat && a != null) host.push(io.github.marsinsanity.mainui.ui.PopMenuScene(host, a.label, listOf(
+                UiItem("Move back to Apps", onSelect = { MainUI.library.setEmulatorApp(a.pkg, false); host.toast("${a.label} moved back to Apps"); reload() }),
+                UiItem("Hide", onSelect = { MainUI.library.setHidden(a.pkg, true); host.toast("${a.label} hidden"); reload() }),
+                UiItem("App info", onSelect = {
+                    runCatching { host.hostContext.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.parse("package:${a.pkg}")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }),
+                UiItem("Uninstall emulator", onSelect = { uninstallApp(host, a.pkg) }),
+            )))
+            return true
+        }
+        return super.onKey(b, repeat)
     }
 }

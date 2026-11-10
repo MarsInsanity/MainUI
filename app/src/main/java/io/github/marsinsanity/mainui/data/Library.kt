@@ -45,6 +45,9 @@ class Library(private val storage: Storage) {
     private val favorites = mutableListOf<Entry>()
     private val androidGames = linkedSetOf<String>()
     private val hiddenApps = linkedSetOf<String>()
+    /** Apps put into the Emulators menu by hand, and detected emulators moved back to Apps. */
+    private val emuAdded = linkedSetOf<String>()
+    private val emuRemoved = linkedSetOf<String>()
     /** Games hidden with Hide ROM, and known BIOS sets shown again with Unhide ROM (game keys). */
     private val hiddenGames = linkedSetOf<String>()
     private val shownBios = linkedSetOf<String>()
@@ -69,7 +72,11 @@ class Library(private val storage: Storage) {
     fun load() = synchronized(lock) {
         loadedDir = storage.configDir
         recents.clear(); favorites.clear(); androidGames.clear(); hiddenApps.clear(); coreChoices.clear(); playTime.clear()
-        hiddenGames.clear(); shownBios.clear()
+        hiddenGames.clear(); shownBios.clear(); emuAdded.clear(); emuRemoved.clear()
+        readObject("emulator_apps.json")?.let { o ->
+            o.optJSONArray("added")?.let { a -> for (i in 0 until a.length()) emuAdded += a.getString(i) }
+            o.optJSONArray("removed")?.let { a -> for (i in 0 until a.length()) emuRemoved += a.getString(i) }
+        }
         readObject("hidden_games.json")?.let { o ->
             o.optJSONArray("hidden")?.let { a -> for (i in 0 until a.length()) hiddenGames += a.getString(i) }
             o.optJSONArray("shown_bios")?.let { a -> for (i in 0 until a.length()) shownBios += a.getString(i) }
@@ -159,6 +166,14 @@ class Library(private val storage: Storage) {
     fun setAndroidGame(pkg: String, value: Boolean) = synchronized(lock) { current();
         if (value) androidGames += pkg else androidGames -= pkg
         saveAndroid()
+    }
+
+    /** Emulators menu by hand: ([added], [removed]) packages (see Apps.emulatorApps). */
+    fun emulatorChoices(): Pair<Set<String>, Set<String>> = synchronized(lock) { current(); emuAdded.toSet() to emuRemoved.toSet() }
+    /** [pkg] in the Emulators menu ([value]) or in Apps, whatever the detection says. */
+    fun setEmulatorApp(pkg: String, value: Boolean) = synchronized(lock) { current();
+        if (value) { emuAdded += pkg; emuRemoved -= pkg } else { emuRemoved += pkg; emuAdded -= pkg }
+        write("emulator_apps.json", JSONObject().put("added", JSONArray(emuAdded.toList())).put("removed", JSONArray(emuRemoved.toList())).toString(1))
     }
 
     fun hiddenApps(): Set<String> = synchronized(lock) { current(); hiddenApps.toSet() }

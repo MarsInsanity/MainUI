@@ -81,6 +81,11 @@ class AppsScene(host: SceneHost) : ListScene(host, "Apps", large = true) {
                 }),
                 // An unofficial port (an Android build of a PC game): Games > Ports, a file in the ports folder.
                 UiItem("Move to Ports", onSelect = { Ports.add(host, a.label, a.pkg, changed) }),
+                // An emulator MainUI doesn't know: into the Emulators menu (main menu).
+                UiItem("Move to Emulators", onSelect = {
+                    MainUI.library.setEmulatorApp(a.pkg, true); MainUI.library.setAndroidGame(a.pkg, false); MainUI.library.setHidden(a.pkg, false)
+                    host.toast("${a.label} moved to Emulators"); changed()
+                }),
                 UiItem("App info", onSelect = {
                     host.hostContext.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${a.pkg}"))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
