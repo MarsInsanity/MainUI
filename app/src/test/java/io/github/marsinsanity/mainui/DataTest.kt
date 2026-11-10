@@ -1375,7 +1375,7 @@ class RomUnzipTest {
             val plan = u.scan(listOf(dir), mgw) { it == "imgs" }
             assertEquals(listOf("Ball.zip", "Evil.zip"), plan.archives.map { it.zip.name })
             assertEquals(3, plan.games)
-            val r = u.unpack(plan, deleteZips = true, progress = { _, _, _ -> }, cancelled = { false })
+            val r = u.unpack(plan, io.github.marsinsanity.mainui.data.RomUnzip.Mode.DELETE_EACH, progress = { _, _, _ -> }, cancelled = { false })
             assertEquals("ball", File(dir, "Ball.mgw").readText())
             assertEquals("fire", File(dir, "Sub/Fire.mgw").readText())
             assertFalse(File(dir, "readme.txt").exists())
@@ -1395,7 +1395,7 @@ class RomUnzipTest {
             zip(File(dir, "Fire.zip"), "Fire.mgw" to "fire")
             File(dir, "Ball.mgw").writeText("ball")          // unpacked before: same size
             File(dir, "Fire.mgw").writeText("my own fire!") // a different file of that name
-            val r = u.unpack(u.scan(listOf(dir), mgw), deleteZips = true, progress = { _, _, _ -> }, cancelled = { false })
+            val r = u.unpack(u.scan(listOf(dir), mgw), io.github.marsinsanity.mainui.data.RomUnzip.Mode.DELETE_EACH, progress = { _, _, _ -> }, cancelled = { false })
             assertEquals(0, r.unpacked); assertEquals(1, r.existing)
             assertEquals("my own fire!", File(dir, "Fire.mgw").readText())
             assertFalse(File(dir, "Ball.zip").exists())
@@ -1411,12 +1411,34 @@ class RomUnzipTest {
             zip(File(dir, "A.zip"), "A.mgw" to "a"); zip(File(dir, "B.zip"), "B.mgw" to "b")
             val plan = u.scan(listOf(dir), mgw)
             var n = 0
-            val r = u.unpack(plan, deleteZips = false, progress = { _, _, _ -> n++ }, cancelled = { n >= 1 })
+            val r = u.unpack(plan, io.github.marsinsanity.mainui.data.RomUnzip.Mode.KEEP, progress = { _, _, _ -> n++ }, cancelled = { n >= 1 })
             assertTrue(r.stopped); assertTrue(File(dir, "B.zip").exists()); assertFalse(File(dir, "B.mgw").exists())
             val big = io.github.marsinsanity.mainui.data.RomUnzip.Archive(File(dir, "x.zip"), listOf("x"), 300, 1)
             val small = io.github.marsinsanity.mainui.data.RomUnzip.Archive(File(dir, "y.zip"), listOf("y"), 100, 1)
-            assertEquals(300 + u.MARGIN, u.spaceNeeded(listOf(big, small), keepZips = false))
-            assertEquals(400 + u.MARGIN, u.spaceNeeded(listOf(big, small), keepZips = true))
+            assertEquals(300 + u.MARGIN, u.spaceNeeded(listOf(big, small), io.github.marsinsanity.mainui.data.RomUnzip.Mode.DELETE_EACH))
+            assertEquals(400 + u.MARGIN, u.spaceNeeded(listOf(big, small), io.github.marsinsanity.mainui.data.RomUnzip.Mode.DELETE_AFTER))
+            assertEquals(400 + u.MARGIN, u.spaceNeeded(listOf(big, small), io.github.marsinsanity.mainui.data.RomUnzip.Mode.KEEP))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun allAtOnceDeletesTheZipsOnlyAtTheEndAndOnlyWhenItAllGotThrough() {
+        val after = io.github.marsinsanity.mainui.data.RomUnzip.Mode.DELETE_AFTER
+        val dir = temp()
+        try {
+            zip(File(dir, "A.zip"), "A.mgw" to "a"); zip(File(dir, "B.zip"), "B.mgw" to "b")
+            // Stopped before the second zip: A is unpacked, but no zip is deleted.
+            var n = 0
+            val stopped = u.unpack(u.scan(listOf(dir), mgw), after, progress = { _, _, _ -> n++ }, cancelled = { n >= 2 })
+            assertTrue(stopped.stopped)
+            assertTrue(File(dir, "A.mgw").exists()); assertFalse(File(dir, "B.mgw").exists())
+            assertTrue(File(dir, "A.zip").exists()); assertTrue(File(dir, "B.zip").exists())
+            assertEquals(0, stopped.zipsDeleted)
+            // Run again: A is skipped as already there, B unpacked, then both zips go.
+            val r = u.unpack(u.scan(listOf(dir), mgw), after, progress = { _, _, _ -> }, cancelled = { false })
+            assertEquals(1, r.unpacked); assertEquals(1, r.existing); assertEquals(2, r.zipsDeleted)
+            assertFalse(File(dir, "A.zip").exists()); assertFalse(File(dir, "B.zip").exists())
+            assertEquals("b", File(dir, "B.mgw").readText())
         } finally { dir.deleteRecursively() }
     }
 }
