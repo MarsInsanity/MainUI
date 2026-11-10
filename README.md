@@ -139,7 +139,7 @@ Differences from a Miyoo Mini, due to the screen:
 - **Haptic feedback** (Settings > User interface, *Light* by default; Off / Light / Medium / Strong): a
   short pulse when the selection moves (d-pad, L/R paging, swipes) and a firmer one for buttons and
   taps, in MainUI and its in-game menu. Timed pulses long enough for a handheld's rumble motor to
-  spin up (18-65 ms), sent to every motor found: Android's vibrator and the built-in controller's
+  spin up on a single press (35-85 ms, starting with a short full-strength kick), sent to every motor found: Android's vibrator and the built-in controller's
   (where many handhelds have theirs, the way games rumble). They count as media vibration (game
   rumble), not touch feedback, and follow MainUI's setting; moves are spaced at least 45 ms apart so
   holding a direction doesn't become a buzz. Choosing a level says so if no motor is found.
