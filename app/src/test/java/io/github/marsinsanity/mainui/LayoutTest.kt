@@ -58,4 +58,12 @@ class LayoutTest {
         assertEquals(Triple(20, 62, 150), rgb(io.github.marsinsanity.mainui.ui.tileBottom(a)))
         assertEquals(Triple(85, 220, 255), rgb(io.github.marsinsanity.mainui.ui.tileHighlight(a)))
     }
+
+    @Test fun selectionBarsKeepTheirEnds() {
+        assertEquals(24, Gfx.selectionCap(640))  // MainUI's and Onion's 640 px bars
+        assertEquals(48, Gfx.selectionCap(1280)) // drawn for a 2x screen: the same 24 design px
+        assertEquals(6, Gfx.selectionCap(160))   // proportional for other sizes
+        assertEquals(1, Gfx.selectionCap(8))     // tiny ones: at least a pixel
+        assertEquals(1, Gfx.selectionCap(2))
+    }
 }
