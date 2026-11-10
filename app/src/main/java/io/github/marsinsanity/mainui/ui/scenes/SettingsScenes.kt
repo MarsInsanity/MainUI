@@ -81,7 +81,12 @@ class UiSettingsScene(host: SceneHost) : ListScene(host, "User interface") {
                 { s.clockFormat }) { s.clockFormat = it },
             toggle("Menu sounds", { s.uiSounds }) { s.uiSounds = it; MainUI.themes.reloadSounds() },
             multi("Haptic feedback", listOf("off" to "Off", "light" to "Light", "medium" to "Medium", "strong" to "Strong"),
-                { s.haptics }) { s.haptics = it; io.github.marsinsanity.mainui.core.Haptics.press() },
+                { s.haptics }) {
+                s.haptics = it
+                io.github.marsinsanity.mainui.core.Haptics.press()
+                if (it != "off" && !io.github.marsinsanity.mainui.core.Haptics.available())
+                    host.toast("No vibration motor found on this device", 2500)
+            },
             toggle("Theme background music", { s.bgm }) { s.bgm = it; MainUI.themes.reloadSounds() },
         ))
     }
