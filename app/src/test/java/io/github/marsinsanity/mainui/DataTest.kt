@@ -189,6 +189,18 @@ class RetroArchConfigTest {
     }
 
     @Test
+    fun stateSlotsAreReadFromFileNames() {
+        assertEquals(0, c.stateSlotOf("Crash (USA).state", "Crash (USA)"))
+        assertEquals(-1, c.stateSlotOf("Crash (USA).state.auto", "Crash (USA)"))
+        assertEquals(12, c.stateSlotOf("Crash (USA).state12", "Crash (USA)"))
+        // Thumbnails, other games and other files are not states of this game.
+        assertNull(c.stateSlotOf("Crash (USA).state.png", "Crash (USA)"))
+        assertNull(c.stateSlotOf("Crash (USA).state.auto.png", "Crash (USA)"))
+        assertNull(c.stateSlotOf("Crash (USA) 2.state", "Crash (USA)"))
+        assertNull(c.stateSlotOf("Crash (USA).srm", "Crash (USA)"))
+    }
+
+    @Test
     fun stateFoldersPutTheConfiguredOneFirst() {
         val cfg = "savestate_directory = \"/storage/emulated/0/RetroArch/states/\"\nstate_slot = \"-1\"\n"
         assertEquals(listOf("/storage/emulated/0/RetroArch/states", "/storage/emulated/0/Android/data/com.retroarch/files/states",
