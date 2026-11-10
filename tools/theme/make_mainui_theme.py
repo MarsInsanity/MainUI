@@ -528,7 +528,16 @@ def change_sound(path):
         wv.writeframes(bytes(frames))
 
 
-TILES = {"recent": g_recent, "favorite": g_star, "game": g_gamepad, "retroarch": g_expert, "app": g_apps, "setting": g_gear}
+def g_handheld(d, cx, cy, s, c, w):
+    """A handheld: the Emulators menu."""
+    rrect(d, (cx - s * 0.62, cy - s, cx + s * 0.62, cy + s), s * 0.18, c, w)
+    rrect(d, (cx - s * 0.42, cy - s * 0.78, cx + s * 0.42, cy - s * 0.08), s * 0.06, c, w * 0.8)
+    dpad(d, cx - s * 0.26, cy + s * 0.42, s * 0.16, c, w * 0.8)
+    buttons(d, cx + s * 0.26, cy + s * 0.42, s * 0.3, c)
+
+
+TILES = {"recent": g_recent, "favorite": g_star, "game": g_gamepad, "retroarch": g_expert, "app": g_apps, "setting": g_gear,
+         "emulators": g_handheld}
 APPS = {"themes": g_palette, "pacman": g_bag, "gameswitcher": g_switcher, "search": g_search, "gallery": g_image,
         "activity": g_chart, "retroarch": g_expert, "tweaks": g_sliders, "download": g_download, "folder": g_folder}
 

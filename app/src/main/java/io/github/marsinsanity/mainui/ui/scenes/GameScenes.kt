@@ -102,6 +102,8 @@ internal object GameItems {
         if (port != null) {
             items += UiItem("Move back to Apps", onSelect = { Ports.remove(host, g.name, port, toAndroid = false, done = onChanged) })
             items += UiItem("Move to Android games", onSelect = { Ports.remove(host, g.name, port, toAndroid = true, done = onChanged) })
+            // (Its port file stays: reinstalled, it is a port again.)
+            items += UiItem("Uninstall game", onSelect = { uninstallApp(host, port) })
         } else if (!g.isAndroid && !g.isFolder && g.file != null && !isMenu) items += UiItem("Delete ROM", onSelect = { confirmDelete(host, g, onChanged) })
         host.push(PopMenuScene(host, g.name, items))
     }
@@ -278,9 +280,13 @@ class AndroidGamesScene(host: SceneHost) : ListScene(host, "Android") {
 
     private fun reload() {
         host.io({ MainUI.apps.androidGames() }) { apps ->
-            list.set(apps.map { a ->
+            // Empty: how to add one, like Ports.
+            list.set(if (apps.isEmpty()) listOf(
+                UiItem("No Android games yet", disabled = true),
+                UiItem("Apps: SELECT on an app > Move to Android games", disabled = true),
+            ) else apps.map { a ->
                 GameItems.item(host, null, Game(SystemDef.ANDROID.id, null, a.label, pkg = a.pkg))
-            })
+            }, keepIndex = true)
         }
     }
 
@@ -297,6 +303,7 @@ class AndroidGamesScene(host: SceneHost) : ListScene(host, "Android") {
                     UiItem("Move back to Apps", onSelect = { MainUI.library.setAndroidGame(g.pkg!!, false); reload() }),
                     UiItem("Move to Ports", onSelect = { Ports.add(host, g.name, g.pkg!!) { reload() } }),
                     UiItem("Hide", onSelect = { MainUI.library.setHidden(g.pkg!!, true); MainUI.library.setAndroidGame(g.pkg, false); reload() }),
+                    UiItem("Uninstall game", onSelect = { uninstallApp(host, g.pkg!!) }),
                 )) { reload() }
                 return true
             }

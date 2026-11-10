@@ -69,6 +69,7 @@ class UiSettingsScene(host: SceneHost) : ListScene(host, "User interface") {
             multi("Games view", listOf("grid" to "Grid", "row" to "Row"), { s.systemsLayout.replace("carousel", "row") }) { s.systemsLayout = it },
             toggle("Show Recents", { s.showRecents }) { s.showRecents = it },
             toggle("Show Favorites", { s.showFavorites }) { s.showFavorites = it },
+            toggle("Show Emulators", { s.showEmulators }) { s.showEmulators = it },
             toggle("Show Expert (RetroArch)", { s.showExpert }) { s.showExpert = it },
             toggle("Show Search tile", { s.showSearchTile }) { s.showSearchTile = it },
             toggle("Show Android system", { s.showAndroidSystem }) { s.showAndroidSystem = it },

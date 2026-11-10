@@ -814,6 +814,14 @@ class Gfx {
                 c.drawLine(cx, cy, cx, cy - r * 0.55f, stroke)
                 c.drawLine(cx, cy, cx + r * 0.4f, cy + r * 0.25f, stroke)
             }
+            "emulators" -> {
+                // a handheld
+                rect.set(cx - r * 0.62f, cy - r, cx + r * 0.62f, cy + r); c.drawRoundRect(rect, r * 0.18f, r * 0.18f, stroke)
+                rect.set(cx - r * 0.42f, cy - r * 0.78f, cx + r * 0.42f, cy - r * 0.08f); c.drawRoundRect(rect, r * 0.06f, r * 0.06f, stroke)
+                c.drawLine(cx - r * 0.42f, cy + r * 0.42f, cx - r * 0.1f, cy + r * 0.42f, stroke)
+                c.drawLine(cx - r * 0.26f, cy + r * 0.26f, cx - r * 0.26f, cy + r * 0.58f, stroke)
+                c.drawCircle(cx + r * 0.4f, cy + r * 0.32f, r * 0.08f, fill); c.drawCircle(cx + r * 0.22f, cy + r * 0.52f, r * 0.08f, fill)
+            }
             "expert", "retroarch" -> {
                 rect.set(cx - r, cy - r * 0.7f, cx + r, cy + r * 0.7f); c.drawRoundRect(rect, r * 0.15f, r * 0.15f, stroke)
                 path.moveTo(cx - r * 0.6f, cy - r * 0.3f); path.lineTo(cx - r * 0.2f, cy); path.lineTo(cx - r * 0.6f, cy + r * 0.3f)

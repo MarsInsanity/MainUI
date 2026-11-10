@@ -50,6 +50,7 @@ object HomeScenes {
         if (s.showRecents) out += Tile("recents", "Recents", "recent", "recent") { host.push(RecentsScene(host)) }
         if (s.showFavorites) out += Tile("favorites", "Favorites", "favorite", "favorite") { host.push(FavoritesScene(host)) }
         out += Tile("games", "Games", "game", "game") { openSystems(host) }
+        if (s.showEmulators) out += Tile("emulators", "Emulators", "emulators", "emulators") { host.push(EmulatorAppsScene(host)) }
         if (s.showExpert) out += Tile("expert", "Expert", "expert", "retroarch") { openRetroArch(host) }
         out += Tile("apps", "Apps", "app", "app") { host.push(AppsScene(host)) }
         out += Tile("settings", "Settings", "setting", "setting") { host.push(SettingsScene(host)) }
@@ -81,7 +82,11 @@ object HomeScenes {
             // the UI thread: listing the apps takes a while after every install / update.
             val n = androidCount.takeIf { it >= 0 } ?: MainUI.library.androidGames().size
             out += Tile("android", "Android", "android", icons = SystemDef.ANDROID.icons, short = "APK",
-                sub = plural(n, "game"), open = { host.push(AndroidGamesScene(host)) })
+                sub = plural(n, "game"), open = { host.push(AndroidGamesScene(host)) },
+                // Like the Ports tile: apps are added here too.
+                options = { host.push(PopMenuScene(host, "Android", listOf(
+                    UiItem("Add an Android app...", onSelect = { host.push(AppPickerScene.android(host, onRescan)) }),
+                ))) })
         }
         for (sys in systems) {
             // Empty folders stay hidden; a folder with files MainUI can't play is shown so it can say why,
@@ -113,7 +118,7 @@ object HomeScenes {
         if (sys.id == io.github.marsinsanity.mainui.data.AndroidPorts.SYSTEM) {
             // Ports: no core or scraper; Android apps are added here.
             host.push(PopMenuScene(host, sys.name, listOf(
-                UiItem("Add an Android app...", onSelect = { host.push(PortAppPickerScene(host, onRescan)) }),
+                UiItem("Add an Android app...", onSelect = { host.push(AppPickerScene.ports(host, onRescan)) }),
                 UiItem("Rescan folder", onSelect = {
                     MainUI.games.invalidate()
                     // (The system as it is now: its folder may have appeared since the tile was made.)

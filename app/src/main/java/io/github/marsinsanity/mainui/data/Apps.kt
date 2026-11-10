@@ -66,12 +66,30 @@ class Apps(private val ctx: Context, private val library: Library, private val s
     /** Apps in the Ports system (files in the ports folders, see AndroidPorts). */
     private fun portPackages(): Set<String> = runCatching { io.github.marsinsanity.mainui.MainUI.games.portPackages() }.getOrDefault(emptySet())
 
-    /** Apps for the Apps menu: not hidden, not sorted into the Android or Ports system. */
+    /** Apps for the Apps menu: not hidden, not sorted into the Android or Ports system or the Emulators menu. */
     fun visibleApps(): List<AppInfo> {
         val hidden = library.hiddenApps()
         val games = library.androidGames()
         val ports = portPackages()
-        return all().filter { it.pkg !in hidden && it.pkg !in games && it.pkg !in ports }
+        val emus = emulatorApps().mapTo(HashSet()) { it.pkg }
+        return all().filter { it.pkg !in hidden && it.pkg !in games && it.pkg !in ports && it.pkg !in emus }
+    }
+
+    /**
+     * The Emulators menu: installed emulators MainUI knows (RetroArch, its recipes and their other
+     * builds) and apps put there by hand, less those moved back to Apps; never hidden apps,
+     * Android games or ports.
+     */
+    fun emulatorApps(): List<AppInfo> {
+        val (added, removed) = library.emulatorChoices()
+        val hidden = library.hiddenApps()
+        val games = library.androidGames()
+        val ports = portPackages()
+        val em = runCatching { io.github.marsinsanity.mainui.MainUI.emulators }.getOrNull()
+        return all().filter { a ->
+            a.pkg !in hidden && a.pkg !in games && a.pkg !in ports &&
+                (a.pkg in added || (a.pkg !in removed && em?.isEmulatorPackage(a.pkg, a.label) == true))
+        }
     }
 
     fun hiddenApps(): List<AppInfo> {
