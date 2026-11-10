@@ -204,7 +204,7 @@ exposes:
 | Vita3K | PS Vita (`psvita`, `.psvita` files holding the title ID) | No save states |
 | hakuX | Xbox (`xbox`) | Through hakuX's own menu |
 | PPSSPP | PSP (`psp`) | Hotkeys F2 / F4 (PPSSPP's keyboard defaults) |
-| DuckStation | PS1 (`psx`) | Hotkeys F1 / F2 |
+| DuckStation | PS1 (`psx`) | Hotkeys F2 / F1 (DuckStation's defaults: F1 loads, F2 saves) |
 | DraStic, melonDS | DS (`nds`) | Hotkeys F1 / F2 |
 | Dolphin | GameCube / Wii (`gc`, `wii`) | Hotkeys F1 / F2 |
 | Azahar, Lime3DS, Citra | 3DS (`3ds`) | Hotkeys F1 / F2 |

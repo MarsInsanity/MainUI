@@ -60,20 +60,33 @@ object RomUnzip {
      * readmes. Empty when it holds no game. The game count comes along.
      */
     fun pick(entries: List<Pair<String, Long>>, accepts: (String) -> Boolean): Pair<List<Pair<String, Long>>, Int> {
-        val files = entries.map { (n, s) -> n.replace('\\', '/') to s }.filter { (n, _) ->
-            !n.endsWith("/") && !n.startsWith("__MACOSX/") && !n.substringAfterLast('/').startsWith(".") &&
-                n.substringAfterLast('.', "").lowercase() !in JUNK
-        }
+        val files = entries.map { (n, s) -> n.replace('\\', '/') to s }.filter { (n, _) -> keeps(n) }
         val games = files.count { accepts(it.first.substringAfterLast('/')) }
         return if (games == 0) emptyList<Pair<String, Long>>() to 0 else files to games
     }
 
-    /** Entry names (with "/" separators, folders ending in "/") and unpacked sizes of [f]: a .zip or .rar. */
+    /**
+     * A RAR with a dictionary limit the app's memory can hold: a bigger one is refused (an
+     * exception, reported) instead of an OutOfMemoryError on the unpacking thread.
+     */
+    private fun openRar(f: File) = com.github.junrar.Archive(f,
+        com.github.junrar.ArchiveOptions.builder().maxDictionarySize(Runtime.getRuntime().maxMemory() / 2).build())
+
+    /**
+     * Entry names (with "/" separators, folders ending in "/") and unpacked sizes of [f]: a .zip or
+     * .rar. For a multi-part RAR only the files starting in the first part (the rest are only seen
+     * while unpacking; see [unpackRar]).
+     */
     fun list(f: File): List<Pair<String, Long>> =
-        if (f.extension.equals("rar", true)) com.github.junrar.Archive(f).use { a ->
+        if (f.extension.equals("rar", true)) openRar(f).use { a ->
             if (a.isEncrypted) throw IOException("it is password protected")
-            a.fileHeaders.map { h -> (h.fileName.replace('\\', '/') + if (h.isDirectory) "/" else "") to h.fullUnpackSize.coerceAtLeast(0) }
+            a.fileHeaders.filter { !it.isSplitBefore }
+                .map { h -> (h.fileName.replace('\\', '/') + if (h.isDirectory) "/" else "") to h.fullUnpackSize.coerceAtLeast(0) }
         } else ZipFile(f).use { z -> z.entries().asSequence().map { it.name to it.size.coerceAtLeast(0) }.toList() }
+
+    /** Whether an archive file [name] is unpacked at all (folders, Mac / hidden files and readmes aren't). */
+    private fun keeps(name: String) = !name.endsWith("/") && !name.startsWith("__MACOSX/") &&
+        !name.substringAfterLast('/').startsWith(".") && name.substringAfterLast('.', "").lowercase() !in JUNK
 
     /** The files of the archive [f]: all parts of a multi-part RAR ("X.part1.rar", "X.part2.rar"... or "X.rar", "X.r00"...). */
     fun partsOf(f: File): List<File> {
@@ -105,9 +118,19 @@ object RomUnzip {
                 try {
                     val (files, games) = pick(list(f), accepts)
                     val parts = partsOf(f)
-                    // Unknown sizes count as the archive's own size: never less than that unpacked.
-                    if (files.isNotEmpty()) out += Archive(f, files.map { it.first },
-                        maxOf(files.sumOf { it.second }, parts.sumOf { it.length() }), games, parts)
+                    if (files.isNotEmpty()) {
+                        // Only what still has to be written counts (a run stopped part way and started
+                        // again); unknown sizes as the archive's own size, never less than that unpacked.
+                        // A multi-part set lists only its first part's files: half as much again as all parts.
+                        val todo = files.filter { (n, size) -> target(d, n)?.let { it.exists() && it.length() == size } != true }
+                        val packed = parts.sumOf { it.length() }
+                        val bytes = when {
+                            todo.isEmpty() && parts.size == 1 -> 0L
+                            parts.size > 1 -> maxOf(todo.sumOf { it.second }, packed + packed / 2)
+                            else -> maxOf(todo.sumOf { it.second }, packed)
+                        }
+                        out += Archive(f, files.map { it.first }, bytes, games, parts)
+                    }
                 } catch (e: Exception) {
                     problems?.add(f to (e.message ?: e.javaClass.simpleName))
                 }
@@ -134,17 +157,22 @@ object RomUnzip {
         return f.takeIf { runCatching { it.canonicalPath.startsWith(base) }.getOrDefault(false) }
     }
 
-    /** Counts for one archive. */
-    private class Tally { var written = 0; var already = 0; var differs: String? = null }
+    /** Counts for one archive; [checkCrc]: existing files must match the archive's CRC to count as unpacked. */
+    private class Tally(val checkCrc: Boolean) { var written = 0; var already = 0; var differs: String? = null }
+
+    private fun crcOf(f: File): Long = java.util.zip.CRC32().also { c ->
+        f.inputStream().use { input -> val buf = ByteArray(1 shl 20); while (true) { val n = input.read(buf); if (n < 0) break; c.update(buf, 0, n) } }
+    }.value
 
     /**
-     * Writes one entry to [dest] through a ".part" file. An existing [dest] is left alone:
-     * counted as already unpacked when it has the entry's [size], else noted as a different file.
-     * Returns whether it was written.
+     * Writes one entry to [dest] through a ".part" file. An existing [dest] is left alone: counted
+     * as already unpacked when it has the entry's [size] (and, when the archive is to be deleted,
+     * its [crc]), else noted as a different file, which keeps the archive. Returns whether it was written.
      */
-    private fun write(dest: File, size: Long, t: Tally, copy: (OutputStream) -> Unit): Boolean {
+    private fun write(dest: File, size: Long, crc: Long?, t: Tally, copy: (OutputStream) -> Unit): Boolean {
         if (dest.exists()) {
-            if (size < 0 || dest.length() == size) t.already++ else t.differs = dest.name
+            val same = size >= 0 && dest.length() == size && (!t.checkCrc || crc == null || crcOf(dest) == crc)
+            if (same) t.already++ else t.differs = dest.name
             return false
         }
         dest.parentFile?.mkdirs()
@@ -166,31 +194,41 @@ object RomUnzip {
 
     private fun unpackZip(a: Archive, dir: File, t: Tally, cancelled: () -> Boolean) {
         ZipFile(a.file).use { z ->
+            // Names as listed ("\\" made "/"): some Windows tools store "Game\\Game.iso".
+            val byName = z.entries().asSequence().associateBy { it.name.replace('\\', '/') }
             for (name in a.entries) {
                 if (cancelled()) throw StopException()
-                val e = z.getEntry(name) ?: continue
+                // Never "done" (and deleted) with a file left in it.
+                val e = byName[name] ?: throw IOException("can't find $name in it")
                 val dest = target(dir, name) ?: continue // outside the folder: never written
-                write(dest, e.size, t) { out -> z.getInputStream(e).use { it.copyTo(out, 1 shl 20) } }
+                write(dest, e.size, e.crc.takeIf { it >= 0 }, t) { out -> z.getInputStream(e).use { it.copyTo(out, 1 shl 20) } }
             }
         }
     }
 
     /**
-     * RAR entries are read in archive order: in a solid archive each file needs the ones before
-     * it, so the ones not written (readmes, files already there) are still unpacked, into nothing.
+     * RAR entries are read in archive order, across all parts of a multi-part set: unpacking a
+     * file that goes on in the next part moves to that part, whose files follow (so in a set every
+     * file worth keeping is unpacked, not only the first part's listed ones). In a solid archive
+     * each file needs the ones before it, so files not written (readmes, files already there) are
+     * still unpacked, into nothing, as are split ones (to reach the next part).
      */
     private fun unpackRar(a: Archive, dir: File, t: Tally, cancelled: () -> Boolean) {
         val wanted = a.entries.toHashSet()
-        com.github.junrar.Archive(a.file).use { ar ->
+        val multi = a.parts.size > 1
+        openRar(a.file).use { ar ->
             if (ar.isEncrypted) throw IOException("it is password protected")
             val solid = ar.mainHeader?.isSolid == true
-            for (h in ar.fileHeaders) {
+            while (true) {
                 if (cancelled()) throw StopException()
-                if (h.isDirectory) continue
+                val h = ar.nextFileHeader() ?: break
+                if (h.isDirectory || h.isSplitBefore) continue // (the rest of a file from the part before)
                 val name = h.fileName.replace('\\', '/')
-                val dest = if (name in wanted) target(dir, name) else null // outside the folder: never written
-                val written = dest != null && write(dest, h.fullUnpackSize, t) { out -> ar.extractFile(h, out) }
-                if (!written && solid) ar.extractFile(h, Discard)
+                val want = if (multi) keeps(name) else name in wanted
+                val dest = if (want) target(dir, name) else null // outside the folder: never written
+                val crc = if (h.hasFileCrc() && !h.isSplitAfter) h.fileCRC.toLong() and 0xFFFFFFFFL else null
+                val written = dest != null && write(dest, h.fullUnpackSize, crc, t) { out -> ar.extractFile(h, out) }
+                if (!written && (solid || h.isSplitAfter)) ar.extractFile(h, Discard)
             }
         }
     }
@@ -220,15 +258,19 @@ object RomUnzip {
             if (dir.usableSpace < a.bytes + MARGIN) {
                 return finish(false, "Not enough space for ${a.file.name}: it needs ${size(a.bytes + MARGIN)}, ${size(dir.usableSpace)} is free")
             }
-            val t = Tally()
+            val t = Tally(checkCrc = mode != Mode.KEEP) // an archive to be deleted mustn't count a lookalike as its file
             var ok = true
             try {
                 if (a.isRar) unpackRar(a, dir, t, cancelled) else unpackZip(a, dir, t, cancelled)
             } catch (e: StopException) {
                 unpacked += t.written; existing += t.already
                 return finish(true, null)
+            } catch (e: OutOfMemoryError) {
+                ok = false
+                failed += a.file to "needs too much memory to unpack"
             } catch (e: Exception) {
-                ok = !a.isRar && fallback?.invoke(a.file, dir) == true
+                // The root fallback only for a folder MainUI can't write to (not a damaged archive).
+                ok = !a.isRar && e is java.io.FileNotFoundException && fallback?.invoke(a.file, dir) == true
                 if (!ok) failed += a.file to (e.message ?: e.javaClass.simpleName)
             }
             unpacked += t.written; existing += t.already
