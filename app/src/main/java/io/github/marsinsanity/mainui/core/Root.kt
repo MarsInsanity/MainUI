@@ -259,11 +259,18 @@ object Root {
 
     fun kill(pid: Int): Boolean = exec("kill -9 $pid").ok
 
-    fun keyEvent(vararg keyCodes: String): Boolean {
+    /** A key name `input keyevent` takes: KEYCODE_F1, F1 or a number. Nothing else ever reaches the shell. */
+    private val keyName = Regex("^(KEYCODE_)?[A-Z0-9_]{1,40}$")
+
+    fun keyEvent(vararg keys: String): Boolean {
+        val keyCodes = keys.map { it.trim().uppercase() }
         if (keyCodes.isEmpty()) return false
-        return if (keyCodes.size == 1) exec("input keyevent ${keyCodes[0]}").ok
-        else exec("input keycombination ${keyCodes.joinToString(" ")}").ok ||
-            exec("input keyevent ${keyCodes.joinToString(" ")}").ok
+        // Hotkey specs come from emulators.json, which users (or other apps) can edit: only key
+        // names go to the root shell, quoted, so a spec can never run anything else.
+        if (keyCodes.any { !keyName.matches(it) }) { Log.w(TAG, "refused key spec ${keys.joinToString("+")}"); return false }
+        val args = keyCodes.joinToString(" ") { q(it) }
+        return if (keyCodes.size == 1) exec("input keyevent $args").ok
+        else exec("input keycombination $args").ok || exec("input keyevent $args").ok
     }
 
     fun screencap(dest: File): Boolean {

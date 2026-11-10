@@ -48,6 +48,9 @@ object ScrapeState {
 object Scraper {
     private const val TAG = "MainUI.Scraper"
     private val cancel = AtomicBoolean(false)
+    /** ScreenScraper connection failures in a row: past [SS_DOWN_AFTER] it is skipped for the run. */
+    private val ssFailures = java.util.concurrent.atomic.AtomicInteger()
+    private const val SS_DOWN_AFTER = 5
 
     fun cancel() { if (ScrapeState.running) { cancel.set(true); ScrapeState.message = "Stopping..." } }
 
@@ -73,6 +76,7 @@ object Scraper {
         st.reset()
         st.running = true
         cancel.set(false)
+        ssFailures.set(0)
         logOut = runCatching { File(MainUI.storage.dataDir("logs"), "scraper.txt").bufferedWriter() }.getOrNull()
         fileLog("MainUI ${io.github.marsinsanity.mainui.BuildConfig.VERSION_NAME}, sources ${MainUI.settings.artSources}, " +
             "ScreenScraper developer ID ${if (ScreenScraper.hasDevCredentials()) "set" else "not set"}, " +
@@ -170,8 +174,10 @@ object Scraper {
             }
             pool.shutdown()
             pool.awaitTermination(7, TimeUnit.DAYS)
-            gamelists.values.forEach { gl -> synchronized(gl) { runCatching { gl.save() } } }
-            dats.values.forEach { d -> synchronized(d) { runCatching { d.save() } } }
+            var unsaved = 0
+            gamelists.values.forEach { gl -> synchronized(gl) { runCatching { gl.save() }.onFailure { unsaved++; fileLog("not saved: ${it.message}") } } }
+            dats.values.forEach { d -> synchronized(d) { runCatching { d.save() }.onFailure { unsaved++; fileLog("not saved: ${it.message}") } } }
+            if (unsaved > 0) st.addLog("$unsaved metadata file(s) could not be read, so they were left as they were (see logs/scraper.txt)")
             MainUI.games.invalidate()
             if (!fatal.get()) st.message = when {
                 cancel.get() -> "Cancelled"
@@ -239,17 +245,31 @@ object Scraper {
         }
         fun rel(f: File) = if (f.absolutePath.startsWith(sysRoot.absolutePath + "/")) "./" + f.relativeTo(sysRoot).path else f.absolutePath
 
-        if (api != null && ssId != null) {
+        // A ScreenScraper problem with this game (server down, error page, media download failed)
+        // doesn't end it: the free sources still get their turn, and what SS did send is kept.
+        // Only account-level errors (quota, login) and "too many threads" go up to the run.
+        var ssError: Exception? = null
+        fun ssFailed(e: Exception) {
+            if (e is ScreenScraper.ApiException && (e.fatal || e.tooManyThreads)) throw e
+            if (e !is ScreenScraper.ApiException && ssFailures.incrementAndGet() == SS_DOWN_AFTER)
+                fileLog("ScreenScraper unreachable $SS_DOWN_AFTER times in a row: skipped for the rest of this run")
+            ssError = e
+        }
+        if (api != null && ssId != null && ssFailures.get() < SS_DOWN_AFTER) {
             limiter.acquire()
-            info = api.gameInfo(ssId, file, hashes, MainUI.settings.ssLanguage, regions())
+            info = try {
+                api.gameInfo(ssId, file, hashes, MainUI.settings.ssLanguage, regions()).also { ssFailures.set(0) }
+            } catch (e: java.io.IOException) { ssFailed(e); null }
             val media = info?.let {
                 api.pickMedia(it, MainUI.settings.ssMedia, regions()) ?: api.pickMedia(it, "box-2D", regions()) ?: api.pickMedia(it, "ss", regions())
             }
             if (media != null) {
                 val ext = if (media.format.equals("jpg", true) || media.format.equals("jpeg", true)) "jpg" else "png"
                 val d = dest(ext)
-                api.download(media, d, MainUI.settings.ssMaxImageWidth)
-                imageRel = rel(d)
+                try {
+                    api.download(media, d, MainUI.settings.ssMaxImageWidth)
+                    imageRel = rel(d)
+                } catch (e: java.io.IOException) { ssFailed(e) }
             }
         }
         // Box art from the free sources when ScreenScraper had none (or isn't used).
@@ -257,7 +277,11 @@ object Scraper {
             val d = dest("png")
             FreeArt.find(freeArt, sys.id, file, d, MainUI.settings.ssMaxImageWidth, hashes?.crc)?.let { imageRel = rel(d); source = it }
         }
-        if (info == null && imageRel == null) return Result.NOT_FOUND
+        if (info == null && imageRel == null) {
+            if (cancel.get() && ssError is java.io.InterruptedIOException) return Result.SKIPPED
+            ssError?.let { throw it } // nothing found anywhere: report why SS failed
+            return Result.NOT_FOUND
+        }
         val format = MainUI.settings.ssMetaFormat
         if (info != null && (format == "logiqx" || format == "both")) {
             val d = dats.getOrPut(sysRoot.absolutePath) { LogiqxDat.forWriting(sysRoot) }
@@ -267,9 +291,9 @@ object Scraper {
             }
         }
         // The image path always goes to gamelist.xml (that is where it is read from), metadata when wanted.
-        if (format != "none" || info == null) {
+        val meta = info != null && (format == "gamelist" || format == "both")
+        if (imageRel != null || meta) {
             val gl = gamelists.getOrPut(sysRoot.absolutePath) { GameListXml(sysRoot).load() }
-            val meta = info != null && (format == "gamelist" || format == "both")
             synchronized(gl) {
                 gl.put(file) { e ->
                     if (meta) {
@@ -305,6 +329,8 @@ object Scraper {
 
     /** Scrapes one game synchronously (game options menu). Returns a message for the UI. */
     fun scrapeOne(game: Game): String {
+        // A full run keeps its own copies of the gamelists and would write over this game's entry.
+        if (ScrapeState.running) return "The scraper is running: this game is scraped with the others"
         val sys = io.github.marsinsanity.mainui.ui.scenes.Launch.gameSystem(game.systemId) ?: return "Unknown system"
         val sources = MainUI.settings.artSources.split(',').map { it.trim() }.filter { it.isNotEmpty() }
         val free = sources.filter { it != "ss" }

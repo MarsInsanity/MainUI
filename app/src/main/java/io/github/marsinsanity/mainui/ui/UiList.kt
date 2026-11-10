@@ -90,15 +90,23 @@ class UiList(val large: Boolean = false) {
     }
 
     /** Handles left/right on MULTI and TOGGLE items. */
-    fun change(delta: Int): Boolean {
+    /**
+     * Steps a MULTI value / flips a TOGGLE. [repeat] (a held direction): a MULTI stops at its ends
+     * instead of wrapping round (holding RIGHT on Brightness must not end on the lowest value) and
+     * a TOGGLE doesn't flip again and again.
+     */
+    fun change(delta: Int, repeat: Boolean = false): Boolean {
         val it = current ?: return false
         if (it.disabled) return false
         when (it.type) {
             ItemType.MULTI -> {
                 if (it.values.isEmpty()) return false
-                it.value = (it.value + delta + it.values.size) % it.values.size
+                val next = if (repeat) (it.value + delta).coerceIn(0, it.values.size - 1)
+                else (it.value + delta + it.values.size) % it.values.size
+                if (next == it.value) return false
+                it.value = next
             }
-            ItemType.TOGGLE -> it.value = if (it.value == 1) 0 else 1
+            ItemType.TOGGLE -> if (repeat) return false else it.value = if (it.value == 1) 0 else 1
             else -> return false
         }
         it.onChange?.invoke(it)

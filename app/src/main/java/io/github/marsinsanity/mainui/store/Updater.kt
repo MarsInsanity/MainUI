@@ -70,6 +70,14 @@ object Updater {
     /** The newest build on GitHub (whether or not it is newer than this one). */
     fun newest(): Update? = parseReleases(Http.text("$api/releases?per_page=30")).firstOrNull()
 
+    private val checking = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** The automatic check: skipped (null) while another one is running. */
+    fun checkIfIdle(): Update? {
+        if (!checking.compareAndSet(false, true)) return null
+        try { return check() } finally { checking.set(false) }
+    }
+
     /** Asks GitHub for the newest build and remembers whether it is newer than this one. */
     fun check(): Update? {
         val u = newest()

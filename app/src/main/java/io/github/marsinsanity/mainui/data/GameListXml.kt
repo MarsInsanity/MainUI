@@ -10,7 +10,10 @@ import java.io.StringReader
  *
  * Real world gamelist files are often not well formed (bare '&', stray control
  * characters), so input is sanitised before parsing and unknown tags are kept
- * verbatim so rewriting never loses data written by other tools.
+ * verbatim so rewriting never loses data written by other tools: other top-level
+ * elements (Skraper's <provider>, ES-DE's <alternativeEmulator>) and game children
+ * with attributes, nested tags or repeats (Batocera's <scrap name=".." date=".."/>).
+ * A file that could not be parsed completely is never overwritten ([save] throws).
  */
 class GameListXml(val dir: File) : MetaLookup {
 
@@ -19,6 +22,8 @@ class GameListXml(val dir: File) : MetaLookup {
         val isFolder: Boolean = false,
         val fields: LinkedHashMap<String, String> = LinkedHashMap(),
         val attrs: LinkedHashMap<String, String> = LinkedHashMap(),
+        /** Children kept as written (attributes, nested tags, repeats): written back unchanged. */
+        val raw: MutableList<String> = mutableListOf(),
     ) {
         val name get() = fields["name"]
         val image get() = fields["image"]
@@ -31,34 +36,52 @@ class GameListXml(val dir: File) : MetaLookup {
 
     val file = File(dir, "gamelist.xml")
     private val entries = LinkedHashMap<String, Entry>()
+    /** Top-level elements other than games / folders, as written. */
+    private val others = mutableListOf<String>()
     var loaded = false
+        private set
+    /** Why the file couldn't be read completely (null = it was): then it is never overwritten. */
+    var parseError: String? = null
         private set
 
     fun load(): GameListXml {
         entries.clear()
+        others.clear()
+        parseError = null
         loaded = true
         if (!file.isFile) return this
-        val raw = runCatching { file.readText() }.getOrNull() ?: return this
-        val parser = Xml.newPullParser()
+        val raw = runCatching { file.readText() }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
+        // An empty file (or just the XML declaration) is an empty list, not a broken one.
+        if (isEmptyXml(raw)) return this
+        val parser = newParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         try {
             parser.setInput(StringReader(sanitize(raw)))
             var current: Entry? = null
             var depth = 0
+            var sawRoot = false
             var ev = parser.eventType
             while (ev != XmlPullParser.END_DOCUMENT) {
                 when (ev) {
                     XmlPullParser.START_TAG -> {
                         depth++
+                        if (depth == 1) sawRoot = true
                         val tag = parser.name
                         if (depth == 2 && (tag == "game" || tag == "folder")) {
                             val attrs = LinkedHashMap<String, String>()
                             for (i in 0 until parser.attributeCount) attrs[parser.getAttributeName(i)] = parser.getAttributeValue(i)
                             current = Entry("", tag == "folder", attrs = attrs)
+                        } else if (depth == 2) {
+                            others += readElement(parser).raw
+                            depth-- // consumed its END_TAG
                         } else if (depth == 3 && current != null) {
-                            val text = readText(parser)
-                            depth-- // readText consumed the END_TAG
-                            if (tag == "path") current.path = text.trim() else current.fields[tag] = text
+                            val el = readElement(parser)
+                            depth--
+                            when {
+                                tag == "path" -> current.path = el.text.trim()
+                                el.simple && tag !in current.fields -> current.fields[tag] = el.text
+                                else -> current.raw += el.raw
+                            }
                         }
                     }
                     XmlPullParser.END_TAG -> {
@@ -71,24 +94,13 @@ class GameListXml(val dir: File) : MetaLookup {
                 }
                 ev = parser.next()
             }
+            // Text that isn't XML at all (a clrmamepro DAT, some other file): not ours to rewrite.
+            if (!sawRoot) throw org.xmlpull.v1.XmlPullParserException("no XML elements in it")
         } catch (e: Exception) {
-            android.util.Log.w("MainUI.GameList", "Failed to parse ${file.path}: ${e.message}")
+            parseError = e.message ?: e.javaClass.simpleName
+            runCatching { android.util.Log.w("MainUI.GameList", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
         }
         return this
-    }
-
-    private fun readText(p: XmlPullParser): String {
-        val sb = StringBuilder()
-        var depth = 1
-        while (depth > 0) {
-            when (p.next()) {
-                XmlPullParser.TEXT -> sb.append(p.text)
-                XmlPullParser.START_TAG -> depth++
-                XmlPullParser.END_TAG -> depth--
-                XmlPullParser.END_DOCUMENT -> return sb.toString()
-            }
-        }
-        return sb.toString()
     }
 
     override fun get(romFile: File): Entry? = entries[normalize(relPath(romFile))]
@@ -118,9 +130,15 @@ class GameListXml(val dir: File) : MetaLookup {
     fun relPath(romFile: File): String =
         runCatching { romFile.relativeTo(dir).path }.getOrDefault(romFile.name)
 
+    /**
+     * Writes the list back. Throws (and writes nothing) when the file on disk couldn't be read
+     * completely: rewriting it from the part that was read would drop everything after the error.
+     */
     fun save() {
+        parseError?.let { throw java.io.IOException("${file.path} could not be read ($it): not overwriting it") }
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\"?>\n<gameList>\n")
+        for (o in others) sb.append('\t').append(o).append('\n')
         for (e in entries.values) {
             val tag = if (e.isFolder) "folder" else "game"
             sb.append("\t<").append(tag)
@@ -128,10 +146,12 @@ class GameListXml(val dir: File) : MetaLookup {
             sb.append(">\n")
             sb.append("\t\t<path>").append(escape(e.path)).append("</path>\n")
             for ((k, v) in e.fields) sb.append("\t\t<").append(k).append('>').append(escape(v)).append("</").append(k).append(">\n")
+            for (r in e.raw) sb.append("\t\t").append(r).append('\n')
             sb.append("\t</").append(tag).append(">\n")
         }
         sb.append("</gameList>\n")
-        val tmp = File(dir, "gamelist.xml.tmp")
+        // A temp file of its own: two saves at once (a single-game scrape during a run) never share one.
+        val tmp = File(dir, "gamelist.xml.${Thread.currentThread().id}.${System.nanoTime()}.tmp")
         tmp.writeText(sb.toString())
         if (file.exists()) {
             val bak = File(dir, "gamelist.xml.bak")
@@ -143,12 +163,53 @@ class GameListXml(val dir: File) : MetaLookup {
     }
 
     companion object {
+        /** The XML parser (Android's; unit tests put in kxml2). */
+        @Volatile var newParser: () -> XmlPullParser = { Xml.newPullParser() }
+
+        /** One element: its text, whether it is plain (no attributes or child tags), and its XML as written. */
+        class Element(val text: String, val simple: Boolean, val raw: String)
+
+        /** Reads the element whose START_TAG was just read, up to and including its END_TAG. */
+        fun readElement(p: XmlPullParser): Element {
+            val text = StringBuilder()
+            val raw = StringBuilder()
+            var simple = p.attributeCount == 0
+            fun startTag() {
+                raw.append('<').append(p.name)
+                for (i in 0 until p.attributeCount) raw.append(' ').append(p.getAttributeName(i)).append("=\"").append(escape(p.getAttributeValue(i))).append('"')
+            }
+            startTag()
+            val names = arrayListOf(p.name)
+            var open = true // right after a start tag: an element without content is written <x/>
+            while (names.isNotEmpty()) {
+                when (p.next()) {
+                    XmlPullParser.START_TAG -> { if (open) raw.append('>'); simple = false; startTag(); names += p.name; open = true }
+                    XmlPullParser.TEXT -> {
+                        if (open) { raw.append('>'); open = false }
+                        raw.append(escape(p.text))
+                        if (names.size == 1) text.append(p.text)
+                    }
+                    XmlPullParser.END_TAG -> {
+                        val n = names.removeAt(names.size - 1)
+                        if (open) raw.append("/>") else raw.append("</").append(n).append('>')
+                        open = false
+                    }
+                    XmlPullParser.END_DOCUMENT -> throw org.xmlpull.v1.XmlPullParserException("unexpected end of file in <${names.first()}>")
+                }
+            }
+            return Element(text.toString(), simple, raw.toString())
+        }
+
         fun normalize(p: String): String {
             var s = p.trim().replace('\\', '/')
             while (s.startsWith("./")) s = s.substring(2)
             return s.lowercase()
         }
 
+        private val XML_DECL = Regex("<\\?xml[^>]*\\?>")
+
+        /** Nothing but whitespace and maybe the XML declaration: an empty file, not a broken one. */
+        fun isEmptyXml(raw: String) = raw.replace(XML_DECL, "").isBlank()
         private val BARE_AMP = Regex("&(?!(?:amp|lt|gt|quot|apos|#\\d+|#x[0-9a-fA-F]+);)")
         private val BAD_CHARS = Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]")
 

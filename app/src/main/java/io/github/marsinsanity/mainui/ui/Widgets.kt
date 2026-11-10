@@ -35,8 +35,8 @@ open class ListScene(
         Btn.R1 -> list.pageDown()
         Btn.L2 -> list.letter(false)
         Btn.R2 -> list.letter(true)
-        Btn.LEFT -> if (list.current?.type == ItemType.MULTI || list.current?.type == ItemType.TOGGLE) list.change(-1) else list.pageUp()
-        Btn.RIGHT -> if (list.current?.type == ItemType.MULTI || list.current?.type == ItemType.TOGGLE) list.change(1) else list.pageDown()
+        Btn.LEFT -> if (list.current?.type == ItemType.MULTI || list.current?.type == ItemType.TOGGLE) list.change(-1, repeat) else list.pageUp()
+        Btn.RIGHT -> if (list.current?.type == ItemType.MULTI || list.current?.type == ItemType.TOGGLE) list.change(1, repeat) else list.pageDown()
         Btn.A -> { if (!repeat) activate(); true }
         Btn.B -> { if (!repeat) back(); true }
         else -> false
@@ -120,9 +120,10 @@ class DialogScene(
     private val onConfirm: () -> Unit = {},
 ) : Scene(host) {
     override val isOverlay = true
+    private var box: android.graphics.RectF? = null
 
     override fun draw(g: Gfx) {
-        g.dialog(title, message)
+        box = g.dialog(title, message)
         g.footer(confirmLabel, cancelLabel, covering = true)
     }
 
@@ -136,7 +137,16 @@ class DialogScene(
         return true
     }
 
-    override fun onTap(x: Float, y: Float): Boolean { close(); onConfirm(); return true }
+    /**
+     * A tap on the box confirms; a tap beside it backs out, like B (never "Download all cores" or
+     * "Remove" by tapping away). An OK-only dialog closes on any tap.
+     */
+    override fun onTap(x: Float, y: Float): Boolean {
+        val inside = box?.contains(x, y) ?: true
+        close()
+        if (inside || cancelLabel == null) onConfirm() else onCancel()
+        return true
+    }
 }
 
 /** "Working..." panel over the current screen; swallows input until the caller pops it. */
@@ -184,8 +194,8 @@ class PopMenuScene(
     override fun onKey(b: Btn, repeat: Boolean): Boolean = when (b) {
         Btn.UP -> list.up(repeat)
         Btn.DOWN -> list.down(repeat)
-        Btn.LEFT -> list.change(-1)
-        Btn.RIGHT -> list.change(1)
+        Btn.LEFT -> list.change(-1, repeat)
+        Btn.RIGHT -> list.change(1, repeat)
         Btn.A -> {
             if (!repeat) list.current?.takeIf { !it.disabled }?.let { item ->
                 if (item.type == ItemType.TOGGLE) list.change(1) else { close(); item.onSelect?.invoke(item) }

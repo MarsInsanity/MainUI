@@ -268,10 +268,17 @@ class Gfx {
                 "system" -> android.text.format.DateFormat.is24HourFormat(MainUI.app)
                 else -> true
             }
-            val t = SimpleDateFormat(if (h24) "HH:mm" else "h:mm a", Locale.getDefault()).format(Date())
-            text(t, theme.battery.let { FontStyle(it.typeface, 22f, it.color) }, W - 84f, 30f, Align.RIGHT)
+            val pattern = if (h24) "HH:mm" else "h:mm a"
+            val fmt = clockFormat?.takeIf { it.first == pattern && it.second == Locale.getDefault() }?.third
+                ?: SimpleDateFormat(pattern, Locale.getDefault()).also { clockFormat = Triple(pattern, Locale.getDefault(), it) }
+            text(fmt.format(Date(now)), theme.battery.let { FontStyle(it.typeface, 22f, it.color) }, W - 84f, 30f, Align.RIGHT)
+            // Draw again when the minute changes, even on a screen nobody touches.
+            redrawAfter(60_000L - now % 60_000L + 50L)
         }
     }
+
+    /** The clock's formatter, made again only when its pattern or the language changes. */
+    private var clockFormat: Triple<String, Locale, SimpleDateFormat>? = null
 
     /** Battery icon + percentage following Onion's batteryPercentage rules. */
     fun battery(cx: Float, cy: Float) {
@@ -346,6 +353,8 @@ class Gfx {
             // An overlay (dialog, menu, progress) replaces the bar of the screen below it: repaint
             // the background there first, or that screen's hints show through a see-through bar.
             c.save(); c.clipRect(0f, y, W, H); background(); c.restore()
+            // ...and its hints: taps on the bar are for the overlay's buttons only.
+            pendingHints.clear()
         }
         if (bg != null) bar(bg, y, FOOTER) else fillRect(0f, y, W, FOOTER, darken(theme.bgColor, 0.45f))
         val cy = H - 30f
@@ -595,15 +604,23 @@ class Gfx {
     fun dim(alpha: Int = 150) = fillRect(0f, 0f, W, H, Color.argb(alpha, 0, 0, 0))
 
     /** Onion's theme_renderDialog: pop-bg with title + message. */
-    fun dialog(title: String, message: String) {
+    /** Draws a dialog box; returns the box's area (taps outside it dismiss a dialog). */
+    fun dialog(title: String, message: String): RectF {
         dim(120)
         val b = skin("pop-bg")
         val pw = 560f; val ph = 280f
         val x = (W - pw) / 2; val y = (H - ph) / 2 - 10
-        if (b != null) bmp(b, (W - b.width) / 2f, (H - b.height) / 2f - 10, b.width.toFloat(), b.height.toFloat())
-        else { fillRect(x, y, pw, ph, theme.panel, 14f); strokeRect(x, y, pw, ph, theme.accent, 3f, 14f) }
+        val box = if (b != null) {
+            val bx = (W - b.width) / 2f; val by = (H - b.height) / 2f - 10
+            bmp(b, bx, by, b.width.toFloat(), b.height.toFloat())
+            RectF(bx, by, bx + b.width, by + b.height)
+        } else {
+            fillRect(x, y, pw, ph, theme.panel, 14f); strokeRect(x, y, pw, ph, theme.accent, 3f, 14f)
+            RectF(x, y, x + pw, y + ph)
+        }
         text(title, theme.title, W / 2, y + 50, Align.CENTER, maxW = pw - 40)
         paragraph(message, theme.list, W / 2, y + 100, pw - 60, align = Align.CENTER, maxLines = 5)
+        return box
     }
 
     /** Small centred message box (Onion's info panel / toast). */

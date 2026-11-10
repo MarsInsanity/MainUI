@@ -158,7 +158,7 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     private var frozenGen = -1
 
     override fun prepare() {
-        if (reachable == null) reachable = status() != null
+        if (reachable == null) reachable = probe()
         // Official builds: keyboard hotkeys through MainUI's virtual keyboard (needs root).
         if (reachable == false && Root.available()) io.github.marsinsanity.mainui.core.VirtualKeys.warmUp()
     }
@@ -203,6 +203,24 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
 
     /** "GET_STATUS PAUSED snes,Game,crc32=..." or "GET_STATUS CONTENTLESS"; null if unreachable. */
     fun status(): String? = ask("GET_STATUS", 200)
+
+    /**
+     * Whether this RetroArch answers network commands. Remembered for a while per package and
+     * port: every menu open makes a new controller, and official builds never answer, so asking
+     * each time would hold every HOME press up by the full timeout.
+     */
+    private fun probe(): Boolean {
+        val key = "$pkg:$port"
+        val now = android.os.SystemClock.elapsedRealtime()
+        probes[key]?.let { (ok, at) -> if (now - at < if (ok) 30 * 60_000L else 10 * 60_000L) return ok }
+        val ok = status() != null
+        probes[key] = ok to now
+        return ok
+    }
+
+    companion object {
+        private val probes = java.util.concurrent.ConcurrentHashMap<String, Pair<Boolean, Long>>()
+    }
 
     override fun pause(): Boolean {
         prepare()

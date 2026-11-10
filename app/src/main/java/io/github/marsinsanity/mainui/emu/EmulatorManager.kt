@@ -91,7 +91,11 @@ class EmulatorManager(
 ) {
     lateinit var retroarch: EmuDef
         private set
-    private val standalone = LinkedHashMap<String, EmuDef>()
+    /**
+     * Recipes by id. This map and the installed ones below are replaced whole (never changed in
+     * place), so launches and menus reading them on other threads never see one half-rebuilt.
+     */
+    @Volatile private var standalone: Map<String, EmuDef> = emptyMap()
     var raCommandPort = 55355
         private set
 
@@ -109,20 +113,23 @@ class EmulatorManager(
     @Volatile private var lastCoreScan = 0L
     /** core basename -> display name / supported extensions read from RetroArch .info files (root). */
     private val coreInfo = HashMap<String, Pair<String, Set<String>>>()
-    private val installedPkgs = HashMap<String, String?>() // emu id -> installed package
-    private val installedComponents = HashMap<String, Pair<String, String?>?>()
+    @Volatile private var installedPkgs: Map<String, String?> = emptyMap() // emu id -> installed package
+    @Volatile private var installedComponents: Map<String, Pair<String, String?>?> = emptyMap()
+    /** loadDefs / refresh run one at a time (several threads start them). */
+    private val defsLock = Any()
 
     init { loadDefs() }
 
-    fun loadDefs() {
-        standalone.clear()
+    fun loadDefs() = synchronized(defsLock) {
+        val defs = LinkedHashMap<String, EmuDef>()
         val base = JSONObject(ctx.assets.open("emulators.json").bufferedReader().use { it.readText() })
-        apply(base)
+        apply(base, defs)
         val override = File(storage.dataRoot(), "emulators.json")
-        if (override.isFile) runCatching { apply(JSONObject(override.readText())) }
+        if (override.isFile) runCatching { apply(JSONObject(override.readText()), defs) }
+        standalone = defs
     }
 
-    private fun apply(root: JSONObject) {
+    private fun apply(root: JSONObject, standalone: MutableMap<String, EmuDef>) {
         root.optJSONObject("retroarch")?.let { r ->
             retroarch = parseDef("retroarch", r)
             raCommandPort = r.optInt("commandPort", raCommandPort)
@@ -172,11 +179,11 @@ class EmulatorManager(
     }
 
     /** Re-detect installed packages and RetroArch cores. Call off the main thread. */
-    fun refresh() {
+    fun refresh() = synchronized(defsLock) {
         val pm = ctx.packageManager
         fun installed(p: String) = runCatching { pm.getPackageInfo(p, 0); true }.getOrDefault(false)
-        installedPkgs.clear()
-        installedComponents.clear()
+        val pkgs = HashMap<String, String?>()
+        val comps = HashMap<String, Pair<String, String?>?>()
         fun hasActivity(pkg: String, act: String) = runCatching { pm.getActivityInfo(ComponentName(pkg, act), 0); true }.getOrDefault(false)
         fun launcherOf(pkg: String) = (pm.getLaunchIntentForPackage(pkg) ?: pm.getLeanbackLaunchIntentForPackage(pkg))?.component?.className
         // Launchable apps, for emulators installed under an id the recipes don't list.
@@ -197,10 +204,12 @@ class EmulatorManager(
                     // keep their names under another application id; else its launcher activity.
                     pkg to (d.components.mapNotNull { it.second }.distinct().firstOrNull { hasActivity(pkg, it) } ?: launcherOf(pkg))
                 }
-            installedPkgs[id] = c?.first
-            installedComponents[id] = c
+            pkgs[id] = c?.first
+            comps[id] = c
         }
-        variantPkgs = installedPkgs.values.filterNotNull().toSet()
+        installedPkgs = pkgs
+        installedComponents = comps
+        variantPkgs = pkgs.values.filterNotNull().toSet()
         val ra = settings.raPackageOverride.takeIf { it.isNotBlank() && installed(it) }
             ?: retroarch.packages.firstOrNull { installed(it) }
         raPackage = ra

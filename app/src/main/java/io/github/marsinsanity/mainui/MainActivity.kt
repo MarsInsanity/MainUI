@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import io.github.marsinsanity.mainui.service.OverlayService
 import io.github.marsinsanity.mainui.ui.MainUIView
 import io.github.marsinsanity.mainui.ui.scenes.GameSwitcherScene
 import io.github.marsinsanity.mainui.ui.scenes.HomeScenes
@@ -40,6 +41,20 @@ class MainActivity : Activity() {
         instance = this
         view.setRoot(HomeScenes.root(view))
         if (!MainUI.settings.setupDone || !MainUI.storage.hasAllFilesAccess()) view.push(SetupScene(view))
+        // Started fresh by the overlay's Game Switcher / in-game menu (the activity didn't exist yet).
+        else if (savedInstanceState == null) handleExtras(intent)
+    }
+
+    /** The Game Switcher / fallback in-game menu asked for by an intent. True when handled. */
+    private fun handleExtras(intent: Intent?): Boolean {
+        if (intent == null) return false
+        if (intent.getBooleanExtra(EXTRA_INGAME_MENU, false)) { keepSession = true; showInGameMenuFallback(); return true }
+        if (intent.getBooleanExtra(EXTRA_GAME_SWITCHER, false)) {
+            keepSession = true
+            if (view.top() !is GameSwitcherScene) view.push(GameSwitcherScene(view))
+            return true
+        }
+        return false
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -58,22 +73,22 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val isHome = intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME)
-        if (intent.getBooleanExtra(EXTRA_INGAME_MENU, false)) { keepSession = true; showInGameMenuFallback(); return }
-        if (intent.getBooleanExtra(EXTRA_GAME_SWITCHER, false)) {
-            keepSession = true
-            if (view.top() !is GameSwitcherScene) view.push(GameSwitcherScene(view))
-            return
-        }
+        if (handleExtras(intent)) return
         if (!isHome) return
         val session = MainUI.sessions.active
         if (!resumed && session != null && leftForSession) {
-            // HOME pressed inside a game without the accessibility overlay.
-            // (Long presses can't be told apart here: Android only delivers the HOME intent.)
+            // HOME while a game session exists: the game may still be running behind, keep it.
             keepSession = true
-            when (MainUI.settings.homePress) {
-                "menu" -> showInGameMenuFallback()
-                "gs" -> view.push(GameSwitcherScene(view))
-                else -> {}
+            // HOME pressed inside the game without the accessibility overlay: the fallback menu.
+            // With the overlay running, HOME only gets here when the game wasn't in front (it
+            // handles HOME in games itself), and after starting another app it isn't "in the game".
+            // (Long presses can't be told apart here: Android only delivers the HOME intent.)
+            if (OverlayService.instance == null && MainUI.sessions.lastStartWasSession) {
+                when (MainUI.settings.homePress) {
+                    "menu" -> showInGameMenuFallback()
+                    "gs" -> view.push(GameSwitcherScene(view))
+                    else -> {}
+                }
             }
             return
         }

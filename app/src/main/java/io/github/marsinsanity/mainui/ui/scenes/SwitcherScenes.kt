@@ -162,14 +162,14 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
                 view = if (view == 2) viewRestore else if (view == 0) 1 else 0
                 MainUI.settings.prefs.edit().putInt("gs_view", view).apply()
             }
-            Btn.START -> if (!repeat) { viewRestore = view; view = if (view == 2) viewRestore else 2 }
+            Btn.START -> if (!repeat) { if (view == 2) view = viewRestore else { viewRestore = view; view = 2 } }
             Btn.SELECT -> if (!repeat) {
                 timeMode = (timeMode + 1) % 3
                 MainUI.settings.prefs.edit().putInt("gs_time", timeMode).apply()
                 legendUntil = System.currentTimeMillis() + 2000
             }
             Btn.UP, Btn.DOWN -> {
-                brightness = (brightness + if (b == Btn.UP) 1 else -1).coerceIn(0, 10)
+                brightness = (brightness + if (b == Btn.UP) 1 else -1).coerceIn(1, 10) // 10%..100%, as Settings > Device
                 Brightness.set(ctx, brightness)
                 brightnessUntil = System.currentTimeMillis() + 1500
             }

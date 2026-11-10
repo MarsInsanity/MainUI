@@ -34,21 +34,23 @@ class ThemeStoreScene(host: SceneHost) : ListScene(host, "Get themes") {
 
     private fun load(refresh: Boolean) {
         busy = "Loading theme list..."
-        host.io({ runCatching { ThemeStore.catalog(refresh) } }) { r ->
+        // Which themes are installed is worked out here too: one listing of each Themes folder,
+        // not a storage lookup per catalog entry on the UI thread.
+        host.io({ runCatching { ThemeStore.catalog(refresh) to ThemeStore.installedNames() } }) { r ->
             busy = null
             r.onFailure { host.push(DialogScene(host, "Theme repository", "Could not load the theme list:\n${it.message}", "OK", null)) }
-            r.onSuccess { list -> show(list) }
+            r.onSuccess { (list, installed) -> show(list, installed) }
         }
     }
 
-    private fun show(list: List<ThemeStore.Entry>) {
+    private fun show(list: List<ThemeStore.Entry>, installed: Set<String>) {
         this.list.set(list.map { e ->
             UiItem(e.title, sub = buildString {
-                if (ThemeStore.isInstalled(e)) append("installed  ")
+                if (e.name.lowercase() in installed) append("installed  ")
                 else if (e.featured) append("featured  ")
                 append(e.author.ifEmpty { if (e.remixed) "remix" else "" })
             }.trim(), data = e,
-                preview = { Images.get("themestore:${e.name}", host, 640) { ThemeStore.preview(e) } })
+                preview = { Images.get("themestore:${e.name}", host, 640, network = true) { ThemeStore.preview(e) } })
         })
         title = "Get themes (${list.size})"
     }
@@ -133,12 +135,14 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
         host.io({
             val all = AppStore.apps()
             val q = query.lowercase()
-            all.filter { a ->
+            // Installed versions in one go (not a package lookup per app on the UI thread).
+            val versions = AppStore.installedVersions()
+            Triple(all.filter { a ->
                 (q.isEmpty() || a.name.lowercase().contains(q) || a.summary.lowercase().contains(q) || a.pkg.contains(q)) &&
                     (category == null || category in a.categories) &&
-                    (!updatesOnly || (AppStore.installedVersion(a.pkg)?.let { v -> (a.apk?.versionCode ?: 0) > v } == true))
-            } to all.size
-        }) { (apps, total) ->
+                    (!updatesOnly || (versions[a.pkg]?.let { v -> (a.apk?.versionCode ?: 0) > v } == true))
+            }, all.size, versions)
+        }) { (apps, total, versions) ->
             if (busy == "Loading apps...") busy = null
             val items = mutableListOf(
                 UiItem("Search...", icon = { Glyphs.get("search") }, sub = query.ifEmpty { null }, onSelect = { search() }),
@@ -149,13 +153,13 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
                 UiItem("Repositories", icon = { Glyphs.get("setting") }, sub = "refresh / add", onSelect = { host.push(RepoScene(host)) }),
             )
             for (a in apps.take(1500)) {
-                val installed = AppStore.installedVersion(a.pkg)
+                val installed = versions[a.pkg]
                 val status = when {
                     installed == null -> a.apk?.versionName ?: "incompatible"
                     (a.apk?.versionCode ?: 0) > installed -> "update"
                     else -> "installed"
                 }
-                items += UiItem(a.name, icon = { Images.get("appicon:${a.pkg}", host, 96) { AppStore.icon(a) } },
+                items += UiItem(a.name, icon = { Images.get("appicon:${a.pkg}", host, 96, network = true) { AppStore.icon(a) } },
                     sub = status, data = a, onSelect = { host.push(AppDetailScene(host, a)) })
             }
             list.set(items)
@@ -203,7 +207,7 @@ class AppDetailScene(host: SceneHost, private val app: AppStore.App) : ListScene
         val installed = AppStore.installedVersion(app.pkg)
         val apk = app.apk
         val items = mutableListOf<UiItem>()
-        val preview = { Images.get("appicon:${app.pkg}", host, 256) { AppStore.icon(app) } }
+        val preview = { Images.get("appicon:${app.pkg}", host, 256, network = true) { AppStore.icon(app) } }
         when {
             apk == null -> items += UiItem("No version for this device", disabled = true)
             installed == null -> items += UiItem("Install ${apk.versionName}", sub = sizeLabel(apk.size), preview = preview, onSelect = { install() })
@@ -349,7 +353,7 @@ class EmulatorStoreScene(host: SceneHost) : ListScene(host, "Emulators", large =
     companion object {
         fun emuIcon(host: SceneHost, e: io.github.marsinsanity.mainui.store.EmulatorStore.Entry) =
             e.installed?.let { MainUI.apps.icon(it, 96) }
-                ?: e.fdroid?.let { a -> Images.get("appicon:${a.pkg}", host, 96) { AppStore.icon(a) } }
+                ?: e.fdroid?.let { a -> Images.get("appicon:${a.pkg}", host, 96, network = true) { AppStore.icon(a) } }
                 ?: Glyphs.get("game")
     }
 }
@@ -494,6 +498,7 @@ class EmulatorUpdatesScene(host: SceneHost) : ListScene(host, "Emulator updates"
             val last = eu.lastCheck()
             items += UiItem(when {
                 last == 0L -> "Not checked yet"
+                ups.isEmpty() && eu.lastFailures() > 0 -> "Could not check ${eu.lastFailures()} emulator${if (eu.lastFailures() > 1) "s" else ""} (offline?)"
                 ups.isEmpty() -> "All emulators are up to date"
                 else -> "${ups.size} update${if (ups.size > 1) "s" else ""} available"
             }, sub = if (last > 0) android.text.format.DateUtils.getRelativeTimeSpanString(last).toString() else null,

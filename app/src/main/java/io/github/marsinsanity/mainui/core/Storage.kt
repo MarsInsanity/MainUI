@@ -22,7 +22,24 @@ class Storage(private val ctx: Context, private val settings: Settings) {
         val isInternal get() = !removable
     }
 
+    /**
+     * Volumes and the data root are looked up for every image, screenshot and DAT, often per
+     * frame or per game: remembered for a few seconds (cards come and go far less often).
+     */
+    @Volatile private var volumesCache: Pair<Long, List<Volume>>? = null
+    @Volatile private var dataRootCache: Triple<Long, String, File>? = null
+
+    /** Forget the remembered volumes / data root (setting changed, permission granted, SD swap). */
+    fun invalidate() { volumesCache = null; dataRootCache = null; made.clear() }
+
+    private fun now() = android.os.SystemClock.elapsedRealtime()
+
     fun volumes(): List<Volume> {
+        volumesCache?.let { (at, v) -> if (now() - at < CACHE_MS) return v }
+        return scanVolumes().also { volumesCache = now() to it }
+    }
+
+    private fun scanVolumes(): List<Volume> {
         val out = mutableListOf<Volume>()
         val sm = ctx.getSystemService(StorageManager::class.java)
         runCatching {
@@ -38,7 +55,7 @@ class Storage(private val ctx: Context, private val settings: Settings) {
         }
         // Fallback probe for cards the StorageManager did not report.
         File("/storage").listFiles()?.forEach { f ->
-            if (f.isDirectory && f.name.matches(Regex("[0-9A-F]{4}-[0-9A-F]{4}")) && out.none { it.dir == f }) {
+            if (f.isDirectory && f.name.matches(CARD_NAME) && out.none { it.dir == f }) {
                 out += Volume(f, true, f.name, "SD card")
             }
         }
@@ -73,8 +90,14 @@ class Storage(private val ctx: Context, private val settings: Settings) {
 
     /** Root for MainUI's own data. Prefers an existing MainUI folder. */
     fun dataRoot(): File {
+        val loc = settings.dataLocation
+        dataRootCache?.let { (at, l, f) -> if (l == loc && now() - at < CACHE_MS) return f }
+        return findDataRoot(loc).also { dataRootCache = Triple(now(), loc, it) }
+    }
+
+    private fun findDataRoot(location: String): File {
         val vols = volumes()
-        val choice = when (settings.dataLocation) {
+        val choice = when (location) {
             "sd" -> vols.firstOrNull { it.removable }
             "internal" -> vols.firstOrNull { !it.removable }
             else -> vols.firstOrNull { File(it.dir, "MainUI").isDirectory } ?: vols.firstOrNull { !it.removable }
@@ -88,7 +111,12 @@ class Storage(private val ctx: Context, private val settings: Settings) {
         return root
     }
 
-    fun dataDir(sub: String): File = File(dataRoot(), sub).apply { mkdirs() }
+    /** Folders made already (a mkdirs per lookup is a file-system round trip, often per frame). */
+    private val made = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    fun dataDir(sub: String): File = File(dataRoot(), sub).apply {
+        if (path !in made && (isDirectory || mkdirs())) made += path
+    }
 
     val configDir get() = dataDir("config")
     val screenshotDir get() = dataDir("Screenshots")
@@ -147,6 +175,11 @@ class Storage(private val ctx: Context, private val settings: Settings) {
 
     fun hasAllFilesAccess(): Boolean =
         if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
+
+    companion object {
+        private const val CACHE_MS = 5_000L
+        private val CARD_NAME = Regex("[0-9A-F]{4}-[0-9A-F]{4}")
+    }
 }
 
 fun File.canonicalPathOrSelf(): String = runCatching { canonicalPath }.getOrDefault(absolutePath)

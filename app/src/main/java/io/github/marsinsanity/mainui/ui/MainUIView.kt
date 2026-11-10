@@ -175,6 +175,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         runCatching { context.unregisterReceiver(batteryReceiver) }
+        releaseAll()
         handler.removeCallbacksAndMessages(null)
     }
 
@@ -183,6 +184,9 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
+        // Releases never arrive once the window lost focus: don't leave a button "held" (it would
+        // keep auto-repeating, or swallow its next press).
+        if (!hasWindowFocus) releaseAll()
         onWindowFocus?.invoke(hasWindowFocus)
     }
 
@@ -221,6 +225,14 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         if (!held.remove(b)) return
         if (repeatBtn == b) { repeatBtn = null; handler.removeCallbacks(repeatRunnable) }
         stack.lastOrNull()?.onKeyUp(b)
+    }
+
+    /** Lets go of everything held (focus lost, detached, input cancelled). */
+    private fun releaseAll() {
+        for (b in held.toList()) release(b)
+        axisState.clear()
+        repeatBtn = null
+        handler.removeCallbacks(repeatRunnable)
     }
 
     /** Feeds a logical button press (used by the overlay service and tests). */
@@ -277,6 +289,8 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (event.isFromSource(InputDevice.SOURCE_JOYSTICK) || event.isFromSource(InputDevice.SOURCE_GAMEPAD)) {
+            // The stick / hat stream was cut off (focus moved to a game): nothing stays held.
+            if (event.actionMasked == MotionEvent.ACTION_CANCEL) { releaseAll(); return true }
             if (event.action == MotionEvent.ACTION_MOVE) {
                 val hx = event.getAxisValue(MotionEvent.AXIS_HAT_X)
                 val hy = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
@@ -313,6 +327,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     private var dragY = 0f
 
     private fun toLogical(v: Float) = v / (width / logicalWidth)
+    private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
 
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean {
@@ -323,8 +338,22 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         override fun onSingleTapUp(e: MotionEvent): Boolean = tap(e)
 
         // A quick second tap is reported as a double tap instead of a tap; treat it as one
-        // (first tap selects a row, second opens it).
-        override fun onDoubleTap(e: MotionEvent): Boolean = tap(e)
+        // (first tap selects a row, second opens it). onDoubleTap gets the FIRST tap's position,
+        // so the second tap is handled from its own events: at its own place, when it lifts.
+        override fun onDoubleTap(e: MotionEvent): Boolean = true
+
+        private var secondX = 0f
+        private var secondY = 0f
+        override fun onDoubleTapEvent(e: MotionEvent): Boolean {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { secondX = e.x; secondY = e.y }
+                MotionEvent.ACTION_UP -> {
+                    // Moved away (a quick swipe after a tap): not a tap.
+                    if (abs(e.x - secondX) <= touchSlop && abs(e.y - secondY) <= touchSlop) tap(e)
+                }
+            }
+            return true
+        }
 
         private fun tap(e: MotionEvent): Boolean {
             val x = toLogical(e.x); val y = toLogical(e.y)

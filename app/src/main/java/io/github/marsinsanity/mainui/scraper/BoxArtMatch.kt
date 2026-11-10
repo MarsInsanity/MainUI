@@ -14,13 +14,16 @@ object BoxArtMatch {
     private val trailingArticle = Regex(""", (The|A|An)(?=( - |: |$| \())""", RegexOption.IGNORE_CASE)
     private val leadingArticle = Regex("""^(The|A|An) """, RegexOption.IGNORE_CASE)
     private val disc = Regex("""^Disc \d+""", RegexOption.IGNORE_CASE)
+    private val thumbChars = Regex("""[&*/:`<>?\\|]""")
+    private val marks = Regex("\\p{Mn}+")
+    private val nonAlnum = Regex("[^a-z0-9]+")
 
     val REGIONS = setOf("USA", "Europe", "Japan", "World", "Asia", "Korea", "China", "Taiwan", "Hong Kong", "Brazil",
         "Australia", "Canada", "France", "Germany", "Spain", "Italy", "Netherlands", "Sweden", "UK", "Russia",
         "Scandinavia", "Denmark", "Finland", "Norway", "Portugal", "Greece", "Poland", "Mexico", "Latin America")
 
     /** libretro thumbnail file name for a game name: the characters & * / : ` < > ? \ | become _. */
-    fun thumbName(name: String) = name.replace(Regex("""[&*/:`<>?\\|]"""), "_")
+    fun thumbName(name: String) = name.replace(thumbChars, "_")
 
     fun tags(name: String): List<String> = tagRe.findAll(name).map { it.groupValues[1].trim() }.toList()
 
@@ -32,10 +35,13 @@ object BoxArtMatch {
         t = trailingArticle.replace(t, "")
         t = leadingArticle.replace(t, "")
         // Accents don't count ("Pokémon" = "Pokemon").
-        t = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
+        t = java.text.Normalizer.normalize(t, java.text.Normalizer.Form.NFD).replace(marks, "")
         t = t.lowercase().replace("&", " and ").replace("'", "")
-        return Regex("[^a-z0-9]+").replace(t, " ").trim()
+        return nonAlnum.replace(t, " ").trim()
     }
+
+    /** [title] -> the names having it, for a whole thumbnail set (built once, see [pick]'s titles). */
+    fun titleIndex(names: Collection<String>): Map<String, List<String>> = names.groupBy { title(it) }
 
     /** Thumbnail regions in order of preference, from ScreenScraper style codes ("us,wor,eu,ss,jp"). */
     fun regionPrefs(ssRegions: String): List<String> = ssRegions.split(',').mapNotNull {
@@ -53,7 +59,8 @@ object BoxArtMatch {
      * [available]: the thumbnail set's names (without .png), null when the list couldn't be read.
      * Returns null when no box is the same game.
      */
-    fun pick(identified: List<String>, fileName: String, available: Set<String>?, prefs: List<String>): String? {
+    fun pick(identified: List<String>, fileName: String, available: Set<String>?, prefs: List<String>,
+             titles: Map<String, List<String>>? = null): String? {
         if (available == null) return identified.firstOrNull()?.let(::thumbName)
         for (n in identified) thumbName(n).let { if (it in available) return it }
         // Same title: from the identified name (its tags say the region) or else the file name.
@@ -61,7 +68,8 @@ object BoxArtMatch {
         thumbName(source).let { if (it in available) return it }
         val t = title(source)
         if (t.isEmpty()) return null
-        val sameTitle = available.filter { title(it) == t }
+        // [titles] ([titleIndex] of [available]) saves normalising every name of the set per game.
+        val sameTitle = if (titles != null) titles[t].orEmpty() else available.filter { title(it) == t }
         if (sameTitle.isEmpty()) return null
         return sameTitle.maxWithOrNull(compareBy<String> { score(it, source, prefs) }.thenBy { -it.length }.thenByDescending { it })
             ?.takeIf { score(it, source, prefs) > -100 }

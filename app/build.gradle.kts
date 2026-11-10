@@ -13,7 +13,7 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 fun secret(key: String, env: String): String =
-    (localProps.getProperty(key) ?: System.getenv(env) ?: "").replace("\"", "\\\"")
+    (localProps.getProperty(key) ?: System.getenv(env) ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
 
 // Version = number of commits, so a build made here and one made by GitHub Actions
 // from the same commit get the same number, and every later commit a higher one
@@ -96,4 +96,6 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // Android's org.json is only a stub in unit tests; the real one for parsing tests.
     testImplementation("org.json:json:20240303")
+    // An XmlPull parser (Android has its own) for the gamelist.xml / DAT tests.
+    testImplementation("net.sf.kxml:kxml2:2.3.0")
 }

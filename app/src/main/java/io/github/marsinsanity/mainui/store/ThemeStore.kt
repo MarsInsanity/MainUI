@@ -69,6 +69,10 @@ object ThemeStore {
     fun isInstalled(e: Entry): Boolean =
         MainUI.storage.themeDirs().any { File(it, e.name).isDirectory }
 
+    /** Lower-case names of every installed theme folder (for marking a whole catalog at once). */
+    fun installedNames(): Set<String> =
+        MainUI.storage.themeDirs().flatMap { d -> d.listFiles()?.filter { it.isDirectory }?.map { it.name.lowercase() }.orEmpty() }.toSet()
+
     /**
      * Downloads and installs a theme into the Themes folder on [onSd] storage
      * (created if needed). Returns the installed theme folder.
@@ -77,6 +81,8 @@ object ThemeStore {
         val vol = (if (onSd) MainUI.storage.sdCard else null) ?: MainUI.storage.internal
         val themes = vol.dir.listFiles()?.firstOrNull { it.isDirectory && it.name.equals("Themes", true) }
             ?: File(vol.dir, "Themes").apply { mkdirs() }
+        // The name comes from the catalog and becomes a file / folder name: no paths.
+        if (e.name.isBlank() || e.name.contains('/') || e.name.contains('\\') || e.name.contains("..")) throw IOException("Invalid theme name")
         val zip = File(themes, "${e.name}.zip")
         Http.download(zipUrl(e), zip, progress)
         return MainUI.themes.install(zip) ?: throw IOException("Could not extract ${zip.name}")
@@ -149,12 +155,19 @@ object Http {
             ifNoneMatch?.let { put("If-None-Match", it) }
             ifModifiedSince?.let { put("If-Modified-Since", it) }
         }
-        val (c, finalUrl) = open(url, first) { it in 200..299 || it == 304 }
+        var (c, finalUrl) = open(url, first) { it in 200..299 || it == 304 }
         val etag = c.getHeaderField("ETag")
         val lastModified = c.getHeaderField("Last-Modified")
         if (c.responseCode == 304) { c.disconnect(); return Info(true, etag ?: ifNoneMatch, lastModified ?: ifModifiedSince, 0) }
         val range = c.getHeaderField("Content-Range")
-        val total = range?.substringAfter('/')?.toLongOrNull()
+        var total = range?.substringAfter('/')?.toLongOrNull()
+        if (c.responseCode == 206 && (total == null || range?.startsWith("bytes 0-") != true)) {
+            // A piece of unknown total size ("bytes 0-1048575/*") or not from the start: that piece
+            // alone isn't the file, so fetch the whole file in one plain request instead.
+            c.disconnect()
+            open(url).let { (c2, u) -> c = c2; finalUrl = u }
+            total = null
+        }
         try {
             if (c.responseCode != 206 || total == null || total <= PIECE) {
                 // No ranges (or a small file): one stream.
@@ -163,11 +176,12 @@ object Http {
             } else {
                 // If-Range needs a strong validator: a weak ETag (W/"...") can't be used.
                 val validator = etag?.takeUnless { it.startsWith("W/") } ?: lastModified
-                parallel(c, finalUrl, tmp, total, validator, progress)
+                parallel(c, url, finalUrl, tmp, total, validator, progress)
             }
         } catch (e: PieceMismatch) {
             // The file changed while downloading, or a server ignored the range: start over in one stream.
-            val (c2, _) = open(finalUrl)
+            // From the original URL: a redirect target (GitHub's signed asset links) may have expired.
+            val (c2, _) = open(url)
             try { streamTo(c2, tmp, 0L, c2.contentLengthLong, progress) } finally { c2.disconnect() }
         } finally {
             c.disconnect()
@@ -198,8 +212,21 @@ object Http {
         }
     }
 
-    private fun parallel(first: HttpURLConnection, url: String, tmp: File, total: Long, validator: String?,
+    /**
+     * [origUrl] is what was asked for, [resolved] where its redirects led. Pieces go straight to
+     * [resolved]; when that link stops working mid-way (GitHub's signed asset links expire after a
+     * few minutes) it is resolved again from [origUrl].
+     */
+    private fun parallel(first: HttpURLConnection, origUrl: String, resolved: String, tmp: File, total: Long, validator: String?,
                          progress: (Long, Long) -> Unit) {
+        val target = java.util.concurrent.atomic.AtomicReference(resolved)
+        val reResolved = java.util.concurrent.atomic.AtomicInteger()
+        /** Resolves [origUrl] again after [stale] stopped working (once per stale link, a few times at most). */
+        fun refresh(stale: String): Boolean = synchronized(target) {
+            if (target.get() != stale) return true // another piece already did
+            if (reResolved.incrementAndGet() > 5) return false
+            runCatching { open(origUrl, mapOf("Range" to "bytes=0-0")).let { (c, u) -> c.disconnect(); target.set(u) } }.isSuccess
+        }
         java.io.RandomAccessFile(tmp, "rw").use { raf ->
             raf.setLength(total)
             val ch = raf.channel
@@ -244,8 +271,11 @@ object Http {
                                     put("Range", "bytes=${p.first}-${p.last}")
                                     validator?.let { v -> put("If-Range", v) }
                                 }
-                                val c = connect(url, headers)
+                                val u = target.get()
+                                val c = connect(u, headers)
                                 try {
+                                    val code = c.responseCode
+                                    if ((code == 401 || code == 403 || code == 410 || code in 300..399) && refresh(u)) continue
                                     val cr = c.getHeaderField("Content-Range")
                                     if (c.responseCode != 206 || cr == null || !cr.startsWith("bytes ${p.first}-${p.last}/$total")) {
                                         throw PieceMismatch("piece ${p.first}: HTTP ${c.responseCode} $cr")
@@ -255,6 +285,8 @@ object Http {
                                 break
                             } catch (e: PieceMismatch) {
                                 error.compareAndSet(null, e); break
+                            } catch (e: java.io.InterruptedIOException) {
+                                error.compareAndSet(null, e); break // cancelled (from progress): no retries
                             } catch (e: IOException) {
                                 // Network hiccup: retry this piece a couple of times.
                                 if (++attempt >= 3) { error.compareAndSet(null, e); break }

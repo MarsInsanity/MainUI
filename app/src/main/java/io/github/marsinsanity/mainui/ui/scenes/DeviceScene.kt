@@ -35,9 +35,9 @@ class DeviceScene(host: SceneHost) : ListScene(host, "Device") {
         val items = mutableListOf<UiItem>()
         val cr = ctx.contentResolver
 
-        // Brightness, 0-100% in tens (Onion's 0-10 steps).
-        val levels = (0..10).map { it.toString() to "${it * 10}%" }
-        items += multi("Brightness", levels, { Brightness.get(ctx).toString() }) { Brightness.set(ctx, it.toInt()) }
+        // Brightness, 10-100% in tens (Onion's steps; no 0%: a black screen can't be undone by looking).
+        val levels = (1..10).map { it.toString() to "${it * 10}%" }
+        items += multi("Brightness", levels, { Brightness.get(ctx).coerceAtLeast(1).toString() }) { Brightness.set(ctx, it.toInt()) }
         val auto = runCatching { AndroidSettings.System.getInt(cr, AndroidSettings.System.SCREEN_BRIGHTNESS_MODE) == 1 }.getOrDefault(false)
         items += toggle("Auto brightness", { auto }) { on -> putSystem(AndroidSettings.System.SCREEN_BRIGHTNESS_MODE, if (on) 1 else 0) }
 

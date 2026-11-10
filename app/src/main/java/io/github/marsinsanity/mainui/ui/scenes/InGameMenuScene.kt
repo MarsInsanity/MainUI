@@ -188,6 +188,7 @@ class InGameMenuScene(
     }
 
     override fun onTap(x: Float, y: Float): Boolean {
+        if (busy != null) return true // saving / exiting: like the buttons, wait for it
         val idx = (y / ROW_H).toInt()
         if (x > 320f || idx !in 0 until list.size) { run(Action.CONTINUE); return true }
         list.active = idx
@@ -262,7 +263,7 @@ class InGameMenuScene(
         host.io({ work() }) { msg ->
             busy = null
             host.toast(msg, 900)
-            main.postDelayed({ continueGame() }, 700)
+            main.postDelayed(autoContinue, 700)
         }
     }
 
@@ -292,7 +293,9 @@ class InGameMenuScene(
     }
 
     private fun saveThumb(b: Bitmap) = runCatching {
-        FileOutputStream(MainUI.sessions.slotThumb(session.gameKey, slot)).use { b.compress(Bitmap.CompressFormat.PNG, 85, it) }
+        val f = MainUI.sessions.slotThumb(session.gameKey, slot)
+        f.parentFile?.mkdirs()
+        FileOutputStream(f).use { b.compress(Bitmap.CompressFormat.PNG, 85, it) }
     }
 
     /** Unpause exactly once, whatever path leaves the menu. */
@@ -318,7 +321,12 @@ class InGameMenuScene(
         closeMenu()
     }
 
+    /** Back to the game after a RetroArch save / load; dropped if the menu closes first. */
+    private val autoContinue = Runnable { continueGame() }
+
     override fun onExit() {
+        // A late auto-continue must not close whatever menu is showing by then.
+        main.removeCallbacks(autoContinue)
         // Safety net (overlay torn down some other way): never leave the game paused.
         resumeOnce()
     }
