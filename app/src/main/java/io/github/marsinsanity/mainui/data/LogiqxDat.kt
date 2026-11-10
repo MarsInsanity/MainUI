@@ -56,6 +56,8 @@ class LogiqxDat(val file: File) : MetaLookup {
     class Game(
         var name: String,
         val isMachine: Boolean = false,
+        /** Its element as written: game, machine (MAME) or software (software lists). */
+        val tag: String = if (isMachine) "machine" else "game",
         val fields: LinkedHashMap<String, String> = LinkedHashMap(),
         val attrs: LinkedHashMap<String, String> = LinkedHashMap(),
         val roms: MutableList<Rom> = mutableListOf(),
@@ -81,6 +83,10 @@ class LogiqxDat(val file: File) : MetaLookup {
 
     /** Loaded with everything kept for writing back ([load] keepRaw): only such a DAT may be saved. */
     private var keptRaw = false
+    /** The root element as read (written back the same), and the file's DOCTYPE as written. */
+    private var rootTag = "datafile"
+    private val rootAttrs = LinkedHashMap<String, String>()
+    private var doctype: String? = null
 
     /**
      * Reads the DAT. [keepRaw]: also keep what MainUI doesn't use (every rom attribute, other
@@ -89,13 +95,15 @@ class LogiqxDat(val file: File) : MetaLookup {
      */
     fun load(keepRaw: Boolean = false): LogiqxDat {
         keptRaw = keepRaw
+        rootTag = "datafile"; rootAttrs.clear(); doctype = null
         games.clear(); header.clear(); byFile.clear(); byName.clear(); byCrc.clear()
         headerRaw.clear(); others.clear(); parseError = null
         loadedMtime = file.lastModified()
         if (!file.isFile) return this
         // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
-        val raw = runCatching { file.readText().removePrefix("\uFEFF") }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
+        val raw = runCatching { GameListXml.readXmlText(file) }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
         if (GameListXml.isEmptyXml(raw)) return this
+        doctype = doctypeOf(raw)
         val p = GameListXml.newParser()
         p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         try {
@@ -110,12 +118,18 @@ class LogiqxDat(val file: File) : MetaLookup {
                 when (ev) {
                     XmlPullParser.START_TAG -> {
                         depth++
-                        if (depth == 1) sawRoot = true
                         val tag = p.name
+                        if (depth == 1) {
+                            sawRoot = true
+                            // Written back as it was (<datafile>, <mame build=...>, <softwarelist name=...>).
+                            rootTag = tag
+                            rootAttrs.clear()
+                            for (i in 0 until p.attributeCount) rootAttrs[p.getAttributeName(i)] = p.getAttributeValue(i)
+                        }
                         when {
                             depth == 2 && tag == "header" -> inHeader = true
                             depth == 2 && (tag == "game" || tag == "machine" || tag == "software") -> {
-                                game = Game(p.getAttributeValue(null, "name") ?: "", isMachine = tag == "machine")
+                                game = Game(p.getAttributeValue(null, "name") ?: "", isMachine = tag == "machine", tag = tag)
                                 for (i in 0 until p.attributeCount) game.attrs[p.getAttributeName(i)] = p.getAttributeValue(i)
                             }
                             depth == 2 && tag != "header" -> { GameListXml.readElement(p).let { if (keepRaw) others += it.raw }; depth-- }
@@ -158,6 +172,8 @@ class LogiqxDat(val file: File) : MetaLookup {
             }
             // Text that isn't XML at all (a clrmamepro DAT, some other file): not ours to rewrite.
             if (!sawRoot) throw org.xmlpull.v1.XmlPullParserException("no XML elements in it")
+            // Cut short (a copy that didn't finish): the parser just stops, with elements still open.
+            if (depth != 0) throw org.xmlpull.v1.XmlPullParserException("unexpected end of file")
         } catch (e: Exception) {
             parseError = e.message ?: e.javaClass.simpleName
             runCatching { android.util.Log.w("MainUI.Logiqx", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
@@ -241,8 +257,13 @@ class LogiqxDat(val file: File) : MetaLookup {
         val esc = GameListXml::escape
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\"?>\n")
-        sb.append("<!DOCTYPE datafile PUBLIC \"-//Logiqx//DTD ROM Management Datafile//EN\" \"http://www.logiqx.com/Dats/datafile.dtd\">\n")
-        sb.append("<datafile>\n\t<header>\n")
+        // The file's own DOCTYPE (MAME's inline DTD...), else Logiqx's for a Logiqx DAT.
+        val dt = doctype
+        if (dt != null) sb.append(dt).append('\n')
+        else if (rootTag == "datafile") sb.append("<!DOCTYPE datafile PUBLIC \"-//Logiqx//DTD ROM Management Datafile//EN\" \"http://www.logiqx.com/Dats/datafile.dtd\">\n")
+        sb.append('<').append(rootTag)
+        for ((k, v) in rootAttrs) sb.append(' ').append(k).append("=\"").append(esc(v)).append('"')
+        sb.append(">\n\t<header>\n")
         if (header.isEmpty()) {
             header["name"] = dir.name
             header["description"] = dir.name
@@ -255,7 +276,7 @@ class LogiqxDat(val file: File) : MetaLookup {
         // Logiqx element order: comment, description, year, manufacturer, ..., rom
         val order = listOf("comment", "description", "year", "manufacturer")
         for (g in games) {
-            val tag = if (g.isMachine) "machine" else "game"
+            val tag = g.tag
             sb.append("\t<").append(tag)
             val attrs = LinkedHashMap(g.attrs).apply { this["name"] = g.name }
             for ((k, v) in attrs) sb.append(' ').append(k).append("=\"").append(esc(v)).append('"')
@@ -277,7 +298,7 @@ class LogiqxDat(val file: File) : MetaLookup {
             }
             sb.append("\t</").append(tag).append(">\n")
         }
-        sb.append("</datafile>\n")
+        sb.append("</").append(rootTag).append(">\n")
         val tmp = File(dir, "${file.name}.${Thread.currentThread().id}.${System.nanoTime()}.tmp")
         tmp.writeText(sb.toString())
         if (file.exists()) {
@@ -289,6 +310,22 @@ class LogiqxDat(val file: File) : MetaLookup {
     }
 
     companion object {
+        /** The `<!DOCTYPE ...>` at the start of [raw] (with its inline DTD, if any), or null. */
+        fun doctypeOf(raw: String): String? {
+            val start = raw.indexOf("<!DOCTYPE")
+            if (start < 0) return null
+            // Only before the first element: not one quoted in some text further on.
+            val firstEl = Regex("<[A-Za-z_]").find(raw)?.range?.first ?: raw.length
+            if (start > firstEl) return null
+            var depth = 0
+            for (i in start until raw.length) when (raw[i]) {
+                '[' -> depth++
+                ']' -> depth--
+                '>' -> if (depth <= 0) return raw.substring(start, i + 1)
+            }
+            return null
+        }
+
         /**
          * Finds the DAT for a system folder: <folder>/<folder>.dat, any *.dat, or an
          * *.xml whose root element is <datafile> (Skraper's generic profile writes XML).
@@ -308,11 +345,14 @@ class LogiqxDat(val file: File) : MetaLookup {
             val files = dir.listFiles() ?: return null
             // MainUI's own DAT, written when the folder's DAT couldn't be read (see forWriting).
             files.firstOrNull { it.isFile && it.name.equals("${dir.name}.mainui.dat", true) }?.let { return it }
-            files.firstOrNull { it.isFile && it.name.equals("${dir.name}.dat", true) }?.let { return it }
-            files.filter { it.isFile && it.extension.equals("dat", true) }.minByOrNull { it.name.length }?.let { return it }
+            // Only XML DATs: a clrmamepro text DAT or a .dat rom image (Naomi) is no metadata of ours.
+            fun head(f: File, n: Int) = runCatching { f.bufferedReader().use { r -> CharArray(n).let { b -> String(b, 0, r.read(b).coerceAtLeast(0)) } } }.getOrDefault("")
+            fun isXmlDat(f: File) = head(f, 4096).let { it.contains("<datafile") || it.contains("<mame") || it.contains("<softwarelist") || GameListXml.isEmptyXml(it) && f.length() < 4096 }
+            files.firstOrNull { it.isFile && it.name.equals("${dir.name}.dat", true) && isXmlDat(it) }?.let { return it }
+            files.filter { it.isFile && it.extension.equals("dat", true) && !it.name.equals("${dir.name}.dat", true) && it.length() < 512L * 1024 * 1024 }
+                .sortedBy { it.name.length }.firstOrNull { isXmlDat(it) }?.let { return it }
             return files.filter { it.isFile && it.extension.equals("xml", true) && !it.name.equals("gamelist.xml", true) }
-                .firstOrNull { f -> runCatching { f.bufferedReader().use { r -> CharArray(1024).let { b -> String(b, 0, r.read(b).coerceAtLeast(0)) } } }
-                    .getOrDefault("").contains("<datafile") }
+                .firstOrNull { f -> head(f, 1024).contains("<datafile") }
         }
 
         /**

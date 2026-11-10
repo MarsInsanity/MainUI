@@ -70,6 +70,8 @@ object FreeArt {
         internal val identified = ConcurrentHashMap<String, List<String>>()
         /** Per thumbnail set: title -> names (BoxArtMatch.titleIndex). */
         internal val titles = ConcurrentHashMap<String, Map<String, List<String>>>()
+        /** DATs / thumbnail lists whose download failed, by when: tried again after a minute, not given up for the run. */
+        internal val failedAt = ConcurrentHashMap<String, Long>()
     }
 
     private object None
@@ -79,6 +81,10 @@ object FreeArt {
      * Returns the source's name, or null when no source has this game.
      */
     fun find(s: Session, systemId: String, file: File, dest: File, maxWidth: Int, crc: String? = null): String? {
+        // A download or storage failure (no connection, card full) is an error for this game, not "not found".
+        var err: Exception? = null
+        fun saveImage(url: String, dest: File, maxWidth: Int, frontOfWrap: Boolean = false) =
+            saveImage(url, dest, maxWidth, 0, frontOfWrap) { if (err == null) err = it }
         // Canonical names, once per file and DAT (libretro, LaunchBox and TheGamesDB use them).
         fun identified(src: LibretroDb.Source): List<String> = s.identified.computeIfAbsent("${src.dat}\u0000${file.path}") {
             identify(s, src, systemId, file, crc)
@@ -122,6 +128,7 @@ object FreeArt {
                 }
             }
         }
+        err?.let { throw it }
         return null
     }
 
@@ -190,6 +197,10 @@ object FreeArt {
 
     private const val LAUNCHBOX_MAX_AGE = 30L * 24 * 3600 * 1000
     private val launchBoxDir get() = MainUI.storage.dataDir("cache/launchbox")
+
+    /** The LaunchBox / TheGamesDB indexes a full run downloads first are there (a single game's scrape doesn't fetch them). */
+    fun hasLaunchBoxIndex() = File(launchBoxDir, "index").isDirectory
+    fun hasTgdbIndex() = File(tgdbDir, "index").isDirectory
 
     /** The platform indexes for [systemId] as one lookup; null when there is no index (yet). */
     private fun launchBoxLookup(s: Session, systemId: String): LaunchBoxDb.Lookup? = s.lookups.computeIfAbsent(systemId) {
@@ -262,26 +273,37 @@ object FreeArt {
         return names.toList()
     }
 
-    fun dat(s: Session, src: LibretroDb.Source): LibretroDb.Dat? = s.dats.computeIfAbsent(src.dat) {
+    fun dat(s: Session, src: LibretroDb.Source): LibretroDb.Dat? {
         val f = File(MainUI.storage.dataDir("cache/libretro/dat"), "${src.dat}.dat")
-        if (!f.isFile || System.currentTimeMillis() - f.lastModified() > DAT_MAX_AGE) {
-            runCatching { Http.download(datUrl(src), f) }.onFailure { Log.w(TAG, "DAT ${src.dat}: ${it.message}") }
+        val key = "dat:${src.dat}"
+        val v = s.dats.computeIfAbsent(src.dat) {
+            if (!f.isFile || System.currentTimeMillis() - f.lastModified() > DAT_MAX_AGE) {
+                runCatching { Http.download(datUrl(src), f) }.onFailure { Log.w(TAG, "DAT ${src.dat}: ${it.message}"); s.failedAt[key] = System.currentTimeMillis() }
+            }
+            if (f.isFile) runCatching { LibretroDb.parse(f.readText()) }.getOrNull() ?: None else None
         }
-        if (f.isFile) runCatching { LibretroDb.parse(f.readText()) }.getOrNull() ?: None else None
-    } as? LibretroDb.Dat
+        // Not there because the download failed: tried again a minute later (the connection may be back).
+        if (v === None && !f.isFile && System.currentTimeMillis() - (s.failedAt[key] ?: 0L) > 60_000) s.dats.remove(src.dat, None)
+        return v as? LibretroDb.Dat
+    }
 
     /** Names (without .png) of the box art the thumbnail set has; null if the list can't be read. */
     @Suppress("UNCHECKED_CAST")
-    fun index(s: Session, set: String): Set<String>? = s.indexes.computeIfAbsent(set) {
+    fun index(s: Session, set: String): Set<String>? {
         val f = File(MainUI.storage.dataDir("cache/libretro/index"), "$set.txt")
-        if (!f.isFile || System.currentTimeMillis() - f.lastModified() > INDEX_MAX_AGE) {
-            val names = runCatching { parseListing(Http.text(thumbDir(set))) }.getOrNull()?.takeIf { it.isNotEmpty() }
-                ?: if (testBase == null) runCatching { githubTree(set) }.getOrNull() else null
-            if (!names.isNullOrEmpty()) runCatching { f.writeText(names.joinToString("\n")) }
-            else Log.w(TAG, "no thumbnail list for $set")
+        val key = "index:$set"
+        val v = s.indexes.computeIfAbsent(set) {
+            if (!f.isFile || System.currentTimeMillis() - f.lastModified() > INDEX_MAX_AGE) {
+                val names = runCatching { parseListing(Http.text(thumbDir(set))) }.getOrNull()?.takeIf { it.isNotEmpty() }
+                    ?: if (testBase == null) runCatching { githubTree(set) }.getOrNull() else null
+                if (!names.isNullOrEmpty()) runCatching { f.writeText(names.joinToString("\n")) }
+                else { Log.w(TAG, "no thumbnail list for $set"); s.failedAt[key] = System.currentTimeMillis() }
+            }
+            if (f.isFile) f.readLines().filter { it.isNotEmpty() }.toHashSet() else None
         }
-        if (f.isFile) f.readLines().filter { it.isNotEmpty() }.toHashSet() else None
-    } as? Set<String>
+        if (v === None && !f.isFile && System.currentTimeMillis() - (s.failedAt[key] ?: 0L) > 60_000) s.indexes.remove(set, None)
+        return v as? Set<String>
+    }
 
     /** Thumbnail names from a web server's folder listing (links to *.png). */
     fun parseListing(html: String): Set<String> =
@@ -303,7 +325,7 @@ object FreeArt {
      * [frontOfWrap]: the image is a full cover (back, spine, front): keep the front, the right
      * part as wide as a case front is for that height (135 x 190 mm).
      */
-    private fun saveImage(url: String, dest: File, maxWidth: Int, depth: Int = 0, frontOfWrap: Boolean = false): Boolean {
+    private fun saveImage(url: String, dest: File, maxWidth: Int, depth: Int, frontOfWrap: Boolean, onError: (Exception) -> Unit): Boolean {
         val tmp = File(dest.parentFile, dest.name + ".dl")
         return try {
             dest.parentFile?.mkdirs()
@@ -314,7 +336,7 @@ object FreeArt {
                 // libretro-thumbnails stores duplicates as symlinks; GitHub serves those as the target's path.
                 val link = if (tmp.length() in 1..512) tmp.readText().trim() else ""
                 return depth < 2 && link.endsWith(".png", true) && '\n' !in link &&
-                    saveImage(java.net.URL(java.net.URL(url), link.split('/').joinToString("/") { enc(it) }).toString(), dest, maxWidth, depth + 1)
+                    saveImage(java.net.URL(java.net.URL(url), link.split('/').joinToString("/") { enc(it) }).toString(), dest, maxWidth, depth + 1, false, onError)
             }
             if (frontOfWrap && bounds.outWidth < bounds.outHeight * 1.2) return false   // not a full cover
             if (frontOfWrap || maxWidth in 1 until bounds.outWidth || !url.endsWith(".png", true)) {
@@ -326,15 +348,24 @@ object FreeArt {
                 val out = if (maxWidth in 1 until bmp.width)
                     Bitmap.createScaledBitmap(bmp, maxWidth, (bmp.height.toLong() * maxWidth / bmp.width).toInt().coerceAtLeast(1), true)
                 else bmp
-                dest.outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                // Written beside it first: a kill or a full card never leaves a cut image that counts as art.
+                val part = File(dest.parentFile, dest.name + ".new")
+                try {
+                    if (!part.outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }) return false
+                    if (!part.renameTo(dest)) part.copyTo(dest, true)
+                } finally { part.delete() }
             } else {
                 if (!tmp.renameTo(dest)) { tmp.copyTo(dest, true) }
             }
             true
         } catch (e: Exception) {
+            // Not there (404 / 410) is "not found"; anything else (connection, storage) is an error.
+            val m = e.message ?: ""
+            if (!m.startsWith("HTTP 404") && !m.startsWith("HTTP 410")) onError(e)
             false
         } finally {
             tmp.delete()
+            File(tmp.parentFile, tmp.name + ".part").delete()
         }
     }
 

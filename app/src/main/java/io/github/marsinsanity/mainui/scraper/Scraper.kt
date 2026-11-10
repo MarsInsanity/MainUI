@@ -104,7 +104,7 @@ object Scraper {
             if (!useSs && free.isEmpty()) {
                 st.message = "ScreenScraper developer ID missing (Scraper > Developer ID)"; return
             }
-            val api = if (useSs) ScreenScraper.fromSettings() else null
+            var api = if (useSs) ScreenScraper.fromSettings() else null
             if (cancel.get()) { st.message = "Cancelled"; return }
             val freeArt = FreeArt.Session(free, BoxArtMatch.regionPrefs(MainUI.settings.ssRegions))
             var threads = if (useSs) 1 else 4
@@ -119,13 +119,19 @@ object Scraper {
                     fileLog("ScreenScraper: level ${u.level}, ${u.maxThreads} threads, ${st.quota}, $perMin per minute")
                 } catch (e: ScreenScraper.ApiException) {
                     fileLog("ScreenScraper user info failed: ${e.code} ${e.message}")
-                    if (e.code == 403 || e.code == 401) { st.message = "Login failed: ${e.message}"; return }
+                    if (e.code == 403 || e.code == 401) {
+                        if (free.isEmpty()) { st.message = "Login failed: ${e.message}"; return }
+                        // (401 is also "API closed for non-members" when it is busy.) The free sources still run.
+                        fileLog("ScreenScraper off for this run"); st.addLog("ScreenScraper: ${e.message?.take(60)}: free sources only")
+                        api = null
+                    }
                     Log.w(TAG, "userInfo failed", e)
                 } catch (e: java.io.IOException) {
                     fileLog("ScreenScraper unreachable: ${e.message}")
                     Log.w(TAG, "userInfo failed", e)
                 }
             }
+            if (useSs && api == null) threads = 4 // ScreenScraper left out: the free sources' threads
             val override = MainUI.settings.ssThreadsOverride
             if (override in 1 until threads || (api == null && override > 0)) threads = override
             st.threads = threads
@@ -161,6 +167,10 @@ object Scraper {
             val dats = ConcurrentHashMap<String, LogiqxDat>()
             val pool = Executors.newFixedThreadPool(threads)
             val fatal = AtomicBoolean(false)
+            // An account-level ScreenScraper error (quota, closed to non-members) with free sources
+            // on: ScreenScraper is left out for the rest of the run, the free sources go on.
+            val ssOff = AtomicBoolean(false)
+            val ssApi = api
             st.message = "Scraping with $threads thread${if (threads > 1) "s" else ""}" + if (api == null) " (no ScreenScraper)" else ""
             repeat(threads) {
                 pool.execute {
@@ -168,7 +178,7 @@ object Scraper {
                         val (sys, game) = queue.poll() ?: break
                         st.current = "${sys.def.short}: ${game.name}"
                         try {
-                            val r = scrapeGame(api, freeArt, sys, game, gamelists, dats, limiter, breaker)
+                            val r = scrapeGame(if (ssOff.get()) null else ssApi, freeArt, sys, game, gamelists, dats, limiter, breaker)
                             when (r) {
                                 Result.FOUND -> st.found.incrementAndGet()
                                 Result.NOT_FOUND -> { st.missing.incrementAndGet(); st.addLog("Not found: ${game.name}") }
@@ -177,7 +187,11 @@ object Scraper {
                             fileLog("${sys.id}: ${game.file?.name}: $r")
                         } catch (e: ScreenScraper.ApiException) {
                             fileLog("${sys.id}: ${game.file?.name}: ScreenScraper ${e.code} ${e.message}")
-                            if (e.fatal) { fatal.set(true); st.message = "Stopped: ${describe(e)}" }
+                            if (e.fatal && free.isNotEmpty()) {
+                                if (ssOff.compareAndSet(false, true)) { fileLog("ScreenScraper off: ${describe(e)}"); st.addLog("ScreenScraper off for this run: ${describe(e)}") }
+                                queue.put(sys to game); continue
+                            }
+                            else if (e.fatal) { fatal.set(true); st.message = "Stopped: ${describe(e)}" }
                             else if (e.tooManyThreads) { queue.put(sys to game); Thread.sleep(2000); continue }
                             else { st.errors.incrementAndGet(); st.addLog("ScreenScraper ${e.code}: ${game.name}: ${e.message?.take(60)}") }
                         } catch (e: Exception) {
@@ -196,6 +210,8 @@ object Scraper {
             dats.values.forEach { d -> synchronized(d) { runCatching { d.save() }.onFailure { unsaved++; fileLog("not saved: ${it.message}") } } }
             if (unsaved > 0) st.addLog("$unsaved metadata file(s) could not be read, so they were left as they were (see logs/scraper.txt)")
             MainUI.games.invalidate()
+            // Games looked at before (no art then) would otherwise stay without it until a restart.
+            io.github.marsinsanity.mainui.ui.Images.clear()
             if (!fatal.get()) st.message = when {
                 cancel.get() -> "Cancelled"
                 st.found.get() == 0 && st.errors.get() > 0 -> "Done, but every game failed: see the log below"
@@ -340,7 +356,8 @@ object Scraper {
                 if (ScrapeState.done.get() % 25 == 0) runCatching { gl.save() }
             }
         }
-        return if (imageRel != null || info?.name != null) Result.FOUND else Result.NOT_FOUND
+        // (Metadata only counts when some is written: not with "Images only".)
+        return if (imageRel != null || (info?.name != null && format != "none")) Result.FOUND else Result.NOT_FOUND
     }
 
     /** "1991-07-23" / "1991" -> "19910723T000000" (EmulationStation format). */
@@ -376,7 +393,14 @@ object Scraper {
             val unsaved = (gamelists.values.map { gl -> runCatching { gl.save() } } + dats.values.map { d -> runCatching { d.save() } })
                 .mapNotNull { it.exceptionOrNull() }
             MainUI.games.invalidate()
-            val note = if (unsaved.isEmpty()) "" else " (${unsaved.size} metadata file${if (unsaved.size > 1) "s" else ""} left unchanged: couldn't be read)"
+            io.github.marsinsanity.mainui.ui.Images.clear()
+            // LaunchBox / TheGamesDB only come with a full run (big downloads): said when they could have helped.
+            val notYet = listOfNotNull(
+                "LaunchBox".takeIf { FreeArt.LAUNCHBOX in free && LaunchBoxDb.supports(sys.id) && !FreeArt.hasLaunchBoxIndex() },
+                "TheGamesDB".takeIf { FreeArt.THEGAMESDB in free && TheGamesDb.supports(sys.id) && !FreeArt.hasTgdbIndex() },
+            )
+            val note = (if (r != Result.FOUND && notYet.isNotEmpty()) " (${notYet.joinToString(" / ")} not downloaded yet: scrape the system once)" else "") +
+                if (unsaved.isEmpty()) "" else " (${unsaved.size} metadata file${if (unsaved.size > 1) "s" else ""} left unchanged: couldn't be read)"
             if (r == Result.FOUND) "Artwork updated$note" else "No box art found for this game$note"
         } catch (e: ScreenScraper.ApiException) {
             "ScreenScraper: ${describe(e)}"

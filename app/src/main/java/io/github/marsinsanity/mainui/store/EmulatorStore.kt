@@ -149,11 +149,21 @@ object EmulatorStore {
     }
 
     /** RetroArch's latest stable build from retroarch.com (64-bit build on arm64 devices). */
-    fun latestRetroArch(): Release {
+    /**
+     * The newest stable RetroArch: the build of package [pkg] when updating one (each APK has its
+     * own package: RetroArch.apk is com.retroarch, RetroArch_aarch64.apk com.retroarch.aarch64),
+     * else the one for this device.
+     */
+    fun latestRetroArch(pkg: String? = null): Release {
         val index = Http.text("$buildbot/")
         val version = newestVersion(Regex("""href="(?:/stable/)?([0-9]+(?:\.[0-9]+)+)/"""").findAll(index).map { it.groupValues[1] }.toList())
             ?: throw IOException("Could not read the RetroArch download list")
-        val name = if (Build.SUPPORTED_ABIS.firstOrNull() == "arm64-v8a") "RetroArch_aarch64.apk" else "RetroArch.apk"
+        val name = when (pkg) {
+            "com.retroarch" -> "RetroArch.apk"
+            "com.retroarch.ra32" -> "RetroArch_ra32.apk"
+            "com.retroarch.aarch64" -> "RetroArch_aarch64.apk"
+            else -> if (Build.SUPPORTED_ABIS.firstOrNull() == "arm64-v8a") "RetroArch_aarch64.apk" else "RetroArch.apk"
+        }
         return Release(version, name, "$buildbot/$version/android/$name", -1, null)
     }
 
@@ -164,13 +174,24 @@ object EmulatorStore {
         (0 until maxOf(x.size, y.size)).map { (x.getOrElse(it) { 0 }).compareTo(y.getOrElse(it) { 0 }) }.firstOrNull { it != 0 } ?: 0
     }
 
-    /** Downloads [r] and installs it (root: silently; otherwise Android asks). Returns a message. */
-    fun install(name: String, r: Release, progress: (String) -> Unit): String {
+    /**
+     * Downloads [r] and installs it (root: silently; otherwise Android asks). Returns a message.
+     * [replaces]: the installed package this is an update of; an APK of another package (a fork's,
+     * another build's) is not installed beside it.
+     */
+    fun install(name: String, r: Release, replaces: String? = null, progress: (String) -> Unit): String {
         val file = File(MainUI.app.cacheDir, "appstore/${r.apkName.replace(Regex("[^A-Za-z0-9._-]"), "_")}")
         file.parentFile?.mkdirs()
         Http.download(r.url, file) { done, total ->
             val t = if (total > 0) total else r.size
             progress("Downloading $name: ${formatBytes(done)}" + if (t > 0) " / ${formatBytes(t)}" else "")
+        }
+        if (replaces != null) {
+            val got = runCatching { MainUI.app.packageManager.getPackageArchiveInfo(file.path, 0)?.packageName }.getOrNull()
+            if (got != null && got != replaces) {
+                file.delete()
+                return "Not installed: the download is $got, another app than the installed $replaces"
+            }
         }
         return AppStore.installFile(file, name, r.sha256, progress)
     }

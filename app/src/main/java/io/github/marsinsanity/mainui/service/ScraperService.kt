@@ -20,7 +20,12 @@ class ScraperService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) { Scraper.cancel(); return START_NOT_STICKY }
+        if (intent?.action == ACTION_STOP) {
+            Scraper.cancel()
+            // A stop for a run that already ended started this service for nothing.
+            if (worker?.isAlive != true) stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (worker?.isAlive == true) return START_NOT_STICKY
         val systems = intent?.getStringArrayExtra(EXTRA_SYSTEMS)?.toList()
         startForeground(NOTIF_ID, notification("Starting..."), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -36,7 +41,8 @@ class ScraperService : Service() {
                 } catch (_: InterruptedException) {}
             }.apply { isDaemon = true; start() }
             Scraper.run(systems)
-            updater.interrupt()
+            // Its last progress notification must not land after the one saying it is done.
+            updater.interrupt(); runCatching { updater.join(3000) }
             getSystemService(NotificationManager::class.java).notify(DONE_ID, notification(
                 "${ScrapeState.message}: ${ScrapeState.found.get()} found, ${ScrapeState.missing.get()} not found", ongoing = false))
             stopForeground(STOP_FOREGROUND_REMOVE)

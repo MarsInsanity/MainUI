@@ -203,6 +203,13 @@ object RetroArchCores {
         "armn64" to "MagnominusGit/armN64",
     )
 
+    /** The ABIs .github/workflows/cores.yml builds each [EXTRA_CORES] core for (armN64 is 64-bit only). */
+    val EXTRA_ABIS: Map<String, Set<String>> = mapOf("armn64" to setOf("arm64-v8a", "x86_64"))
+        .withDefault { setOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+
+    /** ELF e_machine of each ABI's cores. */
+    private val ELF_MACHINE = mapOf("arm64-v8a" to 0xB7, "armeabi-v7a" to 0x28, "x86_64" to 0x3E, "x86" to 0x03)
+
     fun downloadUrl(abi: String, core: String) = when {
         core !in EXTRA_CORES -> "$buildbot/$abi/$core$SUFFIX.zip"
         buildbot != BUILDBOT -> "$buildbot/extra/${extraZip(core, abi)}"      // debug mirror
@@ -224,7 +231,7 @@ object RetroArchCores {
         val page = runCatching { Http.text("$buildbot/$abi/") }.getOrNull()
         val rows = page?.let { parseListing(it) }?.takeIf { it.isNotEmpty() }
             ?: parseIndexExtended(Http.text("$buildbot/$abi/.index-extended"))
-        return rows + EXTRA_CORES.keys.filter { c -> rows.none { it.core == c } }.map { Remote(it, "", 0) }
+        return rows + EXTRA_CORES.keys.filter { c -> rows.none { it.core == c } && abi in EXTRA_ABIS.getValue(c) }.map { Remote(it, "", 0) }
     }
 
     /** Rows of the buildbot's h5ai folder page: name, "date time", "12.3 MB". */
@@ -253,7 +260,7 @@ object RetroArchCores {
      * Online Updater installs), or from MainUI's "cores" release for [EXTRA_CORES],
      * and installs it. Needs root. Returns the installed path.
      */
-    fun install(ctx: Context, pkg: String, coreDir: String, core: String, progress: (String) -> Unit): String {
+    fun install(ctx: Context, pkg: String, coreDir: String, core: String, progress: (String) -> Unit, infoDir: String = "/data/data/$pkg/info"): String {
         requireRoot()
         val tmpDir = File(ctx.cacheDir, "cores").apply { mkdirs() }
         val zip = File(tmpDir, "$core$SUFFIX.zip")
@@ -261,7 +268,7 @@ object RetroArchCores {
             Http.download(downloadUrl(abiOf(ctx, pkg), core), zip) { done, total ->
                 progress("Downloading $core: ${formatBytes(done)}" + if (total > 0) " / ${formatBytes(total)}" else "")
             }
-            return installFile(ctx, pkg, coreDir, zip, core, progress)
+            return installFile(ctx, pkg, coreDir, zip, core, progress, infoDir)
         } finally {
             zip.delete()
         }
@@ -273,16 +280,19 @@ object RetroArchCores {
      * next to it (or inside the zip) is installed too, so RetroArch shows its name.
      */
     fun installFile(ctx: Context, pkg: String, coreDir: String, file: File, core: String = coreName(file.name.removeSuffix(".zip")),
-                    progress: (String) -> Unit = {}): String {
+                    progress: (String) -> Unit = {}, infoDir: String = "/data/data/$pkg/info"): String {
         requireRoot()
         progress("Installing $core...")
         val tmpDir = File(ctx.cacheDir, "cores").apply { mkdirs() }
         val so = File(tmpDir, "$core$SUFFIX.tmp")
         val info = File(tmpDir, "${core}_libretro.info.tmp")
         try {
+            val abi = abiOf(ctx, pkg)
             if (file.name.endsWith(".zip", true)) {
                 ZipFile(file).use { z ->
-                    val e = z.entries().asSequence().firstOrNull { it.name.endsWith(SUFFIX) } ?: throw IOException("No core inside ${file.name}")
+                    // A zip with a build per CPU: the one for RetroArch's.
+                    val cores = z.entries().asSequence().filter { it.name.endsWith(SUFFIX) }.toList()
+                    val e = cores.firstOrNull { "/$abi/" in "/" + it.name } ?: cores.firstOrNull() ?: throw IOException("No core inside ${file.name}")
                     z.getInputStream(e).use { input -> so.outputStream().use { input.copyTo(it) } }
                     z.entries().asSequence().firstOrNull { it.name.endsWith("_libretro.info") }?.let { ie ->
                         z.getInputStream(ie).use { input -> info.outputStream().use { input.copyTo(it) } }
@@ -295,11 +305,18 @@ object RetroArchCores {
             // An ELF for the wrong system (e.g. a Linux / Miyoo build) would only fail inside RetroArch.
             val head = so.inputStream().use { val b = ByteArray(20); it.read(b); b }
             if (head[0] != 0x7f.toByte() || head[1] != 'E'.code.toByte()) throw IOException("${file.name} is not a core (.so) file")
+            // Built for another CPU (a 32-bit or Linux / Miyoo build): RetroArch couldn't load it, so
+            // it must not replace the working one.
+            val machine = (head[18].toInt() and 0xff) or ((head[19].toInt() and 0xff) shl 8)
+            ELF_MACHINE[abi]?.let { want -> if (machine != want) throw IOException("${file.name} is a core for another CPU, not $abi") }
             so.setReadable(true, false); info.setReadable(true, false)
             val dest = place(pkg, coreDir, so, "$core$SUFFIX")
             if (info.isFile && info.length() > 0) {
-                val infoDir = "/data/data/$pkg/info"
-                runCatching { place(pkg, infoDir, info, "${core}_libretro.info") }
+                // Where this RetroArch reads its .info files (libretro_info_path), so it shows the name.
+                runCatching {
+                    if (infoDir.startsWith("/data/")) place(pkg, infoDir, info, "${core}_libretro.info")
+                    else Root.exec("mkdir -p ${Root.q(infoDir)} && cat ${Root.q(info.absolutePath)} > ${Root.q("$infoDir/${core}_libretro.info")}")
+                }
             }
             Log.d(TAG, "installed $dest")
             return dest
@@ -321,9 +338,11 @@ object RetroArchCores {
             "set -e; o=\$(stat -c %u:%g ${q(data)}); c=\$(stat -c %C ${q(data)}); " +
                 "if [ ! -d ${q(dir)} ]; then mkdir -p ${q(dir)}; chown \$o ${q(dir)}; chmod 0700 ${q(dir)}; " +
                 "chcon \$c ${q(dir)} 2>/dev/null || true; fi; " +
-                "cat ${q(src.absolutePath)} > ${q("$dest.part")}; mv -f ${q("$dest.part")} ${q(dest)}; " +
+                // A copy that fails (the folder full) leaves no part file behind in RetroArch's folder.
+                "cat ${q(src.absolutePath)} > ${q("$dest.part")} || { rm -f ${q("$dest.part")}; exit 1; }; mv -f ${q("$dest.part")} ${q(dest)}; " +
                 "chown \$o ${q(dest)}; chmod 0700 ${q(dest)}; chcon \$c ${q(dest)} 2>/dev/null || true; ls -l ${q(dest)}",
             timeoutSec = 60)
+        if (!r.ok || !r.out.contains(name)) runCatching { Root.exec("rm -f ${q("$dest.part")}") } // (timed out midway)
         if (!r.ok || !r.out.contains(name)) throw IOException("Could not copy $name: ${r.err.ifBlank { r.out }.take(120)}")
         return dest
     }

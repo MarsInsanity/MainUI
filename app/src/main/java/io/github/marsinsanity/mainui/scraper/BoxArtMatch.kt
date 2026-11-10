@@ -66,7 +66,8 @@ object BoxArtMatch {
         // Same title: from the identified name (its tags say the region) or else the file name.
         val source = identified.firstOrNull() ?: fileName
         thumbName(source).let { if (it in available) return it }
-        val t = title(source)
+        // Normalised like the thumbnail names it is compared with ("&" is "_" in those).
+        val t = title(thumbName(source))
         if (t.isEmpty()) return null
         // [titles] ([titleIndex] of [available]) saves normalising every name of the set per game.
         val sameTitle = if (titles != null) titles[t].orEmpty() else available.filter { title(it) == t }
