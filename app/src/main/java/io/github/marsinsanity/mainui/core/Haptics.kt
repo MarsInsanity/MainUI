@@ -29,9 +29,11 @@ object Haptics {
 
     /** Off, light, medium, strong: (move, press) pulse lengths in ms and amplitude 1-255. */
     private val LEVELS = mapOf(
-        "light" to Triple(18L, 30L, 120),
-        "medium" to Triple(26L, 45L, 190),
-        "strong" to Triple(38L, 65L, 255),
+        // Long enough for a handheld's rumble motor to be felt on a single press (shorter pulses only
+        // showed up when a held direction strung them together).
+        "light" to Triple(35L, 50L, 140),
+        "medium" to Triple(45L, 65L, 200),
+        "strong" to Triple(60L, 85L, 255),
     )
 
     @Volatile private var last = 0L
@@ -95,12 +97,15 @@ object Haptics {
     private fun pulse(press: Boolean) {
         val (moveMs, pressMs, amp) = LEVELS[MainUI.settings.haptics] ?: return
         val now = SystemClock.uptimeMillis()
-        if (!press && now - last < 45) return
+        // Held directions: a distinct tick per step, never a continuous buzz.
+        if (!press && now - last < moveMs * 2 + 20) return
         last = now
         val ms = if (press) pressMs else moveMs
         for (m in motors()) runCatching {
+            // A short full-strength kick gets the motor spinning at once, then the level's strength.
             // Motors without amplitude control run at their own strength.
-            m.pulse(VibrationEffect.createOneShot(ms, if (m.amplitude) amp else VibrationEffect.DEFAULT_AMPLITUDE))
+            m.pulse(if (m.amplitude) VibrationEffect.createWaveform(longArrayOf(10L, ms - 10L), intArrayOf(255, amp), -1)
+                else VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
         }.onFailure { Log.w(TAG, "${m.name}: ${it.message}") }
     }
 }
