@@ -86,6 +86,13 @@ private fun daemon(lib: String) {
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "daemon") { daemon(args[1]); return }
+    // `axes <deviceId> <v>...`: one controller event (see [axes]), without making a virtual keyboard.
+    if (args.firstOrNull() == "axes") {
+        val id = args.getOrNull(1)?.toIntOrNull()
+        val ok = id != null && runCatching { axes(injector(), id, args.drop(2).map { it.toFloatOrNull() ?: 0f }) }.getOrDefault(false)
+        println(if (ok) "ok" else "error axes")
+        return
+    }
     if (args.firstOrNull() == "list") {
         for (id in InputDevice.getDeviceIds()) InputDevice.getDevice(id)?.let { d ->
             println("$id\t${d.name}\tsources=0x${Integer.toHexString(d.sources)}\tkeyboardType=${d.keyboardType}\tvirtual=${d.isVirtual}")

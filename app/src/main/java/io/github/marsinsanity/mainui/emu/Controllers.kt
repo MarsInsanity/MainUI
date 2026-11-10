@@ -154,8 +154,9 @@ object Freezer {
  * reach it in testing. So MainUI probes the command port once:
  *  - a build that answers (custom / future builds): pause, slots 0-9 and quit
  *    through UDP commands;
- *  - otherwise: pause by freezing the process (root), Save / Load through
- *    RetroArch's own quick menu (Back opens it), Exit by force stop.
+ *  - otherwise: RetroArch pauses itself while MainUI's menu has focus
+ *    (pause_nonactive; never frozen, which could leave it without sound), Save /
+ *    Load with its keyboard hotkeys (root) or its own quick menu, Exit by force stop.
  */
 class RetroArchController(private val port: Int, private val pkg: String? = null) : GameController {
     @Volatile private var reachable: Boolean? = null
@@ -236,9 +237,11 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     override fun pause(): Boolean {
         prepare()
         if (!api) {
-            frozen = pkg != null && MainUI.settings.freezeStandalone && Freezer.freeze(pkg)
-            frozenGen = Freezer.generation
-            return frozen
+            // RetroArch pauses itself while MainUI's menu or Game Switcher has focus
+            // (pause_nonactive, set by MainUI's RetroArch configuration). Freezing the process on
+            // top of that (SIGSTOP) could leave it without sound afterwards, so it isn't frozen.
+            frozen = false
+            return false
         }
         val st = status() ?: return false
         if (st.contains("PAUSED")) return true

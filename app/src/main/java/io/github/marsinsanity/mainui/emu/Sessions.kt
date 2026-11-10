@@ -121,6 +121,7 @@ class SessionManager(
             val pkg = intent.component?.packageName ?: intent.`package` ?: option.pkg ?: ""
             val s = Session(game.key, game.systemId, game.file?.absolutePath, game.name, option.ref, pkg,
                 intent.component?.className, System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME))
+            io.github.marsinsanity.mainui.core.SessionLog.log("launch ${game.name} with ${option.ref} ($pkg)")
             begin(s)
             library.addRecent(game, option.ref)
             if (!option.isRetroArch) autoLoad(s)
@@ -180,9 +181,14 @@ class SessionManager(
      * A plain launch of an ordinary activity started a second, empty game screen on top of the
      * running one: Flycast showed black until its menu was opened and closed.
      */
+    /** When MainUI last brought back a game that was already running (Game Switcher, menu), uptime ms. */
+    @Volatile var resumedAt = 0L
+        private set
+
     fun resume(): Boolean {
         val s = active ?: return false
         shownAt = android.os.SystemClock.uptimeMillis()
+        resumedAt = shownAt
         // The task lookup runs root commands: never on the UI thread (it can wait seconds for the shell).
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
             Thread({ resumeSession(s) }, "resume").start()
@@ -192,6 +198,7 @@ class SessionManager(
     }
 
     private fun resumeSession(s: Session): Boolean {
+        io.github.marsinsanity.mainui.core.SessionLog.log("resume ${s.name} (${s.pkg})")
         if (Root.knownAvailable()) {
             val id = runCatching { Tasks.idOf(Root.Shell.run("dumpsys activity recents", 4000).out, s.pkg) }.getOrNull()
             if (id != null && runCatching {
@@ -281,7 +288,7 @@ class SessionManager(
             val o = overlay()
             if (active !== s || (o != null && (o.foregroundPackage != s.pkg || o.overlayShowing))) return@Thread
             val ok = runCatching { c.load(0) }.getOrDefault(false)
-            android.util.Log.i("MainUI.Sessions", "auto load ${s.name}: $ok")
+            io.github.marsinsanity.mainui.core.SessionLog.log("auto load ${s.name}: load key ${if (ok) "sent" else "FAILED"} after ${settle} ms")
             if (ok) toast("Loaded your last save")
         }, "auto-load").apply { isDaemon = true }.start()
     }

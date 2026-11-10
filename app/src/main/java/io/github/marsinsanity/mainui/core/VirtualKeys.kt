@@ -44,14 +44,23 @@ object VirtualKeys {
      * helper's CONTROLLER_AXES order: X, Y, Z, RZ, RX, RY, HAT_X, HAT_Y, LTRIGGER, RTRIGGER,
      * BRAKE, GAS). Used after MainUI's menu had focus while they moved. Root only.
      */
-    @Synchronized
     fun axes(deviceId: Int, values: FloatArray): Boolean {
-        if (!ensure()) return false
-        return try {
-            replies.clear()
-            out!!.write("axes $deviceId ${values.joinToString(" ")}\n"); out!!.flush()
-            replies.poll(3000, TimeUnit.MILLISECONDS) == "ok"
-        } catch (e: Exception) { Log.w(TAG, "axes failed", e); false }
+        val args = "$deviceId ${values.joinToString(" ")}"
+        // Through the running helper when there is one; otherwise a one-off root call, so no
+        // virtual keyboard appears just for this (a new keyboard while a game starts up could be
+        // taken for a controller).
+        synchronized(this) {
+            if (proc?.isAlive == true && out != null) return try {
+                replies.clear()
+                out!!.write("axes $args\n"); out!!.flush()
+                replies.poll(3000, TimeUnit.MILLISECONDS) == "ok"
+            } catch (e: Exception) { Log.w(TAG, "axes failed", e); false }
+        }
+        if (!Root.knownAvailable()) return false
+        val ai = MainUI.app.applicationInfo
+        val r = Root.exec("env CLASSPATH=${Root.q(ai.sourceDir)} app_process /system/bin " +
+            "io.github.marsinsanity.mainui.tools.KeyInject axes $args", timeoutSec = 15)
+        return r.ok && r.out.contains("ok")
     }
 
     /** Bumped for every new virtual keyboard (helper start). */
