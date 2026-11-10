@@ -101,7 +101,7 @@
       "components": ["com.github.stenzek.duckstation/.EmulationActivity"],
       "extras": { "resumeState": "bool:false", "bootPath": "%ROMSAF%" },
       "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
-      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F2", "load": "keys:KEYCODE_F1" }
     },
     {
       "id": "drastic", "name": "DraStic",

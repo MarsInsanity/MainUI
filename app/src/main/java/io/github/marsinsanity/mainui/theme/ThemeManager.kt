@@ -161,27 +161,42 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     /** Extracts an Onion theme .zip next to itself. Handles zips with or without a top folder. */
     fun install(zip: File): File? = runCatching {
         ZipFile(zip).use { zf ->
-            val entries = zf.entries().toList()
+            val entries = zf.entries().toList().filter { !it.name.startsWith("__MACOSX/") }
             val tops = entries.map { it.name.substringBefore('/') }.toSet()
+            // A pack of several themes ("CyberOnion (2-pack)"): each top folder that is a theme
+            // (config.json or skin/) is installed as a theme of its own.
+            val themeTops = tops.filter { t -> entries.any { it.name == "$t/config.json" || it.name.startsWith("$t/skin/") } }
+            if (themeTops.size > 1) return@runCatching themeTops.mapNotNull { extract(zf, entries, zip.parentFile!!, it, true) }.first()
             val hasTopFolder = tops.size == 1 && entries.any { it.name.contains('/') }
-            val top = if (hasTopFolder) tops.first() else zip.nameWithoutExtension
-            // The theme folder must be a plain name: never "..", ".", or a path.
-            if (top.isBlank() || top == "." || top == ".." || top.contains('/') || top.contains('\\')) throw java.io.IOException("bad theme folder \"$top\"")
-            val target = File(zip.parentFile, top)
-            val inside = target.canonicalPath + File.separator
-            for (e in entries) {
-                val out = File(zip.parentFile, if (hasTopFolder) e.name else "$top/${e.name}")
-                // Zip slip: everything must land inside the theme's own folder (a prefix test of the
-                // bare path would let "Blue/../Blueprint/x" into a sibling theme "Blueprint").
-                if (!(out.canonicalPath + if (e.isDirectory) File.separator else "").startsWith(inside)) continue
-                if (e.isDirectory) out.mkdirs() else {
-                    out.parentFile?.mkdirs()
-                    zf.getInputStream(e).use { input -> out.outputStream().use { input.copyTo(it) } }
-                }
-            }
-            target
+            val top = if (themeTops.size == 1) themeTops[0] else if (hasTopFolder) tops.first() else zip.nameWithoutExtension
+            extract(zf, entries, zip.parentFile!!, top, hasTopFolder || themeTops.size == 1) ?: throw java.io.IOException("bad theme folder \"$top\"")
         }
-    }.getOrNull()?.also { zip.delete() }
+    }.getOrNull()
+        // Only a usable theme counts (and frees its zip); anything else keeps the zip and fails.
+        ?.takeIf { File(it, "config.json").isFile || File(it, "skin").isDirectory }?.also { zip.delete() }
+
+    /**
+     * Unpacks theme [top] into [dir]/[top]: the entries under "[top]/" when [inFolder], else every
+     * entry. Null for a [top] that isn't a plain folder name.
+     */
+    private fun extract(zf: ZipFile, entries: List<java.util.zip.ZipEntry>, dir: File, top: String, inFolder: Boolean): File? {
+        // The theme folder must be a plain name: never "..", ".", or a path.
+        if (top.isBlank() || top == "." || top == ".." || top.contains('/') || top.contains('\\')) return null
+        val target = File(dir, top)
+        val inside = target.canonicalPath + File.separator
+        for (e in entries) {
+            if (inFolder && !e.name.startsWith("$top/")) continue
+            val out = File(dir, if (inFolder) e.name else "$top/${e.name}")
+            // Zip slip: everything must land inside the theme's own folder (a prefix test of the
+            // bare path would let "Blue/../Blueprint/x" into a sibling theme "Blueprint").
+            if (!(out.canonicalPath + if (e.isDirectory) File.separator else "").startsWith(inside)) continue
+            if (e.isDirectory) out.mkdirs() else {
+                out.parentFile?.mkdirs()
+                zf.getInputStream(e).use { input -> out.outputStream().use { input.copyTo(it) } }
+            }
+        }
+        return target
+    }
 
     // ---- sounds ------------------------------------------------------------------------
     fun reloadSounds() {

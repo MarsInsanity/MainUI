@@ -215,7 +215,9 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val types = system.def.unzip
         if (types.isEmpty()) return emptySet()
         val names = files.mapTo(HashSet()) { it.name.lowercase() }
-        return files.filter { f -> f.extension.equals("zip", true) && types.any { t -> "${f.nameWithoutExtension}.$t".lowercase() in names } }
+        // (Only a single-image zip: a multi-disc one still holds discs that weren't unpacked.)
+        return files.filter { f -> f.extension.equals("zip", true) && types.any { t -> "${f.nameWithoutExtension}.$t".lowercase() in names } &&
+            runCatching { io.github.marsinsanity.mainui.emu.ZipImages.imageCount(f, types) }.getOrDefault(2) <= 1 }
             .mapTo(HashSet()) { it.name.lowercase() }
     }
 

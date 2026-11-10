@@ -27,6 +27,11 @@ object ZipImages {
             .maxByOrNull { it.size }?.let { it.name to it.size }
     }
 
+    /** How many images of [types] [zip] holds (a multi-disc zip has several: only one is unpacked). */
+    fun imageCount(zip: File, types: Set<String>): Int = ZipFile(zip).use { z ->
+        z.entries().asSequence().count { !it.isDirectory && it.name.substringAfterLast('.').lowercase() in types }
+    }
+
     /** The name the image gets beside the zip ("Halo.zip" holding "Halo (USA).iso" -> "Halo.iso"). */
     fun target(zip: File, entryName: String): File =
         File(zip.parentFile, "${zip.nameWithoutExtension}.${entryName.substringAfterLast('.').lowercase()}")

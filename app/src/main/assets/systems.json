@@ -64,7 +64,7 @@
     "zip"
    ],
    "emulators": [
-    "ra:mame"
+    "ra:mamemess"
    ],
    "screenscraper": 78,
    "icons": [
@@ -101,8 +101,7 @@
     "zip"
    ],
    "emulators": [
-    "ra:puae",
-    "ra:uae4arm"
+    "ra:puae"
    ],
    "screenscraper": 64,
    "icons": [
@@ -127,8 +126,7 @@
     "m3u"
    ],
    "emulators": [
-    "ra:puae",
-    "ra:uae4arm"
+    "ra:puae"
    ],
    "screenscraper": 130,
    "icons": [
@@ -255,7 +253,7 @@
    "emulators": [
     "ra:fbneo",
     "ra:fbalpha2012",
-    "ra:mame",
+    "ra:mamearcade",
     "sa:mame4droid",
     "ra:armnes_arcade"
    ],
@@ -296,7 +294,7 @@
     "zip"
    ],
    "emulators": [
-    "ra:mame"
+    "ra:mamemess"
    ],
    "screenscraper": 44,
    "icons": [
@@ -1238,7 +1236,7 @@
     "jar"
    ],
    "emulators": [
-    "ra:freej2me"
+    "ra:squirreljme"
    ],
    "screenscraper": null,
    "icons": [
@@ -1342,7 +1340,7 @@
    ],
    "emulators": [
     "ra:sameduck",
-    "ra:mame"
+    "ra:mamemess"
    ],
    "screenscraper": 90,
    "icons": [
@@ -1913,6 +1911,7 @@
    ],
    "emulators": [
     "sa:pico8",
+    "ra:retro8",
     "ra:fake08"
    ],
    "menu": [
@@ -2532,7 +2531,7 @@
     "zip"
    ],
    "emulators": [
-    "ra:mame"
+    "ra:mamemess"
    ],
    "screenscraper": 144,
    "icons": [
@@ -2608,7 +2607,7 @@
     "zip"
    ],
    "emulators": [
-    "ra:mame"
+    "ra:mamemess"
    ],
    "screenscraper": null,
    "icons": [

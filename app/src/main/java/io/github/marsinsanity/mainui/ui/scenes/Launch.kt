@@ -135,6 +135,12 @@ object Launch {
                 return@io
             }
             val play = { start(host, def, game.copy(file = img)) }
+            // More than one disc in the zip: only one was unpacked, so the zip (the other discs) stays.
+            if (runCatching { ZipImages.imageCount(zip, def.unzip) }.getOrDefault(2) > 1) {
+                host.toast("${zip.name} holds more than one disc: it is kept", 3000)
+                play()
+                return@io
+            }
             host.push(DialogScene(host, "Unpacked",
                 "Delete ${zip.name} to free ${ZipImages.gb(zip.length())}? MainUI launches the unpacked image from now on.",
                 "DELETE", "KEEP", onConfirm = { zip.delete(); MainUI.games.invalidate(); play() }, onCancel = play))

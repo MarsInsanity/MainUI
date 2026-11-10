@@ -61,7 +61,9 @@ object UnzipFlow {
                 return@io
             }
             // Each storage (SD card, internal) needs room for what is unpacked there.
-            val byStorage = plan.archives.groupBy { a -> sys.dirs.firstOrNull { a.file.path.startsWith(it.path + "/") } ?: a.file.parentFile }
+            // (By volume: two system folders, or Roms and Roms2, on one card share its free space.)
+            val vols = MainUI.storage.volumes()
+            val byStorage = plan.archives.groupBy { a -> vols.firstOrNull { a.file.path.startsWith(it.dir.path + "/") }?.dir ?: a.file.parentFile }
             fun free(dir: File?) = dir?.usableSpace ?: 0L
             fun fits(mode: RomUnzip.Mode) = byStorage.all { (dir, list) -> free(dir) >= RomUnzip.spaceNeeded(list, mode) }
             fun need(mode: RomUnzip.Mode) = byStorage.values.maxOf { RomUnzip.spaceNeeded(it, mode) }
@@ -101,7 +103,9 @@ object UnzipFlow {
                 main.post { host.invalidate() }
             }, { stop.get() }, fallback = { zip, dir ->
                 // A folder MainUI can't write to (some SD cards): Android's unzip as root, never overwriting (.zip only).
-                Root.knownAvailable() && Root.exec("unzip -n -q -d ${Root.q(dir.path)} ${Root.q(zip.path)}").ok
+                // Time for a big zip on a slow card (at least 1 MB/s), not Root.exec's 20 s.
+                Root.knownAvailable() && Root.exec("unzip -n -q -d ${Root.q(dir.path)} ${Root.q(zip.path)}",
+                    timeoutSec = 600 + zip.length() / (1L shl 20)).ok
             })
             MainUI.games.invalidate()
             runCatching { MainUI.games.countGames(sys) }
