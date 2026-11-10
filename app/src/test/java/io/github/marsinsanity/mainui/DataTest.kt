@@ -1372,15 +1372,15 @@ class RomUnzipTest {
             zip(File(dir, "Notes.zip"), "notes.txt" to "no games here")
             zip(File(dir, "Evil.zip"), "../escaped.mgw" to "x", "Sub/Fire.mgw" to "fire")
             File(dir, "Imgs").mkdirs(); zip(File(dir, "Imgs/Art.zip"), "Art.mgw" to "skip me")
-            val plan = u.scan(listOf(dir), mgw) { it == "imgs" }
-            assertEquals(listOf("Ball.zip", "Evil.zip"), plan.archives.map { it.zip.name })
+            val plan = u.scan(listOf(dir), mgw, skipDir = { it == "imgs" })
+            assertEquals(listOf("Ball.zip", "Evil.zip"), plan.archives.map { it.file.name })
             assertEquals(3, plan.games)
             val r = u.unpack(plan, io.github.marsinsanity.mainui.data.RomUnzip.Mode.DELETE_EACH, progress = { _, _, _ -> }, cancelled = { false })
             assertEquals("ball", File(dir, "Ball.mgw").readText())
             assertEquals("fire", File(dir, "Sub/Fire.mgw").readText())
             assertFalse(File(dir, "readme.txt").exists())
             assertFalse(File(dir.parentFile, "escaped.mgw").exists()) // never outside the folder
-            assertEquals(2, r.unpacked); assertEquals(2, r.zipsDeleted)
+            assertEquals(2, r.unpacked); assertEquals(2, r.deleted)
             assertFalse(File(dir, "Ball.zip").exists())
             assertTrue(File(dir, "Notes.zip").exists())            // no games: untouched
             assertTrue(dir.walkTopDown().none { it.name.endsWith(".part") })
@@ -1433,12 +1433,92 @@ class RomUnzipTest {
             assertTrue(stopped.stopped)
             assertTrue(File(dir, "A.mgw").exists()); assertFalse(File(dir, "B.mgw").exists())
             assertTrue(File(dir, "A.zip").exists()); assertTrue(File(dir, "B.zip").exists())
-            assertEquals(0, stopped.zipsDeleted)
+            assertEquals(0, stopped.deleted)
             // Run again: A is skipped as already there, B unpacked, then both zips go.
             val r = u.unpack(u.scan(listOf(dir), mgw), after, progress = { _, _, _ -> }, cancelled = { false })
-            assertEquals(1, r.unpacked); assertEquals(1, r.existing); assertEquals(2, r.zipsDeleted)
+            assertEquals(1, r.unpacked); assertEquals(1, r.existing); assertEquals(2, r.deleted)
             assertFalse(File(dir, "A.zip").exists()); assertFalse(File(dir, "B.zip").exists())
             assertEquals("b", File(dir, "B.mgw").readText())
+        } finally { dir.deleteRecursively() }
+    }
+
+    // ---- RAR: a minimal RAR 4 archive with stored (uncompressed) files, written by hand ----
+
+    private fun le16(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())
+    private fun le32(v: Long) = ByteArray(4) { ((v shr (8 * it)) and 0xFF).toByte() }
+    private fun crc(b: ByteArray) = java.util.zip.CRC32().apply { update(b) }.value
+
+    /** RAR 4 block: its header CRC (low 16 bits of the CRC32 of the rest of the header) first. */
+    private fun block(body: ByteArray) = le16((crc(body) and 0xFFFF).toInt()) + body
+
+    private fun rar(f: File, vararg entries: Pair<String, String>, solid: Boolean = false) {
+        val out = java.io.ByteArrayOutputStream()
+        out.write(byteArrayOf(0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00)) // "Rar!" marker
+        out.write(block(byteArrayOf(0x73) + le16(if (solid) 0x0008 else 0) + le16(13) + le16(0) + le32(0)))
+        for ((i, e) in entries.withIndex()) {
+            val data = e.second.toByteArray(); val name = e.first.toByteArray()
+            val flags = 0x8000 or (if (solid && i > 0) 0x0010 else 0)
+            out.write(block(byteArrayOf(0x74) + le16(flags) + le16(32 + name.size) + le32(data.size.toLong()) +
+                le32(data.size.toLong()) + byteArrayOf(0) + le32(crc(data)) + le32(0x5A2E0000) + byteArrayOf(20, 0x30) +
+                le16(name.size) + le32(0x20) + name))
+            out.write(data)
+        }
+        out.write(block(byteArrayOf(0x7B) + le16(0x4000) + le16(7)))
+        f.writeBytes(out.toByteArray())
+    }
+
+    @Test
+    fun unpacksRarFilesLikeZips() {
+        val dir = temp()
+        try {
+            rar(File(dir, "Ball.rar"), "Ball.mgw" to "ball", "readme.txt" to "hi", "Sub\\Fire.mgw" to "fire", "..\\escape.mgw" to "x")
+            rar(File(dir, "Notes.rar"), "notes.txt" to "no games")
+            val plan = u.scan(listOf(dir), mgw)
+            assertEquals(listOf("Ball.rar"), plan.archives.map { it.file.name })
+            assertEquals(3, plan.games)
+            val r = u.unpack(plan, io.github.marsinsanity.mainui.data.RomUnzip.Mode.DELETE_EACH, progress = { _, _, _ -> }, cancelled = { false })
+            assertEquals("ball", File(dir, "Ball.mgw").readText())
+            assertEquals("fire", File(dir, "Sub/Fire.mgw").readText())
+            assertFalse(File(dir, "readme.txt").exists())
+            assertFalse(File(dir.parentFile, "escape.mgw").exists())
+            assertEquals(2, r.unpacked); assertEquals(1, r.deleted)
+            assertFalse(File(dir, "Ball.rar").exists()); assertTrue(File(dir, "Notes.rar").exists())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun solidRarsAreReadInOrderPastTheFilesLeftOut() {
+        val dir = temp()
+        try {
+            rar(File(dir, "Pack.rar"), "readme.txt" to "first", "Ball.mgw" to "ball", "Fire.mgw" to "fire", solid = true)
+            File(dir, "Ball.mgw").writeText("ball") // already there: skipped, still read past
+            val r = u.unpack(u.scan(listOf(dir), mgw), io.github.marsinsanity.mainui.data.RomUnzip.Mode.KEEP,
+                progress = { _, _, _ -> }, cancelled = { false })
+            assertEquals("fire", File(dir, "Fire.mgw").readText())
+            assertEquals(1, r.unpacked); assertEquals(1, r.existing)
+            assertTrue(File(dir, "Pack.rar").exists())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun multiPartRarsAreOneArchiveAndGoTogether() {
+        val dir = temp()
+        try {
+            rar(File(dir, "Game.part1.rar"), "Game.mgw" to "game")
+            File(dir, "Game.part2.rar").writeText("the rest") // a later part: never scanned on its own
+            File(dir, "Broken.rar").writeText("not a rar")
+            val problems = mutableListOf<Pair<File, String>>()
+            val plan = u.scan(listOf(dir), mgw, problems = problems)
+            assertEquals(listOf("Game.part1.rar"), plan.archives.map { it.file.name })
+            assertEquals(listOf("Game.part1.rar", "Game.part2.rar"), plan.archives[0].parts.map { it.name })
+            assertEquals(listOf("Broken.rar"), problems.map { it.first.name }) // said, not tried
+            u.unpack(plan, io.github.marsinsanity.mainui.data.RomUnzip.Mode.DELETE_EACH, progress = { _, _, _ -> }, cancelled = { false })
+            assertEquals("game", File(dir, "Game.mgw").readText())
+            assertFalse(File(dir, "Game.part1.rar").exists()); assertFalse(File(dir, "Game.part2.rar").exists())
+            assertEquals(listOf("Old.rar", "Old.r00", "Old.r01"), run {
+                listOf("Old.rar", "Old.r00", "Old.r01", "Other.r00").forEach { File(dir, it).writeText("x") }
+                u.partsOf(File(dir, "Old.rar")).map { it.name }
+            })
         } finally { dir.deleteRecursively() }
     }
 }

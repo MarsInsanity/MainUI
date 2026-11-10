@@ -164,12 +164,12 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
                 val exts = sys.def.extensions.sorted().joinToString(" ") { ".$it" }
                 val found = sys.unplayableSummary
                 // Zipped games of a system that can't open zips: one button unzips them all.
-                val zips = UnzipFlow.zips(sys)
+                val zips = UnzipFlow.archives(sys)
                 list.set(top + listOfNotNull(
                     UiItem("No games found", disabled = true),
                     found?.let { UiItem("Found: $it", disabled = true) },
                     UiItem("${sys.def.short} games must be: $exts", disabled = true),
-                    if (zips > 0) UiItem("Unzip all ${zips} .zip ${if (zips == 1) "file" else "files"}",
+                    if (zips > 0) UiItem(UnzipFlow.label(sys),
                         onSelect = { UnzipFlow.start(host, sys) { reload() } }) else null,
                     // No folder yet (listed for its menu): where its games go.
                     if (sys.dirs.isEmpty()) menu.firstOrNull()?.file?.parentFile?.let { UiItem("Put them in ${it.path}", disabled = true) } else null,
