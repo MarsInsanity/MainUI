@@ -54,6 +54,7 @@ class App : Application() {
         io.github.marsinsanity.mainui.data.MainUIRef.metadataSource = { s.metadataSource }
         io.github.marsinsanity.mainui.data.MainUIRef.showHidden = { s.showHiddenGames }
         io.github.marsinsanity.mainui.data.MainUIRef.hidden = { key, bios -> MainUI.library.isGameHidden(key, bios) }
+        io.github.marsinsanity.mainui.data.MainUIRef.emulatorInstalled = { ref -> MainUI.emulators.isInstalled(ref) }
         MainUI.library = Library(MainUI.storage).apply { load() }
         MainUI.apps = Apps(this, MainUI.library, s)
         MainUI.emulators = EmulatorManager(this, MainUI.storage, s, MainUI.library)

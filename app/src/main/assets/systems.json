@@ -1915,6 +1915,13 @@
     "sa:pico8",
     "ra:fake08"
    ],
+   "menu": [
+    {
+     "name": "Splore",
+     "emulator": "sa:pico8",
+     "rom": "Splore.p8"
+    }
+   ],
    "screenscraper": 234,
    "icons": [
     "pico-8",

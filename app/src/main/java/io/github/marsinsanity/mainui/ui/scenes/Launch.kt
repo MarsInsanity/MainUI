@@ -41,6 +41,7 @@ object Launch {
         }
         val def = systemDef(game.systemId)
         if (def == null) { host.toast("Unknown system ${game.systemId}"); return }
+        def.menuItemFor(game.file)?.let { launchMenuItem(host, def, game, it); return }
         if (game.file?.exists() != true) { host.toast("File not found"); return }
         val em = MainUI.emulators
         host.io({
@@ -60,6 +61,25 @@ object Launch {
                         "${def.name} games need $emuName, which is not installed.\nGet it now?", "GET", "CANCEL") {
                         host.push(EmulatorDetailScene(host, emuId))
                     })
+                }
+            }
+        }
+    }
+
+    /**
+     * A system's menu entry (PICO-8: Splore), from its game list, Recents, Favorites or the Game
+     * Switcher: always with the entry's emulator, and its file needn't exist.
+     */
+    private fun launchMenuItem(host: SceneHost, def: SystemDef, game: Game, item: io.github.marsinsanity.mainui.data.SystemMenuItem) {
+        host.io({ MainUI.emulators.optionFor(item.emulator) }) { opt ->
+            when {
+                opt == null -> host.toast("Unknown emulator ${item.emulator}")
+                opt.installed != true -> host.push(DialogScene(host, "Emulator not installed",
+                    "${item.name} needs ${opt.name}, which is not installed.\nGet it now?", "GET", "CANCEL") {
+                    host.push(EmulatorDetailScene(host, item.emulator.removePrefix("sa:")))
+                })
+                else -> host.io({ MainUI.sessions.launch(def, game, opt) }) { err ->
+                    if (err != null) host.push(DialogScene(host, "Can't start ${item.name}", err, "OK", null))
                 }
             }
         }

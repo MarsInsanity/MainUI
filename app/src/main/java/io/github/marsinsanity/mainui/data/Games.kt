@@ -32,14 +32,39 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
     @Volatile private var systemsCache: List<GameSystem>? = null
 
     fun systems(includeUnknown: Boolean, refresh: Boolean = false): List<GameSystem> {
-        if (!refresh) systemsCache?.let { return it }
-        val s = registry.discover(includeUnknown)
-        systemsCache = s
-        return s
+        val found = (if (refresh) null else systemsCache) ?: registry.discover(includeUnknown).also { systemsCache = it }
+        return withMenuSystems(found)
+    }
+
+    /** Folderless systems kept by id, so their game counts aren't recounted every time. */
+    private val menuSystems = ConcurrentHashMap<String, GameSystem>()
+
+    /**
+     * Adds the systems that have no folder but a [SystemDef.menu] entry whose emulator is
+     * installed (PICO-8 with the PICO-8 app: Splore). Checked on every call, so installing or
+     * removing the emulator shows / hides the system without a rescan.
+     */
+    private fun withMenuSystems(found: List<GameSystem>): List<GameSystem> {
+        val extra = registry.defs.filter { d ->
+            d.menu.isNotEmpty() && found.none { it.id == d.id } && d.menu.any { MainUIRef.emulatorInstalled(it.emulator) }
+        }
+        if (extra.isEmpty()) return found
+        return (found + extra.map { d -> menuSystems.getOrPut(d.id) { GameSystem(d, emptyList()) } }).sortedBy { it.name.lowercase() }
+    }
+
+    /**
+     * The game a [SystemMenuItem] launches: its file name in the system's first folder, or where
+     * that folder would be (the file needn't exist; the emulator only reads its name).
+     */
+    fun menuGame(system: GameSystem, item: SystemMenuItem): Game {
+        val dir = system.dirs.firstOrNull()
+            ?: File(storage.romRoots().firstOrNull() ?: File("/storage/emulated/0/Roms"), system.def.folders.firstOrNull() ?: system.id)
+        return Game(system.id, File(dir, item.rom), item.name)
     }
 
     fun invalidate() {
         systemsCache = null
+        menuSystems.clear()
         dirCache.clear()
         gamelists.clear()
         listings.clear()
@@ -361,4 +386,6 @@ object MainUIRef {
     @Volatile var hidden: (key: String, bios: Boolean) -> Boolean = { _, bios -> bios }
     /** Settings > Library > Show hidden games. */
     @Volatile var showHidden: () -> Boolean = { false }
+    /** Whether the emulator "sa:<id>" / "ra:<core>" is installed (for [SystemDef.menu]). */
+    @Volatile var emulatorInstalled: (ref: String) -> Boolean = { false }
 }

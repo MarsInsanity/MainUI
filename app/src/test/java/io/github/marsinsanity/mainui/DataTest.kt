@@ -1296,3 +1296,38 @@ class HiddenGamesTest {
         assertFalse(r.isBios(null))
     }
 }
+
+class SystemMenuTest {
+    private val pico = io.github.marsinsanity.mainui.data.SystemDef("pico-8", "Pico-8", listOf("pico-8/carts"), setOf("p8", "png"),
+        listOf("sa:pico8", "ra:fake08"), 234, listOf("pico-8"), "PICO",
+        menu = listOf(io.github.marsinsanity.mainui.data.SystemMenuItem("Splore", "sa:pico8", "Splore.p8")))
+
+    @Test
+    fun menuEntriesAreFoundByFileName() {
+        assertEquals("Splore", pico.menuItemFor(File("/storage/emulated/0/Roms/pico-8/carts/splore.P8"))?.name)
+        assertNull(pico.menuItemFor(File("/storage/emulated/0/Roms/pico-8/carts/celeste.p8")))
+        assertNull(pico.menuItemFor(null))
+    }
+
+    @Test
+    fun menuParsingSkipsIncompleteEntries() {
+        val a = org.json.JSONArray("""[{"name":"Splore","emulator":"sa:pico8","rom":"Splore.p8"},
+            {"name":"","emulator":"sa:x","rom":"a"},{"name":"Bad","emulator":"sa:x","rom":"../a"},{"name":"No rom","emulator":"sa:x"}]""")
+        assertEquals(listOf(io.github.marsinsanity.mainui.data.SystemMenuItem("Splore", "sa:pico8", "Splore.p8")),
+            io.github.marsinsanity.mainui.data.SystemRegistry.parseMenu(a))
+        assertEquals(emptyList<Any>(), io.github.marsinsanity.mainui.data.SystemRegistry.parseMenu(null))
+    }
+
+    @Test
+    fun shippedSystemsGivePico8ItsSploreEntry() {
+        val f = listOf("src/main/assets/systems.json", "app/src/main/assets/systems.json").map(::File).first { it.isFile }
+        val systems = org.json.JSONObject(f.readText()).getJSONArray("systems")
+        val p8 = (0 until systems.length()).map { systems.getJSONObject(it) }.first { it.getString("id") == "pico-8" }
+        val menu = io.github.marsinsanity.mainui.data.SystemRegistry.parseMenu(p8.optJSONArray("menu"))
+        assertEquals(listOf("Splore"), menu.map { it.name })
+        val emus = p8.getJSONArray("emulators").let { a -> (0 until a.length()).map { a.getString(it) } }
+        assertTrue(menu.single().emulator in emus)
+        // pico8-android starts Splore for a cart named splore.p8 / splore.p8.png (any case).
+        assertEquals("splore.p8", menu.single().rom.lowercase())
+    }
+}

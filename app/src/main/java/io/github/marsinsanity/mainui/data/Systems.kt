@@ -19,11 +19,17 @@ data class SystemDef(
     val short: String,
     /** Image types its emulators open that MainUI unpacks from a .zip before launching (Xbox). */
     val unzip: Set<String> = emptySet(),
+    /** Entries at the top of its game list that open an emulator's own menu (PICO-8: Splore). */
+    val menu: List<SystemMenuItem> = emptyList(),
 ) {
     fun accepts(file: File): Boolean {
         if (extensions.isEmpty()) return true
         return file.extension.lowercase() in extensions
     }
+
+    /** The [menu] entry a game file stands for (by file name: PICO-8's "Splore.p8"), if any. */
+    fun menuItemFor(file: File?): SystemMenuItem? =
+        file?.name?.let { n -> menu.firstOrNull { it.rom.equals(n, ignoreCase = true) } }
 
     companion object {
         /** Virtual system for Android-native games. */
@@ -37,7 +43,18 @@ data class SystemDef(
     }
 }
 
-/** A system that has a folder on at least one rom root. */
+/**
+ * "menu" in systems.json: an entry at the top of a system's game list that starts [emulator]
+ * ("sa:<id>") with the file name [rom] in the system's folder, which that emulator treats
+ * specially: PICO-8 (pico8-android) opens Splore for "Splore.p8". The file needn't exist.
+ * While the emulator is installed the system is listed even without a folder or games.
+ */
+data class SystemMenuItem(val name: String, val emulator: String, val rom: String)
+
+/**
+ * A system that has a folder on at least one rom root, or a [SystemDef.menu] entry whose
+ * emulator is installed (then [dirs] can be empty).
+ */
 data class GameSystem(val def: SystemDef, val dirs: List<File>) {
     val id get() = def.id
     val name get() = def.name
@@ -46,6 +63,9 @@ data class GameSystem(val def: SystemDef, val dirs: List<File>) {
     @Volatile var otherFiles: Map<String, Int> = emptyMap()
 
     /** "3 .7z, 1 .zip" for a system that has files but none MainUI plays; null otherwise. */
+    /** Its [SystemDef.menu] entries whose emulator is installed. */
+    val menu: List<SystemMenuItem> get() = def.menu.filter { MainUIRef.emulatorInstalled(it.emulator) }
+
     val unplayableSummary: String?
         get() = if (gameCount != 0 || otherFiles.isEmpty()) null
         else otherFiles.entries.sortedByDescending { it.value }.take(3).joinToString(", ") { "${it.value} .${it.key}" }
@@ -72,6 +92,7 @@ class SystemRegistry(ctx: Context, private val storage: Storage) {
                 icons = o.getJSONArray("icons").strings(),
                 short = o.optString("short", o.getString("id").uppercase()),
                 unzip = o.optJSONArray("unzip")?.strings()?.map { it.lowercase() }?.toSet() ?: emptySet(),
+                menu = parseMenu(o.optJSONArray("menu")),
             )
         }
         defs = list
@@ -119,6 +140,13 @@ class SystemRegistry(ctx: Context, private val storage: Storage) {
     }
 
     companion object {
+        /** "menu": [{"name": "Splore", "emulator": "sa:pico8", "rom": "Splore.p8"}] (incomplete entries skipped). */
+        fun parseMenu(a: org.json.JSONArray?): List<SystemMenuItem> = if (a == null) emptyList() else
+            (0 until a.length()).mapNotNull { i -> a.optJSONObject(i) }.mapNotNull { m ->
+                val name = m.optString("name"); val emu = m.optString("emulator"); val rom = m.optString("rom")
+                if (name.isBlank() || emu.isBlank() || rom.isBlank() || rom.contains('/')) null else SystemMenuItem(name, emu, rom)
+            }
+
         val IGNORED_FOLDERS = setOf(
             "bios", "ports", "themes", "images", "media", "videos", "manuals", "screenshots",
             "savestates", "saves", "backup", "backups", "tools", "opt", "lost+found", "mainui",

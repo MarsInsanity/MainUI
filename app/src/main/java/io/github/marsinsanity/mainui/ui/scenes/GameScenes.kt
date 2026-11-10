@@ -145,20 +145,39 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
     }
 
     private fun reload() {
-        host.io({ MainUI.games.list(sys, dir) }) { games ->
+        host.io({
+            // The system's menu entries first (PICO-8: Splore), at its top level only.
+            val menu = if (dir == null) sys.menu.map { MainUI.games.menuGame(sys, it) } else emptyList()
+            val games = MainUI.games.list(sys, dir).filter { g -> menu.none { it.file?.name.equals(g.file?.name, ignoreCase = true) } }
+            menu to games
+        }) { (menu, games) ->
+            // With the emulator app's icon (the PICO-8 app for Splore).
+            val top = menu.map { g ->
+                GameItems.item(host, sys, g).also { item ->
+                    val pkg = sys.def.menuItemFor(g.file)?.emulator?.takeIf { it.startsWith("sa:") }
+                        ?.let { MainUI.emulators.installedPackage(it.removePrefix("sa:")) }
+                    if (pkg != null && item.icon == null) item.icon = { MainUI.apps.icon(pkg, 64) }
+                }
+            }
             if (games.isEmpty() && dir == null) {
                 // Say why: the folder has files, but not of a kind this system's emulators open.
                 val exts = sys.def.extensions.sorted().joinToString(" ") { ".$it" }
                 val found = sys.unplayableSummary
-                list.set(listOfNotNull(
+                list.set(top + listOfNotNull(
                     UiItem("No games found", disabled = true),
                     found?.let { UiItem("Found: $it", disabled = true) },
                     UiItem("${sys.def.short} games must be: $exts", disabled = true),
+                    // No folder yet (listed for its menu): where its games go.
+                    if (sys.dirs.isEmpty()) menu.firstOrNull()?.file?.parentFile?.let { UiItem("Put them in ${it.path}", disabled = true) } else null,
                 ), false)
-            } else list.set(games.map { GameItems.item(host, sys, it) }, keepIndex = loaded)
+            } else list.set(top + games.map { GameItems.item(host, sys, it) }, keepIndex = loaded)
+            menuKeys = menu.map { it.key }.toSet()
             loaded = true
         }
     }
+
+    /** Keys of the menu entries shown (no ROM options for them: there is no file). */
+    private var menuKeys = emptySet<String>()
 
     override fun draw(g: io.github.marsinsanity.mainui.ui.Gfx) {
         super.draw(g)
@@ -180,7 +199,7 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
                 list.current?.icon = if (now) ({ MainUI.themes.current.skin("ic-favorite-mark") }) else null
                 return true
             }
-            Btn.SELECT -> { if (!repeat && game != null && !game.isFolder) GameItems.options(host, game) { reload() }; return true }
+            Btn.SELECT -> { if (!repeat && game != null && !game.isFolder && game.key !in menuKeys) GameItems.options(host, game) { reload() }; return true }
             Btn.MENU -> { if (!repeat) host.push(GameSwitcherScene(host)); return true }
             Btn.X -> { if (!repeat) SearchFlow.start(host, sys); return true } // search this system's games
             else -> return super.onKey(b, repeat)
