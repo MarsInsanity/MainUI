@@ -51,9 +51,23 @@ class Library(private val storage: Storage) {
     private val coreChoices = HashMap<String, String>()
     private val playTime = HashMap<String, Long>()
 
-    private fun f(name: String) = File(storage.configDir, name)
+    /**
+     * The config folder the lists were read from. Everything is written back there, never to a
+     * folder the data root moved to since (an SD card mounted after MainUI started): that one is
+     * read first ([current]), so its lists are never overwritten with these.
+     */
+    @Volatile private var loadedDir: File? = null
+
+    private fun f(name: String) = File(loadedDir ?: storage.configDir, name)
+
+    /** Reloads when the data root has moved to another folder since [load]. Call holding [lock]. */
+    private fun current() {
+        val dir = storage.configDir
+        if (dir.absolutePath != loadedDir?.absolutePath) load()
+    }
 
     fun load() = synchronized(lock) {
+        loadedDir = storage.configDir
         recents.clear(); favorites.clear(); androidGames.clear(); hiddenApps.clear(); coreChoices.clear(); playTime.clear()
         hiddenGames.clear(); shownBios.clear()
         readObject("hidden_games.json")?.let { o ->
@@ -88,11 +102,11 @@ class Library(private val storage: Storage) {
     private fun savePlayTime() = write("playtime.json", JSONObject(playTime as Map<*, *>).toString(1))
 
     // ---- recents -------------------------------------------------------------------
-    fun recents(): List<Entry> = synchronized(lock) { recents.toList() }
+    fun recents(): List<Entry> = synchronized(lock) { current(); recents.toList() }
 
-    fun recentFor(key: String): Entry? = synchronized(lock) { recents.firstOrNull { it.key == key } }
+    fun recentFor(key: String): Entry? = synchronized(lock) { current(); recents.firstOrNull { it.key == key } }
 
-    fun addRecent(g: Game, emu: String?) = synchronized(lock) {
+    fun addRecent(g: Game, emu: String?) = synchronized(lock) { current();
         val old = recents.firstOrNull { it.key == g.key }
         recents.removeAll { it.key == g.key }
         val e = Entry.of(g).also {
@@ -100,36 +114,39 @@ class Library(private val storage: Storage) {
             it.playSeconds = old?.playSeconds ?: 0; it.screenshot = old?.screenshot
         }
         recents.add(0, e)
-        while (recents.size > MAX_RECENTS) recents.removeAt(recents.size - 1)
+        while (recents.size > MAX_RECENTS) {
+            // Off the list: its Game Switcher screenshot goes too.
+            recents.removeAt(recents.size - 1).screenshot?.let { p -> if (p.startsWith(storage.screenshotDir.absolutePath)) File(p).delete() }
+        }
         saveRecents()
     }
 
-    fun updateRecent(key: String, block: (Entry) -> Unit) = synchronized(lock) {
+    fun updateRecent(key: String, block: (Entry) -> Unit) = synchronized(lock) { current();
         recents.firstOrNull { it.key == key }?.let { block(it); saveRecents() }
     }
 
-    fun removeRecent(key: String) = synchronized(lock) {
+    fun removeRecent(key: String) = synchronized(lock) { current();
         val e = recents.firstOrNull { it.key == key }
         recents.removeAll { it.key == key }
         e?.screenshot?.let { p -> if (p.startsWith(storage.screenshotDir.absolutePath)) File(p).delete() }
         saveRecents()
     }
 
-    fun addPlayTime(key: String, seconds: Long) = synchronized(lock) {
+    fun addPlayTime(key: String, seconds: Long) = synchronized(lock) { current();
         if (seconds <= 0) return@synchronized
         playTime[key] = (playTime[key] ?: 0) + seconds
         savePlayTime()
     }
 
-    fun playTime(key: String): Long = synchronized(lock) { playTime[key] ?: 0 }
-    fun totalPlayTime(): Long = synchronized(lock) { playTime.values.sum() }
+    fun playTime(key: String): Long = synchronized(lock) { current(); playTime[key] ?: 0 }
+    fun totalPlayTime(): Long = synchronized(lock) { current(); playTime.values.sum() }
 
     // ---- favorites -----------------------------------------------------------------
-    fun favorites(): List<Entry> = synchronized(lock) { favorites.sortedBy { it.name.lowercase() } }
-    fun isFavorite(key: String) = synchronized(lock) { favorites.any { it.key == key } }
+    fun favorites(): List<Entry> = synchronized(lock) { current(); favorites.sortedBy { it.name.lowercase() } }
+    fun isFavorite(key: String) = synchronized(lock) { current(); favorites.any { it.key == key } }
 
     /** Returns the new favorite state. */
-    fun toggleFavorite(g: Game): Boolean = synchronized(lock) {
+    fun toggleFavorite(g: Game): Boolean = synchronized(lock) { current();
         val had = favorites.removeAll { it.key == g.key }
         if (!had) favorites += Entry.of(g)
         saveFavorites()
@@ -137,42 +154,42 @@ class Library(private val storage: Storage) {
     }
 
     // ---- Android games & hidden apps ---------------------------------------------
-    fun androidGames(): Set<String> = synchronized(lock) { androidGames.toSet() }
-    fun isAndroidGame(pkg: String) = synchronized(lock) { pkg in androidGames }
-    fun setAndroidGame(pkg: String, value: Boolean) = synchronized(lock) {
+    fun androidGames(): Set<String> = synchronized(lock) { current(); androidGames.toSet() }
+    fun isAndroidGame(pkg: String) = synchronized(lock) { current(); pkg in androidGames }
+    fun setAndroidGame(pkg: String, value: Boolean) = synchronized(lock) { current();
         if (value) androidGames += pkg else androidGames -= pkg
         saveAndroid()
     }
 
-    fun hiddenApps(): Set<String> = synchronized(lock) { hiddenApps.toSet() }
-    fun isHidden(pkg: String) = synchronized(lock) { pkg in hiddenApps }
-    fun setHidden(pkg: String, value: Boolean) = synchronized(lock) {
+    fun hiddenApps(): Set<String> = synchronized(lock) { current(); hiddenApps.toSet() }
+    fun isHidden(pkg: String) = synchronized(lock) { current(); pkg in hiddenApps }
+    fun setHidden(pkg: String, value: Boolean) = synchronized(lock) { current();
         if (value) hiddenApps += pkg else hiddenApps -= pkg
         saveHidden()
     }
 
     // ---- hidden games -----------------------------------------------------------------
     /** Hidden with Hide ROM, or [bios] (a known BIOS set) and not shown again. */
-    fun isGameHidden(key: String, bios: Boolean): Boolean = synchronized(lock) {
+    fun isGameHidden(key: String, bios: Boolean): Boolean = synchronized(lock) { current();
         key in hiddenGames || (bios && key !in shownBios)
     }
 
-    fun setGameHidden(key: String, hide: Boolean, bios: Boolean) = synchronized(lock) {
+    fun setGameHidden(key: String, hide: Boolean, bios: Boolean) = synchronized(lock) { current();
         if (hide) { hiddenGames += key; shownBios -= key }
         else { hiddenGames -= key; if (bios) shownBios += key }
         saveHiddenGames()
     }
 
     // ---- emulator / core choice --------------------------------------------------
-    fun coreForSystem(systemId: String): String? = synchronized(lock) { coreChoices["system:$systemId"] }
-    fun coreForGame(gameKey: String): String? = synchronized(lock) { coreChoices["game:$gameKey"] }
+    fun coreForSystem(systemId: String): String? = synchronized(lock) { current(); coreChoices["system:$systemId"] }
+    fun coreForGame(gameKey: String): String? = synchronized(lock) { current(); coreChoices["game:$gameKey"] }
 
-    fun setCoreForSystem(systemId: String, ref: String?) = synchronized(lock) {
+    fun setCoreForSystem(systemId: String, ref: String?) = synchronized(lock) { current();
         if (ref == null) coreChoices.remove("system:$systemId") else coreChoices["system:$systemId"] = ref
         saveCores()
     }
 
-    fun setCoreForGame(gameKey: String, ref: String?) = synchronized(lock) {
+    fun setCoreForGame(gameKey: String, ref: String?) = synchronized(lock) { current();
         if (ref == null) coreChoices.remove("game:$gameKey") else coreChoices["game:$gameKey"] = ref
         saveCores()
     }

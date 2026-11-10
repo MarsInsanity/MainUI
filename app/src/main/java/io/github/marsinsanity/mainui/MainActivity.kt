@@ -96,6 +96,8 @@ class MainActivity : Activity() {
             return
         }
         if (resumed) {
+            // Setup is finished with B / Continue, which loads the real library (HOME would skip that).
+            if (view.scenes().any { it is io.github.marsinsanity.mainui.ui.scenes.SetupScene }) return
             when (MainUI.settings.homeInMainUI) {
                 "gs" -> openGameSwitcher()
                 "menu" -> view.popToRoot()
@@ -147,7 +149,9 @@ class MainActivity : Activity() {
         resumed = false
         // Whatever comes next (the game, another app, the screen going off): never a frozen game.
         Thread({ MainUI.sessions.unpark() }, "unpark").apply { isDaemon = true }.start()
-        leftForSession = MainUI.sessions.active != null
+        // Left for the game only when MainUI started or brought back the game during this visit;
+        // the screen turning off or another app opened from MainUI must not end the session.
+        leftForSession = MainUI.sessions.active != null && MainUI.sessions.shownAt >= resumedAt
         // Back to a game that was running (Game Switcher, fallback menu): hand it the triggers /
         // sticks that moved here. Not for a game starting now: it reads the controller fresh.
         val moved = view.takeMovedControllers()

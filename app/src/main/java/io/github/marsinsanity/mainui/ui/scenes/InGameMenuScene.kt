@@ -213,7 +213,8 @@ class InGameMenuScene(
             Action.LOAD -> if (controller.states == StateSupport.API) apiAction("Loading...") {
                 if (controller.load(slot)) "State loaded from slot $slot" else "Load failed"
             } else hotkeyAction("Load") { controller.load(0) }
-            Action.STATES_MENU, Action.NATIVE -> leaveThen(250) { controller.openNativeMenu() }
+            // From the fallback menu the game's task comes back first, which takes longer.
+            Action.STATES_MENU, Action.NATIVE -> leaveThen(if (overlayMode) 250L else keyDelay) { controller.openNativeMenu() }
             Action.SWITCHER -> {
                 if (saveByKey) {
                     // OnionOS: leaving a game for the Game Switcher saves it (RetroArch: its auto
@@ -225,6 +226,8 @@ class InGameMenuScene(
                         // RetroArch's save is checked (written and copied by now); others get time to write.
                         if (ok && controller !is io.github.marsinsanity.mainui.emu.RetroArchController) Thread.sleep(800)
                         else if (!ok) MainUI.sessions.toast("${session.name} wasn't saved: ${controller.saveProblem ?: "the save key failed"}")
+                        // Saved, but not all the way (RetroArch: not into the auto slot): said too.
+                        if (ok) controller.saveProblem?.let { MainUI.sessions.toast("${session.name}: $it") }
                         main.post {
                             ctx.startActivity(Intent(ctx, MainActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
@@ -247,8 +250,9 @@ class InGameMenuScene(
             Action.KEY_SAVE, Action.KEY_LOAD -> changeKey(a == Action.KEY_SAVE, true)
             Action.KEY_RESET -> { standalone?.emuId?.let { Hotkeys.set(it, null, null); Hotkeys.setLoadDelay(it, null) }; buildItems() }
             Action.KEY_DELAY -> changeDelay(true)
-            Action.BIND_SAVE -> leaveThen(700) { (controller as? StandaloneController)?.save(0) }
-            Action.BIND_LOAD -> leaveThen(700) { (controller as? StandaloneController)?.load(0) }
+            // Only the keys, for the emulator's binding screen: no "saved" bookkeeping (it saves nothing).
+            Action.BIND_SAVE -> leaveThen(700) { (controller as? StandaloneController)?.let { it.keys(it.saveSpec) } }
+            Action.BIND_LOAD -> leaveThen(700) { (controller as? StandaloneController)?.let { it.keys(it.loadSpec) } }
         }
     }
 
@@ -316,8 +320,10 @@ class InGameMenuScene(
             io.github.marsinsanity.mainui.core.SessionLog.log("menu $what for ${session.name}: ${if (ok) "ok" else "FAILED ${problem ?: ""}"}")
             main.post {
                 // RetroArch saves are checked (its state file changed); other presses can't be.
+                // A save that worked only partly (not into RetroArch's auto slot) says so.
                 val done = if (what == "Save" && controller is io.github.marsinsanity.mainui.emu.RetroArchController) "State saved" else "$what state: hotkey sent"
-                Toast.makeText(ctx, if (ok) done else problem ?: "$what state failed (needs root)", if (ok) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, if (ok) problem ?: done else problem ?: "$what state failed (needs root)",
+                    if (ok && problem == null) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -330,11 +336,10 @@ class InGameMenuScene(
             // Fallback menu: bring the game back first (off the UI thread resume() finishes the
             // task switch before returning), so the delay counts from when the game is in front.
             if (!overlayMode) MainUI.sessions.resume()
-            val t0 = android.os.SystemClock.uptimeMillis()
             // A frozen game must be running before its key: a key sent while frozen arrives
             // pressed and released at once, and the game can miss it. The delay counts from then.
             unpausing?.join(3000)
-            Thread.sleep((delayMs - (android.os.SystemClock.uptimeMillis() - t0)).coerceAtLeast(0))
+            Thread.sleep(delayMs)
             runCatching(after).onFailure { Log.w("MainUI.InGame", "action failed", it) }
         }.start()
     }
@@ -380,15 +385,29 @@ class InGameMenuScene(
     }
 
     /** Auto save is on and this game saves with a hotkey: the key has to reach the running game. */
-    private val saveByKey get() = MainUI.settings.autoSaveOnExit && controller.states == StateSupport.HOTKEY
+    /**
+     * Leaving saves with the emulator's key; not while MainUI's auto load of this game is still
+     * pending (the running game is a fresh start, saving it would overwrite the real save).
+     */
+    private val saveByKey get() = autoSave && controller.states == StateSupport.HOTKEY
+    private val autoSave get() = MainUI.settings.autoSaveOnExit && !MainUI.sessions.autoLoadPending(session).also {
+        if (it) io.github.marsinsanity.mainui.core.SessionLog.log("${session.name}: not saved on leaving, its last save wasn't loaded yet")
+    }
 
     private fun exitGame() {
         val ctx = host.hostContext
         if (saveByKey) {
             // Close the menu and let the game run, save with its key, then stop it.
             Toast.makeText(ctx, "Saving and exiting...", Toast.LENGTH_SHORT).show()
-            leaveThen(500) {
+            leaveThen(keyDelay) {
                 val ok = controller.quit(true)
+                // Not saved: not stopped either. The game keeps running and the user hears why.
+                val problem = controller.saveProblem
+                if (!ok && problem != null) {
+                    io.github.marsinsanity.mainui.core.SessionLog.log("exit ${session.name}: not saved, left running: $problem")
+                    MainUI.sessions.toast("${session.name} wasn't saved, so it is still running: $problem")
+                    return@leaveThen
+                }
                 MainUI.sessions.endActive()
                 main.post { ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 if (!ok) Log.w("MainUI.InGame", "exit: could not stop ${session.pkg}")
@@ -399,7 +418,7 @@ class InGameMenuScene(
         invalidate()
         resumed = true // quitting: force stop also kills a frozen process
         host.io({
-            val ok = controller.quit(MainUI.settings.autoSaveOnExit)
+            val ok = controller.quit(autoSave)
             MainUI.sessions.endActive()
             ok
         }) { ok ->

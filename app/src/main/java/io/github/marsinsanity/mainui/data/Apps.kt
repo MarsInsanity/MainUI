@@ -21,7 +21,7 @@ class Apps(private val ctx: Context, private val library: Library, private val s
     private val iconCache = ConcurrentHashMap<String, Bitmap>()
     @Volatile private var cache: List<AppInfo>? = null
 
-    fun invalidate() { cache = null }
+    fun invalidate() { cache = null; iconCache.clear() } // (an updated app may have a new icon)
 
     fun all(): List<AppInfo> {
         cache?.let { return it }
@@ -45,10 +45,12 @@ class Apps(private val ctx: Context, private val library: Library, private val s
     fun isInstalled(pkg: String) = runCatching { pm.getPackageInfo(pkg, 0); true }.getOrDefault(false)
 
     fun icon(pkg: String, sizePx: Int = 96): Bitmap? {
-        iconCache[pkg]?.let { return it }
+        // Per size: a list row's 64 px icon must not be blown up for the 256 px preview.
+        val k = "$pkg@$sizePx"
+        iconCache[k]?.let { return it }
         val d = runCatching { pm.getApplicationIcon(pkg) }.getOrNull() ?: return null
         val b = d.toBitmap(sizePx)
-        iconCache[pkg] = b
+        iconCache[k] = b
         return b
     }
 
@@ -82,16 +84,22 @@ class Apps(private val ctx: Context, private val library: Library, private val s
      * Auto sort newly installed games into the Android system. Runs on start
      * and on PACKAGE_ADDED. Emulators are never treated as games.
      */
-    fun reconcileNewInstalls(emulators: EmulatorManager) {
-        if (!settings.autoSortAndroidGames) { settings.lastPackageReconcile = System.currentTimeMillis(); return }
+    fun reconcileNewInstalls(emulators: EmulatorManager, force: Boolean = false) {
+        // Into the real library only: without All files access it is a stand-in that goes once
+        // access is granted (and the "done" mark would stay).
+        if (!io.github.marsinsanity.mainui.MainUI.storage.hasAllFilesAccess()) return
+        // (Settings' "Sort installed games now" sorts even with auto sort off.)
+        if (!force && !settings.autoSortAndroidGames) { settings.lastPackageReconcile = System.currentTimeMillis(); return }
         val since = settings.lastPackageReconcile
         invalidate()
+        val hidden = library.hiddenApps() // hidden stays hidden, never sorted back in
         // Emulators sorted in as games before MainUI knew them (another build's id): take them out.
         for (pkg in library.androidGames()) {
             val label = all().firstOrNull { it.pkg == pkg }?.label
             if (emulators.isEmulatorPackage(pkg, label)) library.setAndroidGame(pkg, false)
         }
         for (a in all()) {
+            if (a.pkg in hidden) continue
             if (since != 0L && a.installTime <= since) continue
             if (since == 0L) {
                 // First run: sort everything that declares itself a game.
@@ -105,7 +113,10 @@ class Apps(private val ctx: Context, private val library: Library, private val s
 
     fun onPackageAdded(pkg: String, emulators: EmulatorManager) {
         invalidate()
-        if (!settings.autoSortAndroidGames || emulators.isEmulatorPackage(pkg)) return
+        // Handled now: the next start's catch-up (reconcileNewInstalls) mustn't sort it again
+        // after the user moved it back to Apps or hid it.
+        settings.lastPackageReconcile = System.currentTimeMillis()
+        if (!settings.autoSortAndroidGames || emulators.isEmulatorPackage(pkg) || pkg in library.hiddenApps()) return
         val ai = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull() ?: return
         if (isGame(ai)) library.setAndroidGame(pkg, true)
     }

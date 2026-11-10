@@ -199,7 +199,8 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         if (settings.bgm) {
             current.soundBgm?.let { f ->
                 bgmPlayer = runCatching {
-                    MediaPlayer().apply { setDataSource(f.absolutePath); isLooping = true; setVolume(0.4f, 0.4f); prepare(); start() }
+                    // Playing only while MainUI's screen is shown (a reload behind a game stays quiet).
+                    MediaPlayer().apply { setDataSource(f.absolutePath); isLooping = true; setVolume(0.4f, 0.4f); prepare(); if (shown) start() }
                 }.getOrNull()
             }
         }
@@ -209,8 +210,11 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         if (changeSound != 0) soundPool?.play(changeSound, 0.6f, 0.6f, 0, 0, 1f)
     }
 
-    fun pauseBgm() { runCatching { bgmPlayer?.takeIf { it.isPlaying }?.pause() } }
-    fun resumeBgm() { runCatching { bgmPlayer?.start() } }
+    /** MainUI's screen is shown (between [resumeBgm] and [pauseBgm]): only then is there music. */
+    @Volatile private var shown = false
+
+    fun pauseBgm() { shown = false; runCatching { bgmPlayer?.takeIf { it.isPlaying }?.pause() } }
+    fun resumeBgm() { shown = true; runCatching { bgmPlayer?.start() } }
 
     companion object {
         const val CLASSIC = "classic"

@@ -39,7 +39,11 @@ object MainUI {
         library.load()
         games.invalidate()
         themes.reload()
-        worker.execute { emulators.loadDefs(); emulators.refresh() }
+        worker.execute {
+            emulators.loadDefs(); emulators.refresh()
+            // First run with the real library: sort the installed games into it now.
+            if (storage.hasAllFilesAccess()) apps.reconcileNewInstalls(emulators)
+        }
     }
 }
 
@@ -61,7 +65,7 @@ class App : Application() {
         MainUI.emulators = EmulatorManager(this, MainUI.storage, s, MainUI.library)
         MainUI.sessions = SessionManager(this, s, MainUI.storage, MainUI.library, MainUI.emulators)
         MainUI.themes = ThemeManager(this, MainUI.storage, s)
-        MainUI.themes.reloadSounds()
+        MainUI.themes.reloadSounds() // (music starts when MainActivity resumes, not behind a game)
 
         io.github.marsinsanity.mainui.emu.Freezer.thawAll()
         // Root first (MainUI is made for rooted handhelds): the root shell and the virtual
@@ -75,7 +79,8 @@ class App : Application() {
         }, "root-warmup").apply { isDaemon = true }.start()
         MainUI.worker.execute {
             MainUI.emulators.refresh()
-            MainUI.apps.reconcileNewInstalls(MainUI.emulators)
+            // Only with the real library (before access is granted it's a stand-in that goes).
+            if (MainUI.storage.hasAllFilesAccess()) MainUI.apps.reconcileNewInstalls(MainUI.emulators)
         }
 
         // PACKAGE_ADDED cannot be received by manifest receivers since Android 8,
@@ -97,5 +102,16 @@ class App : Application() {
                 }
             }
         }, filter)
+
+        // An SD card mounted after MainUI started (late at boot) or swapped: MainUI's data folder
+        // can move with it, so everything read from storage is read again.
+        registerReceiver(object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { MainUI.reloadStorage() }
+        }, IntentFilter().apply {
+            addAction(Intent.ACTION_MEDIA_MOUNTED)
+            addAction(Intent.ACTION_MEDIA_UNMOUNTED)
+            addAction(Intent.ACTION_MEDIA_EJECT)
+            addDataScheme("file")
+        })
     }
 }
