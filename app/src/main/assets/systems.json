@@ -1755,6 +1755,23 @@
    "short": "OPEN"
   },
   {
+   "id": "ports",
+   "name": "Ports",
+   "folders": [
+    "ports"
+   ],
+   "extensions": [
+    "android"
+   ],
+   "emulators": [],
+   "screenscraper": null,
+   "icons": [
+    "ports",
+    "port"
+   ],
+   "short": "PORT"
+  },
+  {
    "id": "palm",
    "name": "Palm OS",
    "folders": [

@@ -148,7 +148,8 @@ class SystemRegistry(ctx: Context, private val storage: Storage) {
             }
 
         val IGNORED_FOLDERS = setOf(
-            "bios", "ports", "themes", "images", "media", "videos", "manuals", "screenshots",
+            // ("ports" is a system of its own now: Android ports, PortMaster later.)
+            "bios", "themes", "images", "media", "videos", "manuals", "screenshots",
             "savestates", "saves", "backup", "backups", "tools", "opt", "lost+found", "mainui",
         )
     }

@@ -53,7 +53,9 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
      */
     private fun withMenuSystems(found: List<GameSystem>): List<GameSystem> {
         val extra = registry.defs.filter { d ->
-            d.menu.isNotEmpty() && found.none { it.id == d.id } && d.menu.any { MainUIRef.emulatorInstalled(it.emulator) }
+            found.none { it.id == d.id } && (d.menu.any { MainUIRef.emulatorInstalled(it.emulator) } ||
+                // Ports: where Android apps can be put, before there is a ports folder (adding one creates it).
+                (d.id == AndroidPorts.SYSTEM && MainUIRef.showPortsSystem()))
         }
         if (extra.isEmpty()) return found
         return (found + extra.map { d -> menuSystems.getOrPut(d.id) { GameSystem(d, emptyList()) } }).sortedBy { it.name.lowercase() }
@@ -68,6 +70,19 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             ?: File(storage.romRoots().firstOrNull() ?: File("/storage/emulated/0/Roms"), system.def.folders.firstOrNull() ?: system.id)
         return Game(system.id, File(dir, item.rom), item.name)
     }
+
+    /** The ports folders of the rom roots (see [AndroidPorts]). */
+    fun portDirs(): List<File> = AndroidPorts.dirs(storage.romRoots())
+
+    /** Packages of the Android apps in the Ports system. */
+    fun portPackages(): Set<String> = runCatching { AndroidPorts.packages(portDirs()) }.getOrDefault(emptySet())
+
+    /** Puts the app [pkg] into the Ports system (see [AndroidPorts.add]); the lists are read again. */
+    fun addPort(label: String, pkg: String, write: (File, String) -> Unit = { f, t -> f.writeText(t) }): File =
+        AndroidPorts.add(storage.romRoots(), label, pkg, write).also { invalidate() }
+
+    /** Takes the app [pkg] out of the Ports system. Returns the files that couldn't be deleted. */
+    fun removePort(pkg: String): List<File> = AndroidPorts.remove(storage.romRoots(), pkg).also { invalidate() }
 
     fun invalidate() {
         systemsCache = null
@@ -424,4 +439,6 @@ object MainUIRef {
     @Volatile var showHidden: () -> Boolean = { false }
     /** Whether the emulator "sa:<id>" / "ra:<core>" is installed (for [SystemDef.menu]). */
     @Volatile var emulatorInstalled: (ref: String) -> Boolean = { false }
+    /** Settings > User interface > Show Ports system (listed before its folder exists). */
+    @Volatile var showPortsSystem: () -> Boolean = { true }
 }

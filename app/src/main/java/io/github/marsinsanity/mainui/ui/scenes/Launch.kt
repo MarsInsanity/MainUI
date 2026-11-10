@@ -43,6 +43,7 @@ object Launch {
         if (def == null) { host.toast("Unknown system ${game.systemId}"); return }
         def.menuItemFor(game.file)?.let { launchMenuItem(host, def, game, it); return }
         if (game.file?.exists() != true) { host.toast("File not found"); return }
+        if (io.github.marsinsanity.mainui.data.AndroidPorts.isPort(game.file)) { launchPort(host, game); return }
         val em = MainUI.emulators
         host.io({
             // Cores may have been added in RetroArch since the last scan: look again before giving up.
@@ -83,6 +84,16 @@ object Launch {
                 }
             }
         }
+    }
+
+    /** An Android app in the Ports system: started as the app its port file names. */
+    private fun launchPort(host: SceneHost, game: Game) {
+        val f = game.file ?: return
+        host.io({
+            val pkg = io.github.marsinsanity.mainui.data.AndroidPorts.packageOf(f)
+                ?: return@io "${f.name} names no Android app (its first line must be a package name, like com.example.game)"
+            MainUI.sessions.launchApp(pkg, game.name, asGame = true, port = game)
+        }) { err -> if (err != null) host.push(DialogScene(host, "Can't start ${game.name}", err, "OK", null)) }
     }
 
     private fun start(host: SceneHost, def: SystemDef, game: Game) {

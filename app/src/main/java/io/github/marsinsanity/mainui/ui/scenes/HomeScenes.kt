@@ -88,9 +88,13 @@ object HomeScenes {
             // and a system with an installed emulator's menu (PICO-8: Splore) always is.
             val unplayable = sys.unplayableSummary
             val menu = sys.menu
-            if (!s.showEmptySystems && sys.gameCount == 0 && unplayable == null && menu.isEmpty()) continue
+            // (Ports is listed even empty: it is where Android apps can be put, Settings > User interface.)
+            val ports = sys.id == io.github.marsinsanity.mainui.data.AndroidPorts.SYSTEM
+            if (!ports && !s.showEmptySystems && sys.gameCount == 0 && unplayable == null && menu.isEmpty()) continue
             out += Tile(sys.id, sys.name, "game", icons = sys.def.icons, short = sys.def.short,
                 sub = when {
+                    ports && sys.gameCount <= 0 -> "add Android ports"
+                    ports -> plural(sys.gameCount, "port")
                     sys.gameCount <= 0 && menu.isNotEmpty() -> menu.joinToString(" / ") { it.name }
                     unplayable != null -> "no playable files"
                     sys.gameCount >= 0 -> plural(sys.gameCount, "game")
@@ -104,6 +108,17 @@ object HomeScenes {
 
     /** [onRescan]: the screen's tiles are built again (new counts) after a rescan or unzip. */
     fun systemOptions(host: SceneHost, sys: GameSystem, onRescan: () -> Unit = {}) {
+        if (sys.id == io.github.marsinsanity.mainui.data.AndroidPorts.SYSTEM) {
+            // Ports: no core or scraper; Android apps are added here.
+            host.push(PopMenuScene(host, sys.name, listOf(
+                UiItem("Add an Android app...", onSelect = { host.push(PortAppPickerScene(host, onRescan)) }),
+                UiItem("Rescan folder", onSelect = {
+                    MainUI.games.invalidate()
+                    host.io({ MainUI.games.countGames(sys) }) { host.toast("${sys.name}: ${plural(it, "port")}"); onRescan() }
+                }),
+            )))
+            return
+        }
         val cur = MainUI.emulators.choose(sys.def, null)
         host.push(PopMenuScene(host, sys.name, listOf(
             UiItem("Core: ${if (MainUI.library.coreForSystem(sys.def.id) != null) cur?.name ?: "none" else "Default (${cur?.shortName ?: "none"})"}",

@@ -46,9 +46,10 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
 | 5 | **Emulator / core detection** | Detects RetroArch and its cores wherever they are: the `libretro_directory` from `retroarch.cfg`, `/data/data/<pkg>/cores`, the app's native libraries and split APKs (Play Store builds), re-checked when you come back to MainUI and before every launch. 25+ standalone emulators (ES-DE's launch rules). Per-system and per-game core selection like Onion (`SELECT` on a game > Core). **Missing cores are downloaded** from the libretro buildbot (same files as RetroArch's Online Updater) when you launch a game or pick one; *Get cores for my games* fetches one for every system that has roms but no core. Custom builds go in `MainUI/cores`. |
 | 6 | **Rom search** | Search tile in the games grid (or `Y` on most screens): on-screen keyboard (A types, B deletes, START or OK confirms, SELECT or CANCEL leaves without changes), results across every system and Android games. |
 | 7 | **Game Switcher** | Onion's GameSwitcher: full screen screenshots of recent games, `LEFT/RIGHT` browse, `A` resume, `X` remove, `Y` view mode, `SELECT` play time, `UP/DOWN` brightness, `gs-top-bar` / `gs-bottom-bar` / `gs-legend` / `lum0-10` theme art. Like Onion: the footer shows **A RESUME / B BACK** and the game count (a theme's `gs-bottom-bar` replaces it), and the legend (Y view, X remove, SELECT time, START full screen) shows for 5 s on entering and after SELECT, drawn by MainUI when the theme has no `gs-legend`. |
-| 8 | **Apps menu** | Every launchable Android app with its icon. `Y` hides an app; hidden apps live in their own **Hidden apps** menu (with *Edit hidden apps...* to toggle any app). `SELECT` for app info, uninstall, move to Android games. |
+| 8 | **Apps menu** | Every launchable Android app with its icon. `Y` hides an app; hidden apps live in their own **Hidden apps** menu (with *Edit hidden apps...* to toggle any app). `SELECT` for app info, uninstall, move to Android games or to Ports. |
 | 9 | **Theme Switcher + downloader** | Full screen previews, applies instantly, installs `.zip` themes dropped into a `Themes` folder. **Theme Downloader** browses the [OnionUI theme repository](https://github.com/OnionUI/Themes) on GitHub (200+ themes, the repository's featured ones first) with previews: `A` get, `Y` get and apply, `START` refresh. |
 | 10 | **Android system** | An "Android" system for native games. Add games by hand or let MainUI sort apps that declare themselves games into it automatically on install. |
+| 10b | **Ports** | A **Ports** system for unofficial ports (Android builds of PC games: Doom, Quake, SM64...), tied to the rom root's `ports` folder like any other system. Put an Android app there with `SELECT` on it in Apps (or in Games > Android) > *Move to Ports*, or *Add an Android app...* in Games > Ports. See [Ports](#ports). |
 | 11 | **Process manager** | The apps that are running, one row per app, with memory and CPU; the current game and apps MainUI launched come first. Only apps you open yourself are listed: System UI, Google Play services, the keyboard, the launcher, accessibility services and other parts of Android are never offered. Switch to one, force stop one, or stop everything MainUI launched (root). **Hold Back anywhere** for a compact version: a rounded panel over the app in front (which stays visible around it), with A switch, X twice to stop, Y refresh, B or a tap outside to close. |
 | 12 | **In-game menu** | Press **Home** in a game: the game is paused, then a Miyoo style menu appears over it (one press, flush with the top of the screen) with **Continue, Save / Load, Native Menu, Game Switcher, Exit Game**. Hold Home for the Game Switcher; both are configurable, also for Home inside MainUI. See [Emulators](#emulators) for what Save/Load can do per emulator. |
 | 13 | **App Store** | Controller driven client for F-Droid compatible repositories (F-Droid and IzzyOnDroid by default, add your own with `?fingerprint=`): signed index verification, search, categories, updates, install (silent with root, otherwise Android's installer). Downloads (indexes, APKs, cores, themes) use up to 6 parallel connections when the server supports ranges, an unchanged index is not downloaded again, repositories refresh at the same time, and the mirrors listed in a repository's signed index are used if the repository itself fails. Its **Emulators** section lists every emulator MainUI can launch, what it runs, and installs it from the best source: an F-Droid repository (RetroArch, PPSSPP, Dolphin...), the project's latest GitHub release (Azahar, Flycast, melonDS, MAME4droid, hakuX, Vita3K, ARMSX2, ARMSX3, RPCSX, PICO-8; when a release has builds per Android version or CPU level, the newest one this device can run), or retroarch.com; otherwise it opens the Google Play page or website. Launching a game whose emulator is missing offers its page. |
@@ -93,6 +94,9 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
 │   │   ├── gamelist.xml     names, descriptions, image paths (ES / Skraper / MainUI scraper)
 │   │   └── images/Game.png  artwork (also media/images, Imgs, downloaded_images, boxart)
 │   ├── psx/ snes/ nds/ ...
+│   ├── ports/
+│   │   ├── Doom 64.android  an Android app in the Ports system (its package name inside)
+│   │   └── images/Doom 64.png
 │   └── bios/
 ├── Themes/                  OnionOS themes (folders or .zip)
 └── MainUI/
@@ -111,6 +115,34 @@ with a folder browser (no typing paths).
 Folder names come from the [dArkOS emulator list](https://github.com/christianhaitian/dArkOS/wiki/dArkOS-Emulators-and-Ports-information);
 `tools/gen_systems.py` regenerates `app/src/main/assets/systems.json` from that wiki page.
 Android-only systems were added with the same naming: `ps2`, `wii`, `switch`.
+
+### Ports
+
+The **Ports** system is the `ports` folder of a rom root (`roms/ports`, any letter case), so it is
+read like every other system: names and descriptions from its `gamelist.xml`, art from
+`ports/images/<Name>.png`, sub folders as folders. It is listed in Games even before the folder
+exists (Settings > User interface > *Show Ports system*); adding the first port creates the folder
+in the first rom root.
+
+An **Android app** becomes a port with *Move to Ports* (`SELECT` on it in Apps or Games > Android),
+or *Add an Android app...* in Games > Ports (also `SELECT` on the Ports tile). MainUI then writes a
+small text file into the ports folder, `<App name>.android`, whose first line is the app's package
+name:
+
+```
+# Doom 64 (lines starting with # are comments)
+com.nightdive.doom64ex
+```
+
+You can make these by hand too (on a PC, for apps you'll install later). A port is listed in Games >
+Ports only: not in Apps or Games > Android, and Android games auto-sort leaves it alone. It starts
+like an Android game (recents, favorites, Game Switcher, play time; the in-game menu has no save
+states). Without its own art it shows the app's banner or icon. `SELECT` on it: *Move back to Apps*
+or *Move to Android games* (both delete its `.android` file), favorites, hide.
+
+[PortMaster](https://portmaster.games/) ports (a `.sh` script each, plus a data folder) can stay in
+the same folder: they don't run on Android, so MainUI doesn't list them yet, only counts them on
+the empty Ports screen. The `ports` folder is no longer skipped as a non-rom folder.
 
 When a game exists on both the SD card and internal storage the lists merge them.
 Artwork is looked up at the same relative path on every volume, so images scraped to

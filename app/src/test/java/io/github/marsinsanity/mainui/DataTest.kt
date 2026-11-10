@@ -1636,3 +1636,61 @@ class BugHuntFixesTest {
         assertEquals("T-93175", id.megaCdSerial(sector("GM T-93175-00")))
     }
 }
+
+class AndroidPortsTest {
+    private val ap = io.github.marsinsanity.mainui.data.AndroidPorts
+
+    private fun withRoots(block: (File, File) -> Unit) {
+        val base = java.nio.file.Files.createTempDirectory("ports").toFile()
+        try {
+            val sd = File(base, "sd/Roms").apply { mkdirs() }
+            val internal = File(base, "internal/roms").apply { mkdirs() }
+            block(sd, internal)
+        } finally { base.deleteRecursively() }
+    }
+
+    @Test fun readsThePackageName() = withRoots { root, _ ->
+        fun port(name: String, text: String) = File(root, name).apply { writeText(text) }
+        assertEquals("com.example.doom64", ap.packageOf(port("a.android", "﻿# Doom 64\n\ncom.example.doom64\n")))
+        assertEquals("org.sm64.port", ap.packageOf(port("b.android", "package= org.sm64.port")))
+        assertNull(ap.packageOf(port("c.android", "not a package")))
+        assertNull(ap.packageOf(port("d.android", "")))
+        assertTrue(ap.isPort(File("X.ANDROID")))
+        assertFalse(ap.isPort(File("x.sh")))
+    }
+
+    @Test fun safeFileNames() {
+        assertEquals("Doom 64 - Remastered", ap.fileName("Doom 64: Remastered"))
+        assertEquals("AC - DC", ap.fileName("AC/DC"))
+        assertEquals("Port", ap.fileName("???"))
+    }
+
+    @Test fun addFindsOrMakesThePortsFolder() = withRoots { sd, internal ->
+        // No ports folder: made in the first root.
+        val f = ap.add(listOf(sd, internal), "Doom 64", "com.example.doom64")
+        assertEquals(File(sd, "ports/Doom 64.android"), f)
+        assertEquals("com.example.doom64\n", f.readText())
+        // Already a port: the same file, not a second one.
+        assertEquals(f, ap.add(listOf(sd, internal), "Doom 64", "com.example.doom64"))
+        // Another app with the same name gets its own file.
+        assertEquals("Doom 64 (2).android", ap.add(listOf(sd, internal), "Doom 64", "com.other.doom").name)
+        // An existing folder in any letter case, on another root, is used.
+        File(sd, "ports").deleteRecursively()
+        val existing = File(internal, "PORTS").apply { mkdirs() }
+        assertEquals(existing, ap.add(listOf(sd, internal), "Quake", "com.example.quake").parentFile)
+        assertEquals(setOf("com.example.quake"), ap.packages(ap.dirs(listOf(sd, internal))))
+        // Sub folders a level deep count too; removing takes every file of the package.
+        File(existing, "Shooters").mkdirs(); File(existing, "Shooters/Quake copy.android").writeText("com.example.quake")
+        assertEquals(2, ap.files(ap.dirs(listOf(sd, internal))).size)
+        assertTrue(ap.remove(listOf(sd, internal), "com.example.quake").isEmpty())
+        assertTrue(ap.packages(ap.dirs(listOf(sd, internal))).isEmpty())
+    }
+
+    @Test fun portsIsASystemOfItsOwn() {
+        val sys = org.json.JSONObject(File("src/main/assets/systems.json").readText()).getJSONArray("systems")
+        val ports = (0 until sys.length()).map { sys.getJSONObject(it) }.single { it.getString("id") == "ports" }
+        assertEquals("ports", ports.getJSONArray("folders").getString(0))
+        assertEquals("android", ports.getJSONArray("extensions").getString(0))
+        assertFalse("ports" in io.github.marsinsanity.mainui.data.SystemRegistry.IGNORED_FOLDERS)
+    }
+}
