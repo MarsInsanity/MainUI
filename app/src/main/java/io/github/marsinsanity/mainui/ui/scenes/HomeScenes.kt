@@ -70,7 +70,7 @@ object HomeScenes {
     }
 
     /** Tiles for the systems grid / row: Search, Android, then every system with games. */
-    fun systemTiles(host: SceneHost, systems: List<GameSystem>, includeSearch: Boolean): List<Tile> {
+    fun systemTiles(host: SceneHost, systems: List<GameSystem>, includeSearch: Boolean, onRescan: () -> Unit = {}): List<Tile> {
         val s = MainUI.settings
         val out = mutableListOf<Tile>()
         if (includeSearch && s.showSearchTile) out += Tile("search", "Search", "search", icons = listOf("search"), short = "?") {
@@ -95,12 +95,13 @@ object HomeScenes {
                     else -> null
                 }, system = sys,
                 open = { host.push(GameListScene(host, sys, null)) },
-                options = { systemOptions(host, sys) })
+                options = { systemOptions(host, sys, onRescan) })
         }
         return out
     }
 
-    fun systemOptions(host: SceneHost, sys: GameSystem) {
+    /** [onRescan]: the screen's tiles are built again (new counts) after a rescan or unzip. */
+    fun systemOptions(host: SceneHost, sys: GameSystem, onRescan: () -> Unit = {}) {
         val cur = MainUI.emulators.choose(sys.def, null)
         host.push(PopMenuScene(host, sys.name, listOf(
             UiItem("Core: ${if (MainUI.library.coreForSystem(sys.def.id) != null) cur?.name ?: "none" else "Default (${cur?.shortName ?: "none"})"}",
@@ -108,16 +109,36 @@ object HomeScenes {
             UiItem("Scrape artwork", onSelect = { host.push(ScraperScene(host, listOf(sys.id))) }),
             UiItem("Rescan folder", onSelect = {
                 MainUI.games.invalidate()
-                host.io({ MainUI.games.countGames(sys) }) { host.toast("${sys.name}: ${plural(it, "game")}") }
+                host.io({ MainUI.games.countGames(sys) }) { host.toast("${sys.name}: ${plural(it, "game")}"); onRescan() }
             }),
         ) + listOfNotNull(
             // Zipped (.zip / .rar) games of a system whose emulators can't open them.
             UnzipFlow.archives(sys).takeIf { it > 0 }?.let {
                 UiItem(UnzipFlow.label(sys), onSelect = {
-                    UnzipFlow.start(host, sys) { host.invalidate() }
+                    UnzipFlow.start(host, sys) { onRescan(); host.invalidate() }
                 })
             },
         )))
+    }
+
+    /**
+     * Automatic update checks (MainUI every few hours, emulators daily) when the home screen
+     * shows, whichever layout it has; says so when there is something new.
+     */
+    fun checkForUpdate(host: SceneHost) {
+        if (io.github.marsinsanity.mainui.store.EmulatorUpdates.isDue()) {
+            // (null while another check runs: the App Store's, or one from an earlier visit here)
+            host.io({ runCatching { io.github.marsinsanity.mainui.store.EmulatorUpdates.checkIfIdle() }.getOrNull() }) { ups ->
+                if (!ups.isNullOrEmpty()) host.toast(
+                    if (ups.size == 1) "${ups[0].name} ${ups[0].latest} is available: Settings > Emulators & cores"
+                    else "${ups.size} emulator updates: Settings > Emulators & cores", 4500)
+            }
+        }
+        if (!io.github.marsinsanity.mainui.store.Updater.isDue()) return
+        host.io({ runCatching { io.github.marsinsanity.mainui.store.Updater.checkIfIdle() }.getOrNull() }) { u ->
+            if (u != null && u.versionCode > io.github.marsinsanity.mainui.store.Updater.installed)
+                host.toast("MainUI ${u.versionName} is available: Settings > Updates", 4000)
+        }
     }
 
     /** Loads systems + game counts in the background. */
@@ -208,8 +229,10 @@ class TileStrip {
         if (count > VISIBLE) g.dots(count, index, DOTS_Y + g.cy0)
     }
 
-    /** The tile at [x] (a tap), or null. */
-    fun hit(x: Float, width: Float, count: Int): Int? {
+    /** The tile at [x], [y] (a tap), or null: the header, dots and footer are no tile. */
+    fun hit(x: Float, y: Float, width: Float, height: Float, count: Int): Int? {
+        val top = TOP + (height - 480f) / 2f
+        if (y < top || y > top + TILE_H) return null
         val col = kotlin.math.floor((x - x0(width, count)) / TILE_W).toInt()
         if (col !in 0 until VISIBLE) return null
         return (first + col).takeIf { it in 0 until count }
@@ -307,27 +330,10 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
 
     private fun follow() = strip.follow(index, tiles.size)
 
-    init { follow(); checkForUpdate() }
-
-    /** Automatic update checks (MainUI every few hours, emulators daily); say so when there is something new. */
-    private fun checkForUpdate() {
-        if (io.github.marsinsanity.mainui.store.EmulatorUpdates.isDue()) {
-            // (null while another check runs: the App Store's, or one from an earlier visit here)
-            host.io({ runCatching { io.github.marsinsanity.mainui.store.EmulatorUpdates.checkIfIdle() }.getOrNull() }) { ups ->
-                if (!ups.isNullOrEmpty()) host.toast(
-                    if (ups.size == 1) "${ups[0].name} ${ups[0].latest} is available: Settings > Emulators & cores"
-                    else "${ups.size} emulator updates: Settings > Emulators & cores", 4500)
-            }
-        }
-        if (!io.github.marsinsanity.mainui.store.Updater.isDue()) return
-        host.io({ runCatching { io.github.marsinsanity.mainui.store.Updater.checkIfIdle() }.getOrNull() }) { u ->
-            if (u != null && u.versionCode > io.github.marsinsanity.mainui.store.Updater.installed)
-                host.toast("MainUI ${u.versionName} is available: Settings > Updates", 4000)
-        }
-    }
+    init { follow(); HomeScenes.checkForUpdate(host) }
 
     override fun onResume() {
-        checkForUpdate()
+        HomeScenes.checkForUpdate(host)
         tiles = HomeScenes.menuTiles(host)
         index = index.coerceIn(0, tiles.size - 1)
         follow()
@@ -373,7 +379,8 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
     }
 
     override fun onTap(x: Float, y: Float): Boolean {
-        val idx = strip.hit(x, host.logicalWidth, tiles.size) ?: return false
+        follow()
+        val idx = strip.hit(x, y, host.logicalWidth, host.logicalHeight, tiles.size) ?: return false
         if (idx == index) tiles[idx].open() else { index = idx; follow(); MainUI.settings.mainMenuIndex = index }
         return true
     }
@@ -400,7 +407,7 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
 
     private fun reload(refresh: Boolean) {
         HomeScenes.loadSystems(host, refresh) { list ->
-            tiles = HomeScenes.systemTiles(host, list, includeSearch = true)
+            tiles = HomeScenes.systemTiles(host, list, includeSearch = true) { reload(false) }
             index = index.coerceIn(0, max(0, tiles.size - 1))
             loading = false
         }
@@ -488,18 +495,46 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
     /** The Games screen looks like the top-level page. */
     private val strip = if (home) null else TileStrip()
 
-    override fun onEnter() = reload(false)
-    override fun onResume() = reload(false)
+    override fun onEnter() {
+        if (home) {
+            HomeScenes.checkForUpdate(host)
+            // The menu entries (Settings, Apps...) right away, not only once every system is counted.
+            if (tiles.isEmpty()) {
+                val (front, back) = menuParts()
+                tiles = front + back
+                early = true
+                savedIndex = index
+                index = index.coerceIn(0, max(0, tiles.size - 1))
+            }
+        }
+        reload(false)
+    }
+    override fun onResume() {
+        if (home) HomeScenes.checkForUpdate(host)
+        reload(false)
+    }
+
+    /** Showing only the menu entries until the systems are in ([savedIndex]: the remembered selection). */
+    private var early = false
+    private var savedIndex = 0
+    private var movedEarly = false
+
+    private fun menuParts(): Pair<List<Tile>, List<Tile>> {
+        val menu = HomeScenes.menuTiles(host).filter { it.id != "games" }
+        return menu.filter { it.id == "recents" || it.id == "favorites" } to menu.filter { it.id != "recents" && it.id != "favorites" }
+    }
 
     private fun reload(refresh: Boolean) {
         HomeScenes.loadSystems(host, refresh) { list ->
-            val sys = HomeScenes.systemTiles(host, list, includeSearch = true)
+            val sys = HomeScenes.systemTiles(host, list, includeSearch = true) { reload(false) }
+            val picked = if (early && movedEarly) tiles.getOrNull(index)?.id else null
             tiles = if (home) {
-                val menu = HomeScenes.menuTiles(host).filter { it.id != "games" }
-                val front = menu.filter { it.id == "recents" || it.id == "favorites" }
-                val back = menu.filter { it.id != "recents" && it.id != "favorites" }
+                val (front, back) = menuParts()
                 front + sys + back
             } else sys
+            // Moved while the systems were loading: the same entry stays selected; else the saved one.
+            if (early) index = if (picked != null) tiles.indexOfFirst { it.id == picked }.takeIf { it >= 0 } ?: savedIndex else savedIndex
+            early = false
             index = index.coerceIn(0, max(0, tiles.size - 1))
             loading = false
         }
@@ -544,6 +579,7 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
         if (tiles.isEmpty()) { if (b == Btn.B && !home) { close(); return true }; return false }
+        if (early) movedEarly = true
         val vis = visible(host.logicalWidth)
         when (b) {
             Btn.LEFT -> if (index > 0) index-- else if (!repeat) index = tiles.size - 1 else return false
@@ -558,7 +594,7 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
             Btn.START -> if (!repeat) { host.toast("Rescanning..."); reload(true) }
             else -> return false
         }
-        if (home) MainUI.settings.mainMenuIndex = index else MainUI.settings.systemsIndex = index
+        if (!early) { if (home) MainUI.settings.mainMenuIndex = index else MainUI.settings.systemsIndex = index }
         return true
     }
 
@@ -567,6 +603,7 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
     /** Dragging the row moves the selection a cell at a time. */
     override fun onDrag(dx: Float, dy: Float): Boolean {
         if (dragAcc == 0f && kotlin.math.abs(dy) > kotlin.math.abs(dx)) return false
+        if (early) movedEarly = true
         val step = (if (strip != null) TileStrip.TILE_W else HomeScenes.CELL_W) / 2
         dragAcc += dx
         while (dragAcc <= -step) { if (index < tiles.size - 1) index++; dragAcc += step }
@@ -579,18 +616,26 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
 
     override fun onTap(x: Float, y: Float): Boolean {
         if (tiles.isEmpty()) return false
+        if (early) movedEarly = true
+        // (The window as it is for the current tiles: they may have changed since the last frame.)
         if (strip != null) {
-            val idx = strip.hit(x, host.logicalWidth, tiles.size) ?: return false
+            strip.follow(index, tiles.size)
+            val idx = strip.hit(x, y, host.logicalWidth, host.logicalHeight, tiles.size) ?: return false
             if (idx == index) tiles[idx].open() else { index = idx; MainUI.settings.systemsIndex = index }
             return true
         }
         val vis = visible(host.logicalWidth)
+        scrollTo(vis)
         val count = min(vis, tiles.size)
         val x0 = (host.logicalWidth - count * HomeScenes.CELL_W) / 2
+        val y0 = Gfx.HEADER + (host.logicalHeight - Gfx.HEADER - Gfx.FOOTER - HomeScenes.CELL_H) / 2
+        if (y < y0 || y > y0 + HomeScenes.CELL_H) return false
         val c = floor((x - x0) / HomeScenes.CELL_W).toInt()
         if (c !in 0 until count) return false
         val idx = first + c
+        if (idx !in tiles.indices) return false
         if (idx == index) tiles[idx].open() else index = idx
+        if (!early) { if (home) MainUI.settings.mainMenuIndex = index else MainUI.settings.systemsIndex = index }
         return true
     }
 }

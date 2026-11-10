@@ -46,6 +46,10 @@ interface GameController {
 
     /** Why the last [save] failed, in words for the user; null when unknown. */
     val saveProblem: String? get() = null
+    /** [saveToResume] can save the running game where its next start continues from. */
+    val savesToResume: Boolean get() = states == StateSupport.HOTKEY
+    /** Saves the running game where its next start continues from (leaving for the Game Switcher). */
+    fun saveToResume(): Boolean = save(0)
     fun load(slot: Int): Boolean
     /** Open the emulator's own menu. Called after MainUI's overlay is gone. */
     fun openNativeMenu(): Boolean
@@ -362,11 +366,27 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
      * auto save on, the state just saved is copied into the auto slot: the Game Switcher, Exit and
      * a later launch then continue from it, straight away when RetroArch starts the game.
      */
-    private fun saveByKey(): Boolean {
+    private fun saveByKey(): Boolean = saveChecked("F2", "Couldn't press RetroArch's save key (needs root)") { hotkey("F2") }
+
+    /**
+     * With network commands RetroArch saves into slot 0, which its auto load never reads either:
+     * checked and copied into the auto slot like [saveByKey] (root, for its files).
+     */
+    override val savesToResume get() = keys || (api && pkg != null && rom != null && Root.knownAvailable())
+    override fun saveToResume(): Boolean =
+        if (api && pkg != null && rom != null && Root.knownAvailable()) {
+            saveChecked("SAVE_STATE_SLOT 0", "RetroArch didn't take the save command") {
+                val reply = ask("SAVE_STATE_SLOT 0", 1500)
+                if (reply != null && !reply.contains("-1")) true else { selectSlot(0); send("SAVE_STATE") }
+            }
+        } else save(0)
+
+    /** Saves with [press] ([what]: for the log), checked and copied into the auto slot (see [saveByKey]). */
+    private fun saveChecked(what: String, pressFailed: String, press: () -> Boolean): Boolean {
         saveProblem = null
         val p = pkg
         val r = rom
-        if (p == null || r == null) return hotkey("F2").also { if (!it) saveProblem = "Couldn't press RetroArch's save key (needs root)" }
+        if (p == null || r == null) return press().also { if (!it) saveProblem = pressFailed }
         val log = io.github.marsinsanity.mainui.core.SessionLog::log
         // Read while the menu was open when possible (see snapshotStates); taken once.
         snapshot?.join(5000)
@@ -377,7 +397,7 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
         fun states() = listStates(sf.find, base)
         val before = sf.files
         repeat(2) { attempt ->
-            if (!hotkey("F2")) { saveProblem = "Couldn't press RetroArch's save key (needs root)"; return false }
+            if (!press()) { saveProblem = pressFailed; return false }
             val t0 = android.os.SystemClock.uptimeMillis()
             while (android.os.SystemClock.uptimeMillis() - t0 < 3000) {
                 Thread.sleep(300)
@@ -418,7 +438,7 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
             }
             log("RetroArch changed no $base.state* file within 3 s (try ${attempt + 1}; looked in ${dirs.joinToString()}; before: ${before.keys.ifEmpty { setOf("none") }.joinToString()})")
         }
-        saveProblem = "RetroArch didn't save (it ignored MainUI's F2 key). Send MainUI/logs/session.txt"
+        saveProblem = "RetroArch didn't save (it ignored MainUI's $what). Send MainUI/logs/session.txt"
         return false
     }
 

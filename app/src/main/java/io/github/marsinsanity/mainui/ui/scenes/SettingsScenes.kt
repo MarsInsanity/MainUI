@@ -351,7 +351,7 @@ class CoresScene(host: SceneHost) : ListScene(host, "RetroArch cores") {
     private fun coresForMyGames(): List<String> {
         val em = MainUI.emulators
         if (em.raPackage == null) return emptyList()
-        return MainUI.games.systems(false).filter { it.gameCount > 0 || it.dirs.any { d -> (d.listFiles()?.size ?: 0) > 0 } }
+        return MainUI.games.systems(MainUI.settings.showUnknownFolders).filter { it.gameCount > 0 || it.dirs.any { d -> (d.listFiles()?.size ?: 0) > 0 } }
             .mapNotNull { s ->
                 val opts = em.optionsFor(s.def)
                 if (opts.any { it.installed == true }) null

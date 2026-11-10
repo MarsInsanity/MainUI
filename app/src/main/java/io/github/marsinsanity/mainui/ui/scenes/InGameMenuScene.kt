@@ -216,12 +216,13 @@ class InGameMenuScene(
             // From the fallback menu the game's task comes back first, which takes longer.
             Action.STATES_MENU, Action.NATIVE -> leaveThen(if (overlayMode) 250L else keyDelay) { controller.openNativeMenu() }
             Action.SWITCHER -> {
-                if (saveByKey) {
+                if (autoSave && controller.savesToResume) {
                     // OnionOS: leaving a game for the Game Switcher saves it (RetroArch: its auto
                     // slot, loaded by itself when the game starts again).
                     val ctx = host.hostContext
+                    io.github.marsinsanity.mainui.service.OverlayService.instance?.markLeaving()
                     leaveThen(keyDelay) {
-                        val ok = controller.save(0)
+                        val ok = controller.saveToResume()
                         io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher (menu): save for ${session.name}: ${if (ok) "done" else "FAILED ${controller.saveProblem ?: ""}"}")
                         // RetroArch's save is checked (written and copied by now); others get time to write.
                         if (ok && controller !is io.github.marsinsanity.mainui.emu.RetroArchController) Thread.sleep(800)
