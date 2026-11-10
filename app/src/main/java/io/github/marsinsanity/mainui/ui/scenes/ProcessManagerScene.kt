@@ -37,34 +37,15 @@ class ProcessManagerScene(host: SceneHost, private val overlayMode: Boolean = fa
                 list.set(listOf(UiItem("No apps running", disabled = true)))
                 return@io
             }
-            list.set(apps.map { p ->
-                val tag = when { p.isSession -> "PLAYING  "; p.fromMainUI -> "MainUI  "; else -> "" }
-                UiItem(MainUI.apps.label(p.pkg), icon = { MainUI.apps.icon(p.pkg, 96) }, data = p,
-                    sub = "$tag${p.rssKb / 1024} MB  ${"%.1f".format(p.cpu)}%")
-            })
+            list.set(apps.map { Processes.row(it) })
         }
     }
 
-    private fun scan(): List<RunningApps.App>? {
-        if (!Root.available()) return null
-        val r = Root.exec("ps -A -o PID,USER,RSS,%CPU,NAME")
-        if (!r.ok) return null
-        val launched = MainUI.sessions.launchedPackages.toSet()
-        val recents = RunningApps.recentPackages(Root.exec("dumpsys activity recents").out)
-        return RunningApps.parse(r.lines, RunningApps.killable(host.hostContext, recents + launched),
-            launched, MainUI.sessions.active?.pkg)
-    }
+    private fun scan(): List<RunningApps.App>? = Processes.scan(host.hostContext)
 
     override fun activate() {
         val p = list.current?.data as? RunningApps.App ?: return
-        val s = MainUI.sessions.active
-        if (s != null && s.pkg == p.pkg) {
-            MainUI.sessions.resume()
-        } else {
-            val intent = MainUI.emulators.resumeIntent(p.pkg, null)
-            if (intent == null) { host.toast("Cannot switch to ${MainUI.apps.label(p.pkg)}"); return }
-            runCatching { host.hostContext.startActivity(intent) }
-        }
+        if (!Processes.switchTo(host.hostContext, p)) { host.toast("Cannot switch to ${MainUI.apps.label(p.pkg)}"); return }
         if (overlayMode) host.finishHost()
     }
 
@@ -74,11 +55,7 @@ class ProcessManagerScene(host: SceneHost, private val overlayMode: Boolean = fa
             Btn.X -> {
                 if (!repeat && p != null) host.push(DialogScene(host, "Kill app",
                     "Force stop ${MainUI.apps.label(p.pkg)}?\nUnsaved progress will be lost.") {
-                    host.io({
-                        val ok = Root.forceStop(p.pkg)
-                        if (MainUI.sessions.active?.pkg == p.pkg) MainUI.sessions.endActive()
-                        ok
-                    }) { ok -> host.toast(if (ok) "Stopped" else "Failed"); reload() }
+                    host.io({ Processes.kill(p) }) { ok -> host.toast(if (ok) "Stopped" else "Failed"); reload() }
                 })
                 return true
             }
@@ -94,5 +71,39 @@ class ProcessManagerScene(host: SceneHost, private val overlayMode: Boolean = fa
             }
             else -> return super.onKey(b, repeat)
         }
+    }
+}
+
+/** What the process manager page and the hold-Back popup share: the list, switching, stopping. */
+object Processes {
+    /** Running apps you opened, or null without root (Android hides other apps' processes). */
+    fun scan(ctx: android.content.Context): List<RunningApps.App>? {
+        if (!Root.available()) return null
+        val r = Root.exec("ps -A -o PID,USER,RSS,%CPU,NAME")
+        if (!r.ok) return null
+        val launched = MainUI.sessions.launchedPackages.toSet()
+        val recents = RunningApps.recentPackages(Root.exec("dumpsys activity recents").out)
+        return RunningApps.parse(r.lines, RunningApps.killable(ctx, recents + launched), launched, MainUI.sessions.active?.pkg)
+    }
+
+    /** Brings [p] to the front (the game being played comes back where it was). */
+    fun switchTo(ctx: android.content.Context, p: RunningApps.App): Boolean {
+        val s = MainUI.sessions.active
+        if (s != null && s.pkg == p.pkg) return MainUI.sessions.resume()
+        val intent = MainUI.emulators.resumeIntent(p.pkg, null) ?: return false
+        return runCatching { ctx.startActivity(intent); true }.getOrDefault(false)
+    }
+
+    /** Force stops [p] (root); ends the session when it was the game being played. Off the UI thread. */
+    fun kill(p: RunningApps.App): Boolean {
+        val ok = Root.forceStop(p.pkg)
+        if (MainUI.sessions.active?.pkg == p.pkg) MainUI.sessions.endActive()
+        return ok
+    }
+
+    fun row(p: RunningApps.App, iconPx: Int = 96): UiItem {
+        val tag = when { p.isSession -> "PLAYING  "; p.fromMainUI -> "MainUI  "; else -> "" }
+        return UiItem(MainUI.apps.label(p.pkg), icon = { MainUI.apps.icon(p.pkg, iconPx) }, data = p,
+            sub = "$tag${p.rssKb / 1024} MB  ${"%.1f".format(p.cpu)}%")
     }
 }
