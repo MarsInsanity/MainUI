@@ -26,6 +26,8 @@ class MainActivity : Activity() {
     lateinit var view: MainUIView
         private set
     private var resumed = false
+    /** Resumed (in front, not paused by another app or the lock screen). */
+    val isShowing: Boolean get() = resumed
     private var leftForSession = false
     /** The last pause was MainUI bringing the game to the front (see SessionManager.shownAt). */
     private var leftForGame = false

@@ -116,17 +116,19 @@ object RomUnzip {
                 if (f.isDirectory) { if (depth < 3 && !skipDir(f.name.lowercase())) walk(f, depth + 1); continue }
                 if (f.extension.lowercase() !in types || LATER_PART.containsMatchIn(f.name)) continue
                 try {
-                    val (files, games) = pick(list(f), accepts)
                     val parts = partsOf(f)
+                    // A multi-part set: the files starting in each part, read part by part (when a
+                    // part can't be read on its own, its first part's files and an estimate).
+                    val whole = if (parts.size > 1) runCatching { parts.flatMap { list(it) } }.getOrNull() else null
+                    val (files, games) = pick(whole ?: list(f), accepts)
                     if (files.isNotEmpty()) {
                         // Only what still has to be written counts (a run stopped part way and started
                         // again); unknown sizes as the archive's own size, never less than that unpacked.
-                        // A multi-part set lists only its first part's files: half as much again as all parts.
                         val todo = files.filter { (n, size) -> target(d, n)?.let { it.exists() && it.length() == size } != true }
                         val packed = parts.sumOf { it.length() }
                         val bytes = when {
-                            todo.isEmpty() && parts.size == 1 -> 0L
-                            parts.size > 1 -> maxOf(todo.sumOf { it.second }, packed + packed / 2)
+                            todo.isEmpty() && (parts.size == 1 || whole != null) -> 0L
+                            parts.size > 1 && whole == null -> maxOf(todo.sumOf { it.second }, packed + packed / 2)
                             else -> maxOf(todo.sumOf { it.second }, packed)
                         }
                         out += Archive(f, files.map { it.first }, bytes, games, parts)
@@ -169,9 +171,11 @@ object RomUnzip {
      * as already unpacked when it has the entry's [size] (and, when the archive is to be deleted,
      * its [crc]), else noted as a different file, which keeps the archive. Returns whether it was written.
      */
-    private fun write(dest: File, size: Long, crc: Long?, t: Tally, copy: (OutputStream) -> Unit): Boolean {
+    private fun write(dest: File, size: Long, crc: Long?, t: Tally, contentCrc: (() -> Long)? = null, copy: (OutputStream) -> Unit): Boolean {
         if (dest.exists()) {
-            val same = size >= 0 && dest.length() == size && (!t.checkCrc || crc == null || crcOf(dest) == crc)
+            // No CRC in the header (a file split across RAR parts): the archive's content is read for one.
+            val same = size >= 0 && dest.length() == size &&
+                (!t.checkCrc || (crc ?: contentCrc?.invoke())?.let { crcOf(dest) == it } ?: true)
             if (same) t.already++ else t.differs = dest.name
             return false
         }
@@ -190,6 +194,13 @@ object RomUnzip {
     private object Discard : OutputStream() {
         override fun write(b: Int) {}
         override fun write(b: ByteArray, off: Int, len: Int) {}
+    }
+
+    /** Nothing kept, only the CRC32 of what went through. */
+    private class CrcOut : OutputStream() {
+        val crc = java.util.zip.CRC32()
+        override fun write(b: Int) = crc.update(b)
+        override fun write(b: ByteArray, off: Int, len: Int) = crc.update(b, off, len)
     }
 
     private fun unpackZip(a: Archive, dir: File, t: Tally, cancelled: () -> Boolean) {
@@ -227,8 +238,12 @@ object RomUnzip {
                 val want = if (multi) keeps(name) else name in wanted
                 val dest = if (want) target(dir, name) else null // outside the folder: never written
                 val crc = if (h.hasFileCrc() && !h.isSplitAfter) h.fileCRC.toLong() and 0xFFFFFFFFL else null
-                val written = dest != null && write(dest, h.fullUnpackSize, crc, t) { out -> ar.extractFile(h, out) }
-                if (!written && (solid || h.isSplitAfter)) ar.extractFile(h, Discard)
+                // Each file is read out of the archive once at most (in a solid one, reading it
+                // twice would be wrong): to write it, to check it against one already there, or into nothing.
+                var extracted = false
+                val contentCrc = { extracted = true; CrcOut().also { ar.extractFile(h, it) }.crc.value }
+                val written = dest != null && write(dest, h.fullUnpackSize, crc, t, contentCrc) { out -> extracted = true; ar.extractFile(h, out) }
+                if (!written && !extracted && (solid || h.isSplitAfter)) ar.extractFile(h, Discard)
             }
         }
     }

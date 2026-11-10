@@ -77,7 +77,9 @@ object HomeScenes {
             SearchFlow.start(host)
         }
         if (s.showAndroidSystem) {
-            val n = MainUI.apps.androidGames().size // installed ones (uninstalled games stay in the library)
+            // Installed ones (uninstalled games stay in the library), counted with the systems off
+            // the UI thread: listing the apps takes a while after every install / update.
+            val n = androidCount.takeIf { it >= 0 } ?: MainUI.library.androidGames().size
             out += Tile("android", "Android", "android", icons = SystemDef.ANDROID.icons, short = "APK",
                 sub = plural(n, "game"), open = { host.push(AndroidGamesScene(host)) })
         }
@@ -141,9 +143,13 @@ object HomeScenes {
         }
     }
 
+    /** The Android tile's count, from the last [loadSystems] (-1: not counted yet). */
+    @Volatile private var androidCount = -1
+
     /** Loads systems + game counts in the background. */
     fun loadSystems(host: SceneHost, refresh: Boolean = false, done: (List<GameSystem>) -> Unit) {
         host.io({
+            if (MainUI.settings.showAndroidSystem) androidCount = runCatching { MainUI.apps.androidGames().size }.getOrDefault(androidCount)
             val list = MainUI.games.systems(MainUI.settings.showUnknownFolders, refresh)
             list.filter { it.gameCount < 0 || refresh }.forEach { MainUI.games.countGames(it) }
             list

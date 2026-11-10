@@ -115,7 +115,7 @@ class OverlayService : AccessibilityService() {
             if (menu != null) { menu.leave(); performHold(hold) } else perform(hold)
             return
         }
-        if (overlay != null || opening || !gameInFront()) return
+        if (overlay != null || opening || !gameInFront() || locked()) return
         holdRan(now)
         Log.d(TAG, "HOME held (${if (raw) "button" else "key"}) -> $hold")
         perform(hold)
@@ -169,7 +169,9 @@ class OverlayService : AccessibilityService() {
             if (event.className?.toString() == MainActivity::class.java.name) { foregroundPackage = pkg; leavingUntil = 0L }
             return
         }
-        if (pkg == "com.android.systemui" || pkg.contains("inputmethod")) return
+        // SystemUI (notification shade, volume, power menu) over the game: remembered, see [dismissShade].
+        if (pkg == "com.android.systemui") { systemUiAt = SystemClock.uptimeMillis(); return }
+        if (pkg.contains("inputmethod")) return
         // Any keyboard (SwiftKey, ...): it comes and goes over the game, which sends no event when
         // it is back, so the keyboard must never count as the app in front.
         if (pkg != foregroundPackage && (event.className?.toString() == "android.inputmethodservice.SoftInputWindow" || isKeyboard(pkg))) return
@@ -178,6 +180,24 @@ class OverlayService : AccessibilityService() {
         lastWindowChangeAt = SystemClock.uptimeMillis()
         if (gameInFront()) prewarm()
     }
+
+    /** When SystemUI last showed a window (the shade pulled down...), 0 once dealt with. */
+    @Volatile private var systemUiAt = 0L
+
+    /**
+     * The notification shade (or another SystemUI window) may be over the game, since SystemUI
+     * showed one after the game's last window: closed, and the time its closing takes (ms) to
+     * wait before a capture, so it isn't the menu's background and the game's screenshot.
+     */
+    private fun dismissShade(): Long {
+        if (systemUiAt <= lastWindowChangeAt || Build.VERSION.SDK_INT < 31) return 0L
+        systemUiAt = 0L
+        runCatching { performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE) }
+        return 450L
+    }
+
+    /** The lock screen is up (over a game, whose window still counts as in front). */
+    private fun locked(): Boolean = runCatching { getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked }.getOrDefault(false)
 
     private fun isKeyboard(pkg: String): Boolean = runCatching {
         getSystemService(android.view.inputmethod.InputMethodManager::class.java).enabledInputMethodList.any { it.packageName == pkg }
@@ -268,8 +288,7 @@ class OverlayService : AccessibilityService() {
         val hold = MainUI.settings.homeHold
         // On the lock screen (over a game): the menu would show and save the lock screen, and
         // offer Exit / Save / Load without unlocking.
-        val locked = runCatching { getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked }.getOrDefault(false)
-        if (locked || !gameInFront() || (press == "home" && hold == "home")) {
+        if (locked() || !gameInFront() || (press == "home" && hold == "home")) {
             Log.d(TAG, "HOME passed through (fg=$foregroundPackage, session=${MainUI.sessions.active?.pkg})")
             return HomePress.PASS
         }
@@ -355,6 +374,7 @@ class OverlayService : AccessibilityService() {
                 if (MainUI.sessions.autoLoadPending(s)) {
                     // Its last save isn't loaded yet: saving the fresh start would overwrite it.
                     io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: ${s.name} not saved, its last save wasn't loaded yet")
+                    MainUI.sessions.toast("${s.name} wasn't saved: its last save wasn't loaded yet (Load it from the menu first)")
                 } else if (c.savesToResume) {
                     if (settleMs > 0) Thread.sleep(settleMs)
                     val ok = c.saveToResume()
@@ -372,6 +392,8 @@ class OverlayService : AccessibilityService() {
 
     /** The in-game menu leaves for the Game Switcher (saving first): HOME waits until MainUI is in front. */
     fun markLeaving() { leavingUntil = SystemClock.uptimeMillis() + 30_000 }
+    /** Not leaving after all (the save failed, the game stays): HOME works again. */
+    fun clearLeaving() { leavingUntil = 0L }
 
     /** Runs one of the configurable HOME actions. */
     fun perform(action: String) {
@@ -395,14 +417,15 @@ class OverlayService : AccessibilityService() {
         val id = ++openId
         Log.d(TAG, "showing in-game menu for ${s.name}")
         // The notification shade over the game would be the menu's background and the game's
-        // screenshot: closed first.
-        if (Build.VERSION.SDK_INT >= 31) runCatching { performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE) }
+        // screenshot: closed first, and the capture waits for it to be gone.
+        val shadeMs = dismissShade()
         worker.execute {
             val controller = MainUI.sessions.controllerFor(s)
             runCatching { controller.prepare() }
             val paused = MainUI.settings.pauseOnMenu && runCatching { controller.pause() }.getOrDefault(false)
             Log.d(TAG, "paused=$paused (${controller.javaClass.simpleName})")
             io.github.marsinsanity.mainui.core.SessionLog.log("menu opened for ${s.name} (${s.pkg}): ${controller.javaClass.simpleName}, states ${controller.states}, frozen $paused")
+            if (shadeMs > 0) Thread.sleep(shadeMs)
             capture { bmp ->
                 main.post {
                     if (id != openId) {
@@ -529,7 +552,9 @@ class OverlayService : AccessibilityService() {
         v.destroy()
         handBackControllers(moved)
         // A popup over MainUI itself paused its music; MainUI stayed resumed, so nothing else restarts it.
-        if (foregroundPackage == packageName) MainUI.themes.resumeBgm()
+        // (Only while MainUI's screen really is in front: not when the popup switched to another
+        // app, whose window event hasn't come yet, or over the lock screen.)
+        if (foregroundPackage == packageName && MainActivity.instance?.isShowing == true) MainUI.themes.resumeBgm()
     }
 
 
@@ -537,10 +562,12 @@ class OverlayService : AccessibilityService() {
         // Remember the current frame for the switcher, then bring MainUI forward.
         val s = MainUI.sessions.active
         markLeaving()
-        capture { bmp ->
-            if (bmp != null && s != null) MainUI.sessions.saveScreenshot(s.gameKey, bmp)
-            main.post { leaveForSwitcher(0) }
-        }
+        main.postDelayed({
+            capture { bmp ->
+                if (bmp != null && s != null) MainUI.sessions.saveScreenshot(s.gameKey, bmp)
+                main.post { leaveForSwitcher(0) }
+            }
+        }, dismissShade())
     }
 
     private fun startGameSwitcher() {
@@ -577,7 +604,7 @@ class OverlayService : AccessibilityService() {
                 // A newer update (or the service ending) came while root was being checked.
                 if (gen != hotkeyGen.get()) return@Thread
                 hotkeys?.stop()
-                hotkeys = HotkeyListener(combo, { main.post { if (instance === this && gameInFront() && SystemClock.uptimeMillis() >= leavingUntil) showMenu() } }) { key, down ->
+                hotkeys = HotkeyListener(combo, { main.post { if (instance === this && gameInFront() && !locked() && SystemClock.uptimeMillis() >= leavingUntil) showMenu() } }) { key, down ->
                     if (key in HOME_BUTTONS) main.post { if (instance === this) rawHome(down) }
                 }.also { it.start() }
             }

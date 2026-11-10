@@ -63,7 +63,10 @@ object UnzipFlow {
             // Each storage (SD card, internal) needs room for what is unpacked there.
             // (By volume: two system folders, or Roms and Roms2, on one card share its free space.)
             val vols = MainUI.storage.volumes()
-            val byStorage = plan.archives.groupBy { a -> vols.firstOrNull { a.file.path.startsWith(it.dir.path + "/") }?.dir ?: a.file.parentFile }
+            val byStorage = plan.archives.groupBy { a ->
+                vols.firstOrNull { a.file.path.startsWith(it.dir.path + "/") }?.dir
+                    ?: sys.dirs.firstOrNull { a.file.path.startsWith(it.path + "/") } ?: a.file.parentFile
+            }
             fun free(dir: File?) = dir?.usableSpace ?: 0L
             fun fits(mode: RomUnzip.Mode) = byStorage.all { (dir, list) -> free(dir) >= RomUnzip.spaceNeeded(list, mode) }
             fun need(mode: RomUnzip.Mode) = byStorage.values.maxOf { RomUnzip.spaceNeeded(it, mode) }
