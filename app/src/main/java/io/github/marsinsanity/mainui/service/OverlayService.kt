@@ -171,7 +171,7 @@ class OverlayService : AccessibilityService() {
         Thread({
             runCatching {
                 if (Root.available()) Root.Shell.run("true", 5000)
-                MainUI.sessions.controllerFor(s).prepare()
+                MainUI.sessions.controllerFor(s).warmUp()
             }
         }, "menu-prewarm").apply { isDaemon = true }.start()
     }

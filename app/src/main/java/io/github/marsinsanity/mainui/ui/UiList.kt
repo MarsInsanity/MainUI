@@ -18,6 +18,8 @@ class UiItem(
     var data: Any? = null,
     var onSelect: ((UiItem) -> Unit)? = null,
     var onChange: ((UiItem) -> Unit)? = null,
+    /** MULTI: LEFT on the first value goes round to the last. Off for scales (volume, brightness). */
+    var wrap: Boolean = true,
 ) {
     val checked get() = value == 1
 }
@@ -101,7 +103,7 @@ class UiList(val large: Boolean = false) {
         when (it.type) {
             ItemType.MULTI -> {
                 if (it.values.isEmpty()) return false
-                val next = if (repeat) (it.value + delta).coerceIn(0, it.values.size - 1)
+                val next = if (repeat || !it.wrap) (it.value + delta).coerceIn(0, it.values.size - 1)
                 else (it.value + delta + it.values.size) % it.values.size
                 if (next == it.value) return false
                 it.value = next

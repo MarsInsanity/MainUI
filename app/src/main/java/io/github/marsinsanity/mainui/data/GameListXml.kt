@@ -50,7 +50,8 @@ class GameListXml(val dir: File) : MetaLookup {
         parseError = null
         loaded = true
         if (!file.isFile) return this
-        val raw = runCatching { file.readText() }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
+        // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
+        val raw = runCatching { file.readText().removePrefix("\uFEFF") }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
         // An empty file (or just the XML declaration) is an empty list, not a broken one.
         if (isEmptyXml(raw)) return this
         val parser = newParser()
@@ -206,10 +207,20 @@ class GameListXml(val dir: File) : MetaLookup {
             return s.lowercase()
         }
 
-        private val XML_DECL = Regex("<\\?xml[^>]*\\?>")
 
         /** Nothing but whitespace and maybe the XML declaration: an empty file, not a broken one. */
-        fun isEmptyXml(raw: String) = raw.replace(XML_DECL, "").isBlank()
+        fun isEmptyXml(raw: String): Boolean {
+            // Looks only at the start (no copy of a big file): the first thing that isn't blank.
+            var i = 0
+            while (i < raw.length && raw[i].isWhitespace()) i++
+            if (i == raw.length) return true
+            if (!raw.startsWith("<?xml", i)) return false
+            val end = raw.indexOf("?>", i)
+            if (end < 0) return false
+            i = end + 2
+            while (i < raw.length && raw[i].isWhitespace()) i++
+            return i == raw.length
+        }
         private val BARE_AMP = Regex("&(?!(?:amp|lt|gt|quot|apos|#\\d+|#x[0-9a-fA-F]+);)")
         private val BAD_CHARS = Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]")
 

@@ -22,6 +22,7 @@ object EmulatorUpdates {
     private const val CHECK_EVERY_MS = 24L * 60 * 60 * 1000
     /** After a check that couldn't reach everything. */
     private const val RETRY_MS = 60L * 60 * 1000
+    private const val MAX_RETRIES = 3
 
     enum class Source { FDROID, GITHUB, RETROARCH }
 
@@ -118,7 +119,12 @@ object EmulatorUpdates {
             val installedName = info.versionName ?: ""
             if (installer(pkg) == "com.android.vending") continue   // Google Play updates it
             runCatching { find(e, pkg, installedName, info.longVersionCode, info.lastUpdateTime) }
-                .onFailure { Log.w(TAG, "${e.def.name}: ${it.message}"); failed++; previous[e.def.id]?.let { p -> out += p } }
+                .onFailure {
+                    Log.w(TAG, "${e.def.name}: ${it.message}")
+                    // Releases without an APK for this device: nothing to offer, not a failed check.
+                    if (it.message?.startsWith("No APK") != true) failed++
+                    previous[e.def.id]?.let { p -> out += p }
+                }
                 .getOrNull()?.let { out += it }
         }
         save(out, failed)
@@ -177,10 +183,14 @@ object EmulatorUpdates {
     private fun save(list: List<Update>, failed: Int) {
         val s = MainUI.settings
         val now = System.currentTimeMillis()
+        // Checks that keep failing (a repository gone, GitHub refusing) go back to once a day
+        // after a few hourly retries.
+        val streak = if (failed > 0) s.prefs.getInt("emu_updates_fail_streak", 0) + 1 else 0
         s.prefs.edit().putString("emu_updates", JSONArray().apply { list.forEach { put(it.json()) } }.toString())
             .putLong("emu_updates_checked", now)
             .putInt("emu_updates_failed", failed)
-            .putLong("emu_updates_retry", if (failed > 0) now + RETRY_MS else 0L)
+            .putInt("emu_updates_fail_streak", streak)
+            .putLong("emu_updates_retry", if (failed > 0 && streak <= MAX_RETRIES) now + RETRY_MS else 0L)
             .putInt("emu_updates_build", io.github.marsinsanity.mainui.BuildConfig.VERSION_CODE).apply()
     }
 

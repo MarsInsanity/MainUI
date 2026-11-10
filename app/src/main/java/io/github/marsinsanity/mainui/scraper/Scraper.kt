@@ -48,9 +48,26 @@ object ScrapeState {
 object Scraper {
     private const val TAG = "MainUI.Scraper"
     private val cancel = AtomicBoolean(false)
-    /** ScreenScraper connection failures in a row: past [SS_DOWN_AFTER] it is skipped for the run. */
-    private val ssFailures = java.util.concurrent.atomic.AtomicInteger()
-    private const val SS_DOWN_AFTER = 5
+    /**
+     * ScreenScraper unreachable (no network, server down) several times in a row: skip it for a
+     * minute instead of waiting for its timeouts game after game, then try again. One per run
+     * (and one per single-game scrape), so an outage never outlives the scrape it happened in.
+     */
+    class SsBreaker(private val log: (String) -> Unit = {}, private val clock: () -> Long = { android.os.SystemClock.elapsedRealtime() }) {
+        private var failures = 0
+        private var downUntil = 0L
+        /** False while it is resting after [LIMIT] failures in a row. */
+        @Synchronized fun allow(): Boolean = failures < LIMIT || clock() >= downUntil
+        @Synchronized fun success() { failures = 0; downUntil = 0L }
+        @Synchronized fun failure() {
+            failures++
+            if (failures >= LIMIT) {
+                if (failures == LIMIT) log("ScreenScraper unreachable $LIMIT times in a row: skipping it for a minute at a time")
+                downUntil = clock() + REST_MS
+            }
+        }
+        companion object { const val LIMIT = 5; const val REST_MS = 60_000L }
+    }
 
     fun cancel() { if (ScrapeState.running) { cancel.set(true); ScrapeState.message = "Stopping..." } }
 
@@ -76,7 +93,6 @@ object Scraper {
         st.reset()
         st.running = true
         cancel.set(false)
-        ssFailures.set(0)
         logOut = runCatching { File(MainUI.storage.dataDir("logs"), "scraper.txt").bufferedWriter() }.getOrNull()
         fileLog("MainUI ${io.github.marsinsanity.mainui.BuildConfig.VERSION_NAME}, sources ${MainUI.settings.artSources}, " +
             "ScreenScraper developer ID ${if (ScreenScraper.hasDevCredentials()) "set" else "not set"}, " +
@@ -140,6 +156,7 @@ object Scraper {
 
             val queue = LinkedBlockingQueue(jobs)
             val limiter = RateLimiter(perMin)
+            val breaker = SsBreaker(log = { msg -> fileLog(msg); st.addLog(msg) })
             val gamelists = ConcurrentHashMap<String, GameListXml>()
             val dats = ConcurrentHashMap<String, LogiqxDat>()
             val pool = Executors.newFixedThreadPool(threads)
@@ -151,7 +168,7 @@ object Scraper {
                         val (sys, game) = queue.poll() ?: break
                         st.current = "${sys.def.short}: ${game.name}"
                         try {
-                            val r = scrapeGame(api, freeArt, sys, game, gamelists, dats, limiter)
+                            val r = scrapeGame(api, freeArt, sys, game, gamelists, dats, limiter, breaker)
                             when (r) {
                                 Result.FOUND -> st.found.incrementAndGet()
                                 Result.NOT_FOUND -> { st.missing.incrementAndGet(); st.addLog("Not found: ${game.name}") }
@@ -229,7 +246,7 @@ object Scraper {
 
     private fun scrapeGame(api: ScreenScraper?, freeArt: FreeArt.Session, sys: GameSystem, game: Game,
                            gamelists: ConcurrentHashMap<String, GameListXml>, dats: ConcurrentHashMap<String, LogiqxDat>,
-                           limiter: RateLimiter): Result {
+                           limiter: RateLimiter, breaker: SsBreaker): Result {
         val file = game.file ?: return Result.SKIPPED
         val ssId = sys.def.screenscraperId
         val hashes = if (api != null && ssId != null) runCatching { Hashes.of(file) }.getOrNull() else null
@@ -249,16 +266,20 @@ object Scraper {
         // doesn't end it: the free sources still get their turn, and what SS did send is kept.
         // Only account-level errors (quota, login) and "too many threads" go up to the run.
         var ssError: Exception? = null
+        var mediaError: Exception? = null
         fun ssFailed(e: Exception) {
             if (e is ScreenScraper.ApiException && (e.fatal || e.tooManyThreads)) throw e
-            if (e !is ScreenScraper.ApiException && ssFailures.incrementAndGet() == SS_DOWN_AFTER)
-                fileLog("ScreenScraper unreachable $SS_DOWN_AFTER times in a row: skipped for the rest of this run")
+            if (e !is ScreenScraper.ApiException) breaker.failure() // the connection, not this game
             ssError = e
         }
-        if (api != null && ssId != null && ssFailures.get() < SS_DOWN_AFTER) {
+        if (api != null && ssId != null && !breaker.allow()) {
+            // Resting after repeated connection failures: this game counts as an error (if nothing
+            // else finds it), never as "not found".
+            ssError = java.io.IOException("ScreenScraper unreachable (skipped for now)")
+        } else if (api != null && ssId != null) {
             limiter.acquire()
             info = try {
-                api.gameInfo(ssId, file, hashes, MainUI.settings.ssLanguage, regions()).also { ssFailures.set(0) }
+                api.gameInfo(ssId, file, hashes, MainUI.settings.ssLanguage, regions()).also { breaker.success() }
             } catch (e: java.io.IOException) { ssFailed(e); null }
             val media = info?.let {
                 api.pickMedia(it, MainUI.settings.ssMedia, regions()) ?: api.pickMedia(it, "box-2D", regions()) ?: api.pickMedia(it, "ss", regions())
@@ -269,7 +290,7 @@ object Scraper {
                 try {
                     api.download(media, d, MainUI.settings.ssMaxImageWidth)
                     imageRel = rel(d)
-                } catch (e: java.io.IOException) { ssFailed(e) }
+                } catch (e: java.io.IOException) { ssFailed(e); mediaError = e }
             }
         }
         // Box art from the free sources when ScreenScraper had none (or isn't used).
@@ -277,12 +298,18 @@ object Scraper {
             val d = dest("png")
             FreeArt.find(freeArt, sys.id, file, d, MainUI.settings.ssMaxImageWidth, hashes?.crc)?.let { imageRel = rel(d); source = it }
         }
-        if (info == null && imageRel == null) {
-            if (cancel.get() && ssError is java.io.InterruptedIOException) return Result.SKIPPED
-            ssError?.let { throw it } // nothing found anywhere: report why SS failed
-            return Result.NOT_FOUND
-        }
         val format = MainUI.settings.ssMetaFormat
+        if (imageRel == null) {
+            // Nothing found anywhere: report why SS failed (an error, not "not found").
+            if (info == null) { ssError?.let { throw it }; return Result.NOT_FOUND }
+            // SS knew the game but its image failed: with nothing else to save that is a failure too;
+            // with metadata to save, keep that and say the image failed.
+            mediaError?.let { e ->
+                if (format == "none") throw e
+                fileLog("${sys.id}: ${file.name}: metadata saved, image download failed: $e")
+                ScrapeState.addLog("Image failed: ${game.name}: ${e.message?.take(50)}")
+            }
+        }
         if (info != null && (format == "logiqx" || format == "both")) {
             val d = dats.getOrPut(sysRoot.absolutePath) { LogiqxDat.forWriting(sysRoot) }
             synchronized(d) {
@@ -342,11 +369,15 @@ object Scraper {
         val gamelists = ConcurrentHashMap<String, GameListXml>()
         val dats = ConcurrentHashMap<String, LogiqxDat>()
         return try {
-            val r = scrapeGame(api, FreeArt.Session(free, BoxArtMatch.regionPrefs(MainUI.settings.ssRegions)), sys, game, gamelists, dats, RateLimiter(0))
-            gamelists.values.forEach { it.save() }
-            dats.values.forEach { it.save() }
+            val r = scrapeGame(api, FreeArt.Session(free, BoxArtMatch.regionPrefs(MainUI.settings.ssRegions)), sys, game, gamelists, dats,
+                RateLimiter(0), SsBreaker())
+            // Each file on its own: one that can't be written (a gamelist.xml MainUI couldn't read)
+            // doesn't stop the others, and the art already downloaded still counts.
+            val unsaved = (gamelists.values.map { gl -> runCatching { gl.save() } } + dats.values.map { d -> runCatching { d.save() } })
+                .mapNotNull { it.exceptionOrNull() }
             MainUI.games.invalidate()
-            if (r == Result.FOUND) "Artwork updated" else "No box art found for this game"
+            val note = if (unsaved.isEmpty()) "" else " (${unsaved.size} metadata file${if (unsaved.size > 1) "s" else ""} left unchanged: couldn't be read)"
+            if (r == Result.FOUND) "Artwork updated$note" else "No box art found for this game$note"
         } catch (e: ScreenScraper.ApiException) {
             "ScreenScraper: ${describe(e)}"
         } catch (e: Exception) {

@@ -167,7 +167,7 @@ object FreeArt {
                 // Android's HttpURLConnection asks for gzip and unpacks it by itself.
                 java.io.InputStreamReader(c.inputStream, Charsets.UTF_8).use { r ->
                     val counts = TheGamesDb.buildIndex(r, TheGamesDb.PLATFORMS.values.flatten().toSet(), tmp) { read ->
-                        if (cancelled()) throw java.io.InterruptedIOException("cancelled")
+                        if (cancelled()) throw Http.Cancelled()
                         progress("Reading TheGamesDB: ${read shr 20} MB")
                     }
                     Log.i(TAG, "TheGamesDB index: ${counts.values.sum()} games on ${counts.size} platforms")
@@ -218,7 +218,7 @@ object FreeArt {
             progress("Downloading the LaunchBox database...")
             val info = Http.downloadFast(launchBoxMetadata, zip,
                 ifModifiedSince = if (have) stamp.takeIf { it.isFile }?.readText()?.trim()?.ifEmpty { null } else null) { done, total ->
-                if (cancelled()) throw java.io.InterruptedIOException("cancelled")
+                if (cancelled()) throw Http.Cancelled()
                 progress("Downloading the LaunchBox database: ${done shr 20} / ${if (total > 0) total shr 20 else "?"} MB")
             }
             if (info.notModified) { stamp.setLastModified(System.currentTimeMillis()); return true }
@@ -229,7 +229,7 @@ object FreeArt {
                 val size = e.size.coerceAtLeast(1)
                 java.io.BufferedReader(java.io.InputStreamReader(z.getInputStream(e), Charsets.UTF_8), 1 shl 16).use { r ->
                     val counts = LaunchBoxDb.buildIndex(r, LaunchBoxDb.PLATFORMS.values.flatten().toSet(), tmp) { read ->
-                        if (cancelled()) throw java.io.InterruptedIOException("cancelled")
+                        if (cancelled()) throw Http.Cancelled()
                         progress("Reading the LaunchBox database: ${(read * 100 / size).coerceAtMost(99)}%")
                     }
                     Log.i(TAG, "LaunchBox index: ${counts.values.sum()} games on ${counts.size} platforms")

@@ -498,7 +498,7 @@ class EmulatorUpdatesScene(host: SceneHost) : ListScene(host, "Emulator updates"
             val last = eu.lastCheck()
             items += UiItem(when {
                 last == 0L -> "Not checked yet"
-                ups.isEmpty() && eu.lastFailures() > 0 -> "Could not check ${eu.lastFailures()} emulator${if (eu.lastFailures() > 1) "s" else ""} (offline?)"
+                ups.isEmpty() && eu.lastFailures() > 0 -> "Could not check ${eu.lastFailures()} emulator${if (eu.lastFailures() > 1) "s" else ""}"
                 ups.isEmpty() -> "All emulators are up to date"
                 else -> "${ups.size} update${if (ups.size > 1) "s" else ""} available"
             }, sub = if (last > 0) android.text.format.DateUtils.getRelativeTimeSpanString(last).toString() else null,

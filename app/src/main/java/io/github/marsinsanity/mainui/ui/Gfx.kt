@@ -271,6 +271,8 @@ class Gfx {
             val pattern = if (h24) "HH:mm" else "h:mm a"
             val fmt = clockFormat?.takeIf { it.first == pattern && it.second == Locale.getDefault() }?.third
                 ?: SimpleDateFormat(pattern, Locale.getDefault()).also { clockFormat = Triple(pattern, Locale.getDefault(), it) }
+            // The zone can change while MainUI runs (travel, Settings): follow it every time.
+            fmt.timeZone = java.util.TimeZone.getDefault()
             text(fmt.format(Date(now)), theme.battery.let { FontStyle(it.typeface, 22f, it.color) }, W - 84f, 30f, Align.RIGHT)
             // Draw again when the minute changes, even on a screen nobody touches.
             redrawAfter(60_000L - now % 60_000L + 50L)

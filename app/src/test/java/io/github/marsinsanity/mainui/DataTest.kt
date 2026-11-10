@@ -1125,3 +1125,64 @@ class MetadataFilesTest {
         assertEquals("${dir.name}.mainui.dat", io.github.marsinsanity.mainui.data.LogiqxDat.locate(dir)?.name)
     }
 }
+
+/** Follow-ups from verifying the review fixes. */
+class ReviewFollowUpTest {
+    @org.junit.Before fun parser() { GameListXml.newParser = { org.kxml2.io.KXmlParser() } }
+
+    @Test fun byteOrderMarkIsNotAParseError() {
+        val dir = java.nio.file.Files.createTempDirectory("bom").toFile()
+        try {
+            File(dir, "gamelist.xml").writeText("﻿<?xml version=\"1.0\"?>\n<gameList><game><path>./a.sfc</path><name>A</name></game></gameList>")
+            val gl = GameListXml(dir).load()
+            assertNull(gl.parseError)
+            assertEquals("A", gl.get(File(dir, "a.sfc"))?.name)
+            File(dir, "${dir.name}.dat").writeText("﻿<?xml version=\"1.0\"?>\n<datafile><game name=\"A\"><rom name=\"a.sfc\" size=\"1\"/></game></datafile>")
+            val d = io.github.marsinsanity.mainui.data.LogiqxDat.forWriting(dir)
+            assertEquals("${dir.name}.dat", d.file.name)
+            assertNull(d.parseError)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun emptyXmlCheck() {
+        assertTrue(GameListXml.isEmptyXml(""))
+        assertTrue(GameListXml.isEmptyXml("  \n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\n"))
+        assertFalse(GameListXml.isEmptyXml("<?xml version=\"1.0\"?><gameList/>"))
+        assertFalse(GameListXml.isEmptyXml("clrmamepro ("))
+    }
+
+    @Test fun readOnlyDatCannotBeSaved() {
+        val dir = java.nio.file.Files.createTempDirectory("ro").toFile()
+        try {
+            val f = File(dir, "x.dat").apply { writeText("<datafile><game name=\"A\"><rom name=\"a.sfc\" size=\"1\" status=\"verified\"/></game></datafile>") }
+            val d = io.github.marsinsanity.mainui.data.LogiqxDat(f).load()
+            assertEquals("A", d.find(File(dir, "a.sfc"))?.name)
+            assertTrue(runCatching { d.save() }.isFailure)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun scaleStopsAtItsEnds() {
+        val item = io.github.marsinsanity.mainui.ui.UiItem("Volume", io.github.marsinsanity.mainui.ui.ItemType.MULTI,
+            values = listOf("Muted", "50%", "100%"), wrap = false)
+        val l = io.github.marsinsanity.mainui.ui.UiList().apply { set(listOf(item), false) }
+        assertFalse(l.change(-1)); assertEquals(0, item.value)
+        item.value = 2
+        assertFalse(l.change(1)); assertEquals(2, item.value)
+    }
+
+    @Test fun screenScraperBreakerRestsThenTriesAgain() {
+        var now = 0L
+        val logs = ArrayList<String>()
+        val b = io.github.marsinsanity.mainui.scraper.Scraper.SsBreaker({ logs += it }, { now })
+        repeat(4) { b.failure() }
+        assertTrue(b.allow())
+        b.failure()
+        assertFalse(b.allow()); assertEquals(1, logs.size)
+        now += 61_000
+        assertTrue(b.allow())                     // tries again after a minute
+        b.failure(); assertFalse(b.allow())       // still down: rests again, logged once
+        assertEquals(1, logs.size)
+        now += 61_000
+        b.success(); assertTrue(b.allow())
+    }
+}
