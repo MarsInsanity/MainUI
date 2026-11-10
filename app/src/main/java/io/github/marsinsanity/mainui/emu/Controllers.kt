@@ -60,9 +60,26 @@ interface GameController {
 object Freezer {
     private const val TAG = "MainUI.Freezer"
     private const val PREF = "frozen_pkg"
+    /** The helper programs frozen instead of the app ([freeze]'s only), comma separated. */
+    private const val PREF_ONLY = "frozen_only"
+    private val NAME = Regex("[A-Za-z0-9_.+-]{1,64}")
 
-    private fun pidsCmd(pkg: String) =
-        "ps -A -o PID,NAME | awk '\$2 == \"$pkg\" || index(\$2, \"$pkg:\") == 1 {print \$1}'"
+    /** [pkg]'s app uid; never a system uid (those are shared with Android itself). */
+    private fun appUid(pkg: String): Int? =
+        runCatching { MainUI.app.packageManager.getApplicationInfo(pkg, 0).uid }.getOrNull()
+            ?.takeIf { it % 100_000 in 10_000..19_999 }
+
+    /**
+     * Prints the pids of [pkg]'s processes, or with [only] of its helper programs with those
+     * names (running under the app's uid). null when [only]'s processes can't be told apart.
+     */
+    private fun pidsCmd(pkg: String, only: List<String>?): String? {
+        if (only == null) return "ps -A -o PID,NAME | awk '\$2 == \"$pkg\" || index(\$2, \"$pkg:\") == 1 {print \$1}'"
+        val uid = appUid(pkg) ?: return null
+        val names = only.filter { NAME.matches(it) }.ifEmpty { return null }
+        return "ps -A -o PID,UID,NAME | awk '\$2 == \"$uid\" && (" +
+            names.joinToString(" || ") { "\$3 == \"$it\"" } + ") {print \$1}'"
+    }
 
     /** Bumped on every freeze so a late thaw from an older menu can't undo a newer freeze. */
     @Volatile var generation = 0
@@ -74,29 +91,41 @@ object Freezer {
     /** Processes frozen by the last [freeze] ("pid pid ..."), and the app's main process. */
     @Volatile private var pids = ""
     @Volatile private var mainPid = ""
+    /** The last [freeze] stopped only helper programs: the app itself keeps running. */
+    @Volatile private var helpersOnly = false
 
     /** Prints "<pid> <pid> ..." for every process of [pkg], then "main <pid>". */
     private fun lookupCmd(pkg: String) =
         "ps -A -o PID,NAME | awk '\$2 == \"$pkg\" || index(\$2, \"$pkg:\") == 1 {printf \"%s \", \$1} " +
             "\$2 == \"$pkg\" {m = \$1} END {printf \"\\nmain %s\\n\", m}'"
 
-    fun freeze(pkg: String): Boolean {
+    /**
+     * Freezes [pkg], or with [only] just its helper programs of those names (an app that runs
+     * the game in processes of its own, like PICO-8's proot / pico8_64: the app stays responsive
+     * and needs no [settle]).
+     */
+    fun freeze(pkg: String, only: List<String>? = null): Boolean {
         if (!Root.knownAvailable() && !Root.available()) return false
         synchronized(lock) {
             generation++
-            MainUI.settings.prefs.edit().putString(PREF, pkg).commit()
-            val look = Root.Shell.run(lookupCmd(pkg), 15000)
-            val found = look.lines.firstOrNull { !it.startsWith("main") }?.trim().orEmpty()
-            val main = look.lines.firstOrNull { it.startsWith("main ") }?.substringAfter(' ')?.trim().orEmpty()
+            val cmd = if (only == null) lookupCmd(pkg) else pidsCmd(pkg, only) ?: run {
+                Log.d(TAG, "freeze $pkg: helpers $only not found"); return false
+            }
+            MainUI.settings.prefs.edit().putString(PREF, pkg)
+                .apply { if (only != null) putString(PREF_ONLY, only.joinToString(",")) else remove(PREF_ONLY) }.commit()
+            val look = Root.Shell.run(cmd, 15000)
+            val found = if (only == null) look.lines.firstOrNull { !it.startsWith("main") }?.trim().orEmpty()
+                else look.lines.map { it.trim() }.filter { it.isNotEmpty() && it.all(Char::isDigit) }.joinToString(" ")
+            val main = if (only == null) look.lines.firstOrNull { it.startsWith("main ") }?.substringAfter(' ')?.trim().orEmpty() else ""
             val ok = found.isNotEmpty() && Root.Shell.run("kill -STOP $found", 15000).ok
-            if (ok) { pids = found; mainPid = main }
+            if (ok) { pids = found; mainPid = main; helpersOnly = only != null }
             else {
                 // Never leave a half-frozen game behind: if the stop may have happened, undo it.
                 if (found.isNotEmpty()) Root.Shell.run("kill -CONT $found", 15000)
-                pids = ""; mainPid = ""
-                MainUI.settings.prefs.edit().remove(PREF).apply()
+                pids = ""; mainPid = ""; helpersOnly = false
+                MainUI.settings.prefs.edit().remove(PREF).remove(PREF_ONLY).apply()
             }
-            Log.d(TAG, "freeze $pkg -> $ok ($found, main $main)")
+            Log.d(TAG, "freeze $pkg${if (only != null) " $only" else ""} -> $ok ($found, main $main)")
             return ok
         }
     }
@@ -111,7 +140,7 @@ object Freezer {
      */
     fun settle(pkg: String, gen: Int) {
         synchronized(lock) {
-            if (gen != generation || frozen() != pkg || pids.isEmpty()) return
+            if (gen != generation || frozen() != pkg || pids.isEmpty() || helpersOnly) return
             val m = mainPid.ifEmpty { pids.substringBefore(' ') }
             val r = Root.Shell.run(
                 "c0=\$(grep -m1 voluntary_ctxt /proc/$m/status); kill -CONT $pids; i=0; " +
@@ -129,11 +158,14 @@ object Freezer {
             if (gen != null && gen != generation) { Log.d(TAG, "stale thaw ignored"); return }
             val cached = pids
             // After a MainUI restart the cached list is gone: look the processes up again.
-            val cmd = if (cached.isNotEmpty()) "kill -CONT $cached" else "for p in \$(${pidsCmd(pkg)}); do kill -CONT \$p; done"
+            val only = MainUI.settings.prefs.getString(PREF_ONLY, null)
+                ?.takeIf { MainUI.settings.prefs.getString(PREF, null) == pkg }?.split(',')?.filter { it.isNotEmpty() }
+            val look = if (cached.isEmpty()) pidsCmd(pkg, only) ?: pidsCmd(pkg, null) else null
+            val cmd = if (cached.isNotEmpty()) "kill -CONT $cached" else "for p in \$($look); do kill -CONT \$p; done"
             val r = Root.Shell.run(cmd, 15000)
             if (!r.ok && cached.isNotEmpty()) Root.exec("kill -CONT $cached")
-            pids = ""; mainPid = ""
-            if (MainUI.settings.prefs.getString(PREF, null) == pkg) MainUI.settings.prefs.edit().remove(PREF).commit()
+            pids = ""; mainPid = ""; helpersOnly = false
+            if (MainUI.settings.prefs.getString(PREF, null) == pkg) MainUI.settings.prefs.edit().remove(PREF).remove(PREF_ONLY).commit()
             Log.d(TAG, "thaw $pkg")
         }
     }
@@ -397,7 +429,7 @@ class StandaloneController(
     private var frozenGen = -1
 
     override fun pause(): Boolean {
-        frozen = MainUI.settings.freezeStandalone && Freezer.freeze(pkg)
+        frozen = MainUI.settings.freezeStandalone && Freezer.freeze(pkg, def?.freezeOnly)
         frozenGen = Freezer.generation
         return frozen
     }

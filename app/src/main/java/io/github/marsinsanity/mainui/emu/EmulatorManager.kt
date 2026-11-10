@@ -60,6 +60,12 @@ data class EmuDef(
      * load key works (auto load on start). 0 = MainUI's default.
      */
     val loadDelayMs: Long = 0,
+    /**
+     * "freeze" in "ingame": names of the helper programs that run the game (PICO-8 runs it in
+     * proot / pico8_64 processes started by the app). Pausing then freezes just those, the way the
+     * app pauses itself, instead of the app's own processes. null = freeze the app.
+     */
+    val freezeOnly: List<String>? = null,
 ) {
     val packages: List<String> get() = components.map { it.first }.distinct()
 }
@@ -181,6 +187,7 @@ class EmulatorManager(
             get = o.optJSONObject("get")?.let { g -> g.keys().asSequence().associateWith { k -> g.optString(k) } } ?: emptyMap(),
             rootLaunch = o.optBoolean("root", false),
             loadDelayMs = ingame?.optLong("loadDelay", 0L) ?: 0L,
+            freezeOnly = ingame?.optJSONArray("freeze")?.strings()?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() },
         )
     }
 

@@ -1904,13 +1904,15 @@
    "id": "pico-8",
    "name": "Pico-8",
    "folders": [
-    "pico-8/carts"
+    "pico-8/carts",
+    "pico8"
    ],
    "extensions": [
     "png",
     "p8"
    ],
    "emulators": [
+    "sa:pico8",
     "ra:fake08"
    ],
    "screenscraper": 234,

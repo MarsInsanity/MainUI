@@ -221,6 +221,13 @@
       "ingame": { "menu": "back", "states": "menu" }
     },
     {
+      "id": "pico8", "name": "PICO-8 (pico8-android)",
+      "get": { "github": "Macs75/pico8-android", "note": "Runs your own PICO-8 Raspberry Pi zip from lexaloffle.com (asked for on its first start)" },
+      "components": ["io.wip.pico8/com.godot.game.GodotAppLauncher", "io.wip.pico8/com.godot.game.GodotApp"],
+      "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
+      "ingame": { "menu": "back", "states": "none", "freeze": ["proot", "pico8_64"] }
+    },
+    {
       "id": "eden", "name": "Eden",
       "get": { "page": "https://eden-emu.dev" },
       "components": [
