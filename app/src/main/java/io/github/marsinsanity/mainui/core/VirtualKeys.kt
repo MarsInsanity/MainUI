@@ -39,20 +39,11 @@ object VirtualKeys {
         return false
     }
 
-    /**
-     * Tells the app in front a controller's current trigger / stick positions ([values] in the
-     * helper's CONTROLLER_AXES order: X, Y, Z, RZ, RX, RY, HAT_X, HAT_Y, LTRIGGER, RTRIGGER,
-     * BRAKE, GAS). Used after MainUI's menu had focus while they moved. Root only.
-     */
-    fun axes(deviceId: Int, values: FloatArray): Boolean =
-        inject("axes $deviceId ${values.joinToString(" ")}", 3000) == "ok"
-
-    // ---- the injector: input as the handheld's own controller, no virtual device ----------------
-    // A second root helper (KeyInject "inject"). It never creates an input device: apps see its
-    // presses as the built-in controller's. RetroArch counts at most three keyboards per run (the
-    // volume / power keys and every virtual keyboard MainUI made included); past that it took
-    // MainUI's keyboard for a controller, gave it a port (port 1 when it came first) and read its
-    // hotkeys as buttons, so saves failed. RetroArch's keys go through here instead.
+    // ---- the injector: input as a real controller, no device of its own -----------------------
+    // A second root helper (KeyInject "inject"). Since Android 12 every event injected through
+    // Android arrives from device -1 ("Virtual") whatever device it names, and RetroArch took that
+    // for a new controller and gave it a port (port 1 when it came first). The injector instead
+    // writes into a real controller's own /dev/input node, so apps hear it from that controller.
 
     private var injProc: Process? = null
     private var injOut: BufferedWriter? = null
@@ -62,8 +53,10 @@ object VirtualKeys {
         if (injProc?.isAlive == true && injOut != null) return true
         if (!Root.available()) return false
         val ai = MainUI.app.applicationInfo
+        val lib = File(ai.nativeLibraryDir, "libmainuiinput.so")
+        if (!lib.isFile) { Log.w(TAG, "missing $lib"); return false }
         val p = Root.startInteractive("env CLASSPATH=${Root.q(ai.sourceDir)} app_process /system/bin " +
-            "io.github.marsinsanity.mainui.tools.KeyInject inject") ?: return false
+            "io.github.marsinsanity.mainui.tools.KeyInject inject ${Root.q(lib.path)}") ?: return false
         injReplies.clear()
         Thread({ runCatching { p.inputStream.bufferedReader().forEachLine { injReplies.put(it.trim()) } } }, "inject-reader")
             .apply { isDaemon = true }.start()
@@ -93,11 +86,16 @@ object VirtualKeys {
     }
 
     /**
-     * Presses Android key codes [codes] together on the built-in controller (the first ones held
-     * first: a hotkey enable button). "ok <device id>", "error no controller", or null (no root).
+     * Makes controller [deviceId] tell the app in front where its sticks and triggers are now (a
+     * trigger let go while MainUI's menu had focus is otherwise still held in the game: R2 is
+     * RetroArch's fast-forward, which mutes the sound). One stick axis moves a hair and back
+     * through the controller's own /dev/input node. "ok ...", "none", "error ..."; null without root.
      */
-    fun pad(codes: List<Int>, holdMs: Int = 200): String? =
-        inject("pad ${codes.joinToString("+")} $holdMs", holdMs + 3000L)
+    fun nudge(deviceId: Int): String? {
+        val d = android.view.InputDevice.getDevice(deviceId) ?: return "error no device $deviceId"
+        if (d.isVirtual) return "error virtual device"
+        return inject("nudge ${d.vendorId} ${d.productId} ${d.name}", 3000)
+    }
 
     /** Bumped for every new virtual keyboard (helper start). */
     @Volatile private var deviceGen = 0
@@ -106,23 +104,27 @@ object VirtualKeys {
 
     /**
      * RetroArch takes note of a keyboard on its first key and doesn't act on that key, so the
-     * first Save or Load did nothing. Before the first hotkey for a RetroArch process (and after
-     * every new virtual keyboard), tap Ctrl, which RetroArch doesn't use, and give it a moment.
+     * first Save or Load did nothing: tap Ctrl, which RetroArch doesn't use, and give it a moment.
+     * Done when a RetroArch game starts, so MainUI's keyboard is among the first three keyboards
+     * RetroArch hears from (it counts no more; a later one becomes a controller with a port),
+     * and with [always] before every hotkey: RetroArch forgets its keyboards whenever its input
+     * restarts (loading content), which can't be seen from outside. Otherwise once per RetroArch
+     * process and keyboard.
      */
-    fun primeFor(pkg: String?) {
-        if (pkg == null) return
+    fun primeFor(pkg: String?, always: Boolean = false): Boolean {
+        if (pkg == null) return false
         val pid = Root.Shell.run("pidof $pkg", 3000).out.trim()
-        if (pid.isEmpty()) return
-        if (!ensureLocked()) return
+        if (pid.isEmpty()) return false
+        if (!ensureLocked()) return false
         val key = "$pkg:$pid:$deviceGen"
-        if (primed == key) return
-        if (press("CTRL", 80)) { primed = key; Thread.sleep(350) }
+        if (!always && primed == key) return true
+        if (!press("CTRL", 80)) return false
+        primed = key
+        Thread.sleep(350)
+        return true
     }
 
     @Synchronized private fun ensureLocked() = ensure()
-
-    /** Starts the injector in the background (RetroArch's keys go through it), making no input device. */
-    fun warmUpInjector() { Thread({ synchronized(this) { ensureInjector() } }, "inject-warmup").apply { isDaemon = true }.start() }
 
     /** Starts the helper in the background so the first key press doesn't wait for it. */
     fun warmUp() { Thread({ synchronized(this) { ensure() } }, "keys-warmup").apply { isDaemon = true }.start() }

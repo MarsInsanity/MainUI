@@ -124,7 +124,7 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         resumedAt = android.os.SystemClock.uptimeMillis()
-        view.takeControllerAxes() // from now on: what the game behind misses
+        view.takeMovedControllers() // from now on: what the game behind misses
         io.github.marsinsanity.mainui.emu.Freezer.thawAll()
         // Cores downloaded in RetroArch while MainUI was in the background.
         MainUI.worker.execute { runCatching { MainUI.emulators.refreshCoresIfStale(15_000) } }
@@ -146,8 +146,8 @@ class MainActivity : Activity() {
         leftForSession = MainUI.sessions.active != null
         // Back to a game that was running (Game Switcher, fallback menu): hand it the triggers /
         // sticks that moved here. Not for a game starting now: it reads the controller fresh.
-        val moved = view.takeControllerAxes()
-        if (leftForSession && MainUI.sessions.resumedAt >= resumedAt) OverlayService.handBackControllerAxes(moved, afterMs = 700)
+        val moved = view.takeMovedControllers()
+        if (leftForSession && MainUI.sessions.resumedAt >= resumedAt) OverlayService.handBackControllers(moved, afterMs = 700)
         // Paused because MainUI just started / resumed the game (since it came to the front)?
         val shown = MainUI.sessions.shownAt
         leftForGame = leftForSession && shown >= resumedAt && android.os.SystemClock.uptimeMillis() - shown < 15_000

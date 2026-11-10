@@ -65,16 +65,19 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
    - **Root**: grant MainUI superuser in Magisk (core detection, process manager, key injection, force stop).
 3. In **Settings > Emulators & cores**, run **Configure RetroArch for MainUI** once. It makes RetroArch
    pause itself while MainUI's menu is open, flush in-game saves every 10 s, auto save / load states,
-   treat MainUI's virtual keyboard as a keyboard (`input_android_physical_keyboard`), binds Save / Load
-   State to controller buttons when they have none (F2 / F4's key codes, buttons no controller has),
-   and turns on the network command port (used by RetroArch builds that include it; the official
-   Android builds don't, see below).
+   treat MainUI's virtual keyboard as a keyboard (`input_android_physical_keyboard`), set its keyboard
+   hotkeys F1 / F2 / F4, and turns on the network command port (used by RetroArch builds that include
+   it; the official Android builds don't, see below). It also takes out the Save / Load State
+   controller binds MainUI 0.1.59-0.1.61 added (key codes 132 / 134), leaving binds of your own.
    MainUI applies newer settings by itself the next time a RetroArch game starts while RetroArch is closed.
-   With root, MainUI presses RetroArch's Save, Load and Menu **as the handheld's own controller**
-   (player 1, with the hotkey enable button when one is set; Menu is Back), so no extra input device
-   ever reaches RetroArch: it counts at most three keyboards per run and took a fourth for a
-   controller (given a port, port 1 when it came first, its hotkeys read as buttons). The virtual
-   keyboard is only the fallback when there is no built-in controller.
+   With root, MainUI presses RetroArch's Save, Load and Menu hotkeys on its own keyboard. RetroArch
+   counts at most three keyboards per run (the volume keys included) and takes a later one for a
+   controller with a port, so MainUI's keyboard introduces itself (a Ctrl tap) as soon as a RetroArch
+   game is up, and again before every hotkey.
+   **Nothing is injected as the handheld's controller**: since Android 12 an injected event arrives
+   from device -1 ("Virtual") whatever device it names, and RetroArch made that a new controller with
+   a port (port 1 when it came first). MainUI 0.1.5x did that for Save / Load and for handing back
+   moved triggers; that phantom controller is gone once RetroArch restarts.
    What MainUI did around games (launches, the in-game menu, save / load keys, auto load) is written to
    `MainUI/logs/session.txt`, to send along with a problem report.
 4. **Settings > Emulators & cores > RetroArch cores > Get cores for my games** downloads a core for
@@ -176,7 +179,7 @@ Differences from a Miyoo Mini, due to the screen:
 | | SELECT | Game options: favorite, core for this game (*Default* follows the system's core), system core, scrape, info, **Hide ROM** / **Unhide ROM** (for files that must stay but aren't games; known arcade BIOS sets such as `neogeo.zip`, `pgm.zip`, `qsound.zip` are hidden by themselves; *Settings > Library & storage > Show hidden games* lists them, marked "hidden"), **Delete ROM** (asks first; also deletes the files that belong to the game: `.cue` / `.gdi` tracks, `.m3u` discs, CloneCD / Alcohol companions, the zip an image was unpacked from, its box art and gamelist entry, never a track another game uses) |
 | Game Switcher | A / B / X / Y | Resume / back / remove / view mode |
 | | SELECT / UP / DOWN | Play time / brightness |
-| In game | Home | In-game menu, opened on the press itself (hold: Game Switcher). A trigger or stick that moves while MainUI's menu or Game Switcher has focus is handed back to the game afterwards (root), so a held R2 doesn't stay "held" in it (RetroArch: fast-forward, muted). |
+| In game | Home | In-game menu, opened on the press itself (hold: Game Switcher). A trigger or stick that moves while MainUI's menu or Game Switcher has focus is reported to the game again afterwards (root: one stick axis of that controller moves a hair and back through its own `/dev/input` node, so Android re-sends all its axes as that controller), so a released R2 doesn't stay "held" in it (RetroArch: fast-forward, muted). |
 | Anywhere | hold Back | Process manager popup (Settings > Controls > Hold Back) |
 | Touch | tap / drag / swipe / long press | Select, tap a hint to use it / scroll / next page / SELECT |
 
@@ -299,7 +302,8 @@ only for emulators that handle new launches themselves (RetroArch).
 
 RetroArch only takes note of a new keyboard when it gets its first key, and ignored that key, so the
 first Save or Load did nothing. MainUI now taps Ctrl (unused by RetroArch) on its virtual keyboard
-once per RetroArch run before the first hotkey.
+when a RetroArch game is up and before every hotkey (RetroArch forgets its keyboards whenever it
+restarts its input, e.g. loading content).
 
 **Home button behaviour is configurable** (Settings > Controls): *Press Home in game* and *Hold Home
 in game* can each be the in-game menu, the Game Switcher, "Go to MainUI" or nothing; *Hold time*

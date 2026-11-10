@@ -124,7 +124,7 @@ class SessionManager(
             io.github.marsinsanity.mainui.core.SessionLog.log("launch ${game.name} with ${option.ref} ($pkg)")
             begin(s)
             library.addRecent(game, option.ref)
-            if (!option.isRetroArch) autoLoad(s)
+            if (option.isRetroArch) introduceKeyboard(s) else autoLoad(s)
             null
         } catch (e: Exception) {
             "Could not start ${option.name}: ${e.message}"
@@ -239,6 +239,34 @@ class SessionManager(
     fun controllerFor(s: Session): GameController =
         if (s.isRetroArch) RetroArchController(emulators.raCommandPort, s.pkg)
         else StandaloneController(s.pkg, s.emuRef?.let { emulators.defFor(it) }) { markSaved(s.gameKey) }
+
+    /**
+     * RetroArch only takes keys from the first three keyboards it hears from after its input
+     * starts (volume keys and the like count); a later one becomes a controller with a port. So
+     * once [s]'s game is up, MainUI's keyboard taps Ctrl (unused by RetroArch) to be among them
+     * before anything else, and again a little later in case RetroArch restarted its input while
+     * loading the game. Save / Load tap it again first anyway (RetroArchController.hotkey).
+     */
+    private fun introduceKeyboard(s: Session) {
+        if (!Root.knownAvailable()) return
+        Thread({
+            val overlay = { io.github.marsinsanity.mainui.service.OverlayService.instance }
+            val now = { android.os.SystemClock.uptimeMillis() }
+            val t0 = now()
+            while (overlay()?.foregroundPackage != s.pkg) {
+                if (active !== s || overlay() == null || now() - t0 > 30_000) return@Thread
+                Thread.sleep(250)
+            }
+            val inFront = now()
+            for (settle in longArrayOf(2_500, 10_000)) {
+                while (now() - maxOf(inFront, overlay()?.lastWindowChangeAt ?: 0L) < settle && now() - inFront < settle + 20_000) Thread.sleep(250)
+                val o = overlay() ?: return@Thread
+                if (active !== s || o.foregroundPackage != s.pkg || o.overlayShowing) return@Thread
+                val ok = io.github.marsinsanity.mainui.core.VirtualKeys.primeFor(s.pkg, always = true)
+                io.github.marsinsanity.mainui.core.SessionLog.log("MainUI Keyboard introduced to RetroArch: ${if (ok) "ok" else "FAILED"}")
+            }
+        }, "ra-keyboard").apply { isDaemon = true }.start()
+    }
 
     // ---- auto load (standalone emulators) ----------------------------------------------
     // RetroArch loads its auto slot by itself when a game starts. Standalone emulators don't, so

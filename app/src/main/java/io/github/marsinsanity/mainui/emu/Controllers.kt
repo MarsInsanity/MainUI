@@ -198,13 +198,13 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     override fun prepare() {
         if (reachable == null) reachable = probe(rememberNo = true)
         // Official builds: keyboard hotkeys through MainUI's virtual keyboard (needs root).
-        if (reachable == false && Root.available()) io.github.marsinsanity.mainui.core.VirtualKeys.warmUpInjector()
+        if (reachable == false && Root.available()) io.github.marsinsanity.mainui.core.VirtualKeys.warmUp()
     }
 
     /** Right after the game appears RetroArch may not listen yet: a "no" isn't remembered then. */
     override fun warmUp() {
         if (reachable == null) reachable = probe(rememberNo = false)
-        if (reachable == false && Root.available()) io.github.marsinsanity.mainui.core.VirtualKeys.warmUpInjector()
+        if (reachable == false && Root.available()) io.github.marsinsanity.mainui.core.VirtualKeys.warmUp()
     }
     private val api get() = reachable == true
 
@@ -294,37 +294,19 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
         if (api && status()?.contains("PAUSED") == true) send("PAUSE_TOGGLE")
     }
 
-    /** Held long enough for RetroArch to see it on a frame (a tap can come and go between polls). */
-    private fun hotkey(key: String): Boolean {
-        // First as the handheld's own controller (player 1), with RetroArch's own bindings: no extra
-        // input device, so RetroArch never mistakes one for a controller and gives it a port.
-        val action = when (key) { "F1" -> "menu_toggle"; "F2" -> "save_state"; "F4" -> "load_state"; else -> null }
-        val combo = action?.let { padCombo(it) }
-        if (combo != null) {
-            val r = io.github.marsinsanity.mainui.core.VirtualKeys.pad(combo, 250)
-            io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch $action as the controller (keys ${combo.joinToString("+")}): $r")
-            if (r != null && r.startsWith("ok")) return true
-            if (r != null && !r.startsWith("error no controller")) return false
-        }
-        // No built-in controller (or no binding MainUI can press): MainUI's virtual keyboard.
-        io.github.marsinsanity.mainui.core.VirtualKeys.primeFor(pkg)
-        return io.github.marsinsanity.mainui.core.VirtualKeys.press(key, 250)
-    }
-
     /**
-     * The key codes to press on the controller for RetroArch's [action] ("save_state",
-     * "load_state", "menu_toggle"): the button bound to it in retroarch.cfg (MainUI binds Save / Load
-     * State to F2 / F4's key codes when they have no button), after the hotkey enable button when
-     * one is set. The menu without a button: Back, which RetroArch takes from player 1 as the menu
-     * key. Null when it can't be told (no root, a stick or hat binding).
+     * Presses RetroArch's keyboard hotkey [key] (F1 menu, F2 save state, F4 load state) on MainUI's
+     * virtual keyboard, held long enough to be seen on a frame. Ctrl is tapped first: RetroArch
+     * forgets its keyboards whenever its input restarts and ignores a new keyboard's first key.
+     *
+     * Not as the handheld's controller: since Android 12 an injected event arrives from device -1
+     * ("Virtual") whatever device it names, and RetroArch made that a new controller with a port.
      */
-    private fun padCombo(action: String): List<Int>? {
-        val p = pkg ?: return null
-        val cfg = Root.readFile(MainUI.emulators.raConfigPath(p)) ?: return null
-        fun button(k: String) = RetroArchCores.cfgValue(cfg, k)?.toIntOrNull()
-        val key = button("input_${action}_btn")
-            ?: return if (action == "menu_toggle") listOf(android.view.KeyEvent.KEYCODE_BACK) else null
-        return listOfNotNull(button("input_enable_hotkey_btn"), key)
+    private fun hotkey(key: String): Boolean {
+        val primed = io.github.marsinsanity.mainui.core.VirtualKeys.primeFor(pkg, always = true)
+        val ok = io.github.marsinsanity.mainui.core.VirtualKeys.press(key, 250)
+        io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch hotkey $key on MainUI Keyboard: ${if (ok) "pressed" else "FAILED"}${if (primed) "" else " (not primed)"}")
+        return ok
     }
 
     override fun save(slot: Int): Boolean {
