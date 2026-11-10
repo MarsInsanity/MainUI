@@ -280,6 +280,12 @@ Switcher (hold Home, or the menu's *Game Switcher*) or exiting it saves its stat
 saves into its **auto slot** (MainUI sets `state_slot = -1` with `savestate_auto_save` /
 `savestate_auto_load`), which RetroArch loads by itself whenever the game starts again, so picking a
 game in the Game Switcher continues it where you left. The menu's Save / Load use the same slot.
+RetroArch saves are **checked**: MainUI watches the game's state file (`<game>.state.auto`) in
+RetroArch's savestate folder (its `savestate_directory`, `RetroArch/states`, its app folder or the
+game's folder, sorted subfolders included) and presses Save again once if it didn't change within
+3 s. If it still didn't, a toast says the game wasn't saved, instead of the Game Switcher quietly
+leaving nothing to load. (Switching RetroArch to another game restarts it without saving, so this
+save is the only one.) Exit Game waits for the checked save before stopping RetroArch.
 MainUI applies these RetroArch settings by itself before a RetroArch game starts (while RetroArch isn't
 running) whenever it needs new ones, so *Configure RetroArch* doesn't have to be run again. Standalone
 emulators with save / load keys (DuckStation, PPSSPP, ... with root) save with their save key, and when
@@ -291,6 +297,9 @@ cores > Auto load waits** or the in-game menu (*Save / load keys... > Auto load 
 to never load by itself; the default comes from `"loadDelay"` in the emulator's `ingame` entry of
 `emulators.json`. Skipped if you open the menu or leave first; picking the
 game in the Game Switcher continues it too. A game the emulator still has running is just brought back.
+The session log says why an auto load didn't happen (never saved by MainUI, no load key, the
+emulator never came to the front, the game was left first) and, for RetroArch, whether it has an auto
+slot to load when the game starts.
 
 **Resuming from the Game Switcher** brings the game's own task back to the front (with root:
 Android's task switch, `moveTaskToFront`), so nothing new is started in the emulator. Before, MainUI

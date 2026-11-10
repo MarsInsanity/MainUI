@@ -43,6 +43,9 @@ interface GameController {
      * call [unpause] first, because injected keys go to the focused window.
      */
     fun save(slot: Int): Boolean
+
+    /** Why the last [save] failed, in words for the user; null when unknown. */
+    val saveProblem: String? get() = null
     fun load(slot: Int): Boolean
     /** Open the emulator's own menu. Called after MainUI's overlay is gone. */
     fun openNativeMenu(): Boolean
@@ -190,8 +193,10 @@ object Freezer {
  *    (pause_nonactive; never frozen, which could leave it without sound), Save /
  *    Load with its keyboard hotkeys (root) or its own quick menu, Exit by force stop.
  */
-class RetroArchController(private val port: Int, private val pkg: String? = null) : GameController {
+class RetroArchController(private val port: Int, private val pkg: String? = null, private val rom: String? = null) : GameController {
     @Volatile private var reachable: Boolean? = null
+    @Volatile override var saveProblem: String? = null
+        private set
     private var frozen = false
     private var frozenGen = -1
 
@@ -309,8 +314,44 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
         return ok
     }
 
+    /**
+     * Save (F2), checked: the game's state file in RetroArch's savestate folder must change.
+     * Pressed again once if it didn't within 3 s (a key can be missed while RetroArch settles).
+     * Without the game's path the press alone counts. The Game Switcher and Exit rely on this
+     * file: RetroArch loads it by itself the next time the game starts (savestate_auto_load).
+     */
+    private fun saveByKey(): Boolean {
+        saveProblem = null
+        val p = pkg
+        val r = rom
+        if (p == null || r == null) return hotkey("F2").also { if (!it) saveProblem = "Couldn't press RetroArch's save key (needs root)" }
+        val cfg = Root.readFile(MainUI.emulators.raConfigPath(p))
+        val name = RetroArchCores.stateFileName(r, RetroArchCores.cfgValue(cfg, "state_slot")?.toIntOrNull() ?: 0)
+        val dirs = RetroArchCores.stateDirs(cfg, p, java.io.File(r).parent)
+        val find = "find ${dirs.joinToString(" ") { Root.q(it) }} -maxdepth 3 -type f -name ${Root.q(RetroArchCores.globEscape(name))} " +
+            "-exec stat -c '%Y %n' {} + 2>/dev/null"
+        fun files() = Root.Shell.run(find, 5000).out.lines().map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        val before = files()
+        repeat(2) { attempt ->
+            if (!hotkey("F2")) { saveProblem = "Couldn't press RetroArch's save key (needs root)"; return false }
+            val t0 = android.os.SystemClock.uptimeMillis()
+            while (android.os.SystemClock.uptimeMillis() - t0 < 3000) {
+                Thread.sleep(300)
+                val changed = files() - before
+                if (changed.isNotEmpty()) {
+                    io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch saved ${changed.first().substringAfter(' ')}")
+                    Thread.sleep(400) // let it finish writing
+                    return true
+                }
+            }
+            io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch wrote no $name within 3 s (try ${attempt + 1}; looked in ${dirs.joinToString()}; before: ${before.ifEmpty { setOf("none") }.joinToString()})")
+        }
+        saveProblem = "RetroArch didn't save (it ignored MainUI's F2 key). Send MainUI/logs/session.txt"
+        return false
+    }
+
     override fun save(slot: Int): Boolean {
-        if (!api) return keys && hotkey("F2")
+        if (!api) return keys && saveByKey()
         // RetroArch >= 1.17 understands the *_SLOT variants; older builds ignore them,
         // so fall back to selecting the slot by stepping.
         val reply = ask("SAVE_STATE_SLOT $slot", 1500)
@@ -349,7 +390,8 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
      * must be in front and running (see InGameMenuScene.exitGame).
      */
     override fun quit(autoSave: Boolean): Boolean {
-        if (!api && autoSave && keys && hotkey("F2")) Thread.sleep(1200)
+        // Checked: the force stop below must not cut the save short.
+        if (!api && autoSave && keys) saveByKey()
         if (api) {
             // savestate_auto_save (set by "Configure RetroArch") writes the auto slot on QUIT.
             send("QUIT")

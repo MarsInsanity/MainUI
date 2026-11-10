@@ -237,7 +237,7 @@ class SessionManager(
     }
 
     fun controllerFor(s: Session): GameController =
-        if (s.isRetroArch) RetroArchController(emulators.raCommandPort, s.pkg)
+        if (s.isRetroArch) RetroArchController(emulators.raCommandPort, s.pkg, s.path)
         else StandaloneController(s.pkg, s.emuRef?.let { emulators.defFor(it) }) { markSaved(s.gameKey) }
 
     /**
@@ -250,6 +250,7 @@ class SessionManager(
     private fun introduceKeyboard(s: Session) {
         if (!Root.knownAvailable()) return
         Thread({
+            logAutoState(s)
             val overlay = { io.github.marsinsanity.mainui.service.OverlayService.instance }
             val now = { android.os.SystemClock.uptimeMillis() }
             val t0 = now()
@@ -266,6 +267,19 @@ class SessionManager(
                 io.github.marsinsanity.mainui.core.SessionLog.log("MainUI Keyboard introduced to RetroArch: ${if (ok) "ok" else "FAILED"}")
             }
         }, "ra-keyboard").apply { isDaemon = true }.start()
+    }
+
+    /** Logs whether RetroArch has an auto slot to load for [s]'s game (savestate_auto_load). */
+    private fun logAutoState(s: Session) = runCatching {
+        val rom = s.path ?: return@runCatching
+        val cfg = Root.readFile(emulators.raConfigPath(s.pkg))
+        val name = RetroArchCores.stateFileName(rom, -1)
+        val dirs = RetroArchCores.stateDirs(cfg, s.pkg, File(rom).parent)
+        val found = Root.Shell.run("find ${dirs.joinToString(" ") { Root.q(it) }} -maxdepth 3 -type f " +
+            "-name ${Root.q(RetroArchCores.globEscape(name))} -exec stat -c '%y %n' {} + 2>/dev/null", 5000).out.trim()
+        io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch auto load for ${s.name}: " +
+            "savestate_auto_load ${RetroArchCores.cfgValue(cfg, "savestate_auto_load")}, state_slot ${RetroArchCores.cfgValue(cfg, "state_slot")}, " +
+            if (found.isEmpty()) "no $name yet" else "will load $found")
     }
 
     // ---- auto load (standalone emulators) ----------------------------------------------
@@ -288,18 +302,25 @@ class SessionManager(
      * MainUI's menu is open.
      */
     private fun autoLoad(s: Session) {
-        if (!settings.autoSaveOnExit || !hasSavedState(s.gameKey)) return
+        val log = io.github.marsinsanity.mainui.core.SessionLog::log
+        if (!settings.autoSaveOnExit) return
+        if (!hasSavedState(s.gameKey)) { log("auto load ${s.name}: skipped, MainUI never saved it"); return }
         val c = controllerFor(s) as? StandaloneController ?: return
-        if (c.states != StateSupport.HOTKEY || c.loadSpec == null) return
+        if (c.states != StateSupport.HOTKEY || c.loadSpec == null) {
+            log("auto load ${s.name}: skipped, no load key MainUI can press (states ${c.states}, key ${c.loadSpec}, root ${Root.knownAvailable()})"); return
+        }
         val settle = c.loadDelayMs
-        if (settle <= 0) return // turned off for this emulator
+        if (settle <= 0) { log("auto load ${s.name}: turned off for this emulator"); return }
+        log("auto load ${s.name}: waiting for ${s.pkg}, then ${settle} ms, then ${c.loadSpec}")
         Thread({
             val overlay = { io.github.marsinsanity.mainui.service.OverlayService.instance }
             val now = { android.os.SystemClock.uptimeMillis() }
             val t0 = now()
             if (overlay() != null) {
                 while (overlay()?.foregroundPackage != s.pkg) {
-                    if (active !== s || now() - t0 > 30_000) return@Thread
+                    if (active !== s || now() - t0 > 30_000) {
+                        log("auto load ${s.name}: gave up, ${s.pkg} never came to the front (in front: ${overlay()?.foregroundPackage})"); return@Thread
+                    }
                     Thread.sleep(250)
                 }
                 toast("Loading your last save in about ${(settle + 999) / 1000} s...")
@@ -308,20 +329,24 @@ class SessionManager(
                 val inFront = now()
                 while (true) {
                     val o = overlay() ?: break
-                    if (active !== s || o.foregroundPackage != s.pkg) return@Thread
+                    if (active !== s || o.foregroundPackage != s.pkg) {
+                        log("auto load ${s.name}: cancelled, left the game (in front: ${o.foregroundPackage})"); return@Thread
+                    }
                     if (now() - maxOf(inFront, o.lastWindowChangeAt) >= settle || now() - inFront > settle + 60_000) break
                     Thread.sleep(250)
                 }
             } else Thread.sleep(settle + 4000)
             val o = overlay()
-            if (active !== s || (o != null && (o.foregroundPackage != s.pkg || o.overlayShowing))) return@Thread
+            if (active !== s || (o != null && (o.foregroundPackage != s.pkg || o.overlayShowing))) {
+                log("auto load ${s.name}: cancelled (in front: ${o?.foregroundPackage}, menu open: ${o?.overlayShowing})"); return@Thread
+            }
             val ok = runCatching { c.load(0) }.getOrDefault(false)
             io.github.marsinsanity.mainui.core.SessionLog.log("auto load ${s.name}: load key ${if (ok) "sent" else "FAILED"} after ${settle} ms")
             if (ok) toast("Loaded your last save")
         }, "auto-load").apply { isDaemon = true }.start()
     }
 
-    private fun toast(msg: String) = android.os.Handler(android.os.Looper.getMainLooper()).post {
+    fun toast(msg: String) = android.os.Handler(android.os.Looper.getMainLooper()).post {
         android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_SHORT).show()
     }
 

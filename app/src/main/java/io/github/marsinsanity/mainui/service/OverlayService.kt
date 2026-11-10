@@ -318,8 +318,9 @@ class OverlayService : AccessibilityService() {
                 if (c.states == io.github.marsinsanity.mainui.emu.StateSupport.HOTKEY) {
                     if (settleMs > 0) Thread.sleep(settleMs)
                     val ok = c.save(0)
-                    io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save key for ${s.name}: ${if (ok) "sent" else "FAILED"}")
+                    io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save for ${s.name}: ${if (ok) "done" else "FAILED ${c.saveProblem ?: ""}"}")
                     if (ok) Thread.sleep(800)
+                    else MainUI.sessions.toast("${s.name} wasn't saved: ${c.saveProblem ?: "the save key failed"}")
                 } else io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: no save for ${s.name} (states ${c.states})")
             }.onFailure { Log.w(TAG, "save before Game Switcher failed", it); io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save failed: $it") }
             main.post { startGameSwitcher() }
