@@ -465,11 +465,11 @@ class OverlayService : AccessibilityService() {
     fun removeOverlay() {
         val v = overlay ?: return
         overlay = null
-        val moved = v.takeControllerAxes()
-        io.github.marsinsanity.mainui.core.SessionLog.log("overlay closed" + if (moved.isEmpty()) "" else ", controller axes moved on ${moved.keys}")
+        val moved = v.takeMovedControllers()
+        io.github.marsinsanity.mainui.core.SessionLog.log("overlay closed" + if (moved.isEmpty()) "" else ", controller axes moved on $moved")
         runCatching { getSystemService(WindowManager::class.java).removeView(v) }
         v.destroy()
-        handBackControllerAxes(moved)
+        handBackControllers(moved)
     }
 
 
@@ -523,17 +523,22 @@ class OverlayService : AccessibilityService() {
 
     companion object {
         /**
-         * Triggers / sticks that moved while MainUI had focus: once the game has it back, tell it
-         * where they are now, or a trigger let go in the menu (R2: RetroArch's fast-forward, sound
-         * muted) stays held in the game. Root only.
+         * After MainUI's menu or screen had focus: has every controller whose sticks / triggers
+         * moved meanwhile report them again, now to the game ([moved], device ids). Otherwise
+         * the game still sees them where they were, and a trigger let go in the menu (R2:
+         * RetroArch's fast-forward, sound muted) stays held in the game. Root only.
+         *
+         * Through the controller's own /dev/input node (VirtualKeys.nudge), never as an injected
+         * event: since Android 12 those come from device -1, which RetroArch took for a new
+         * controller and gave a port (port 1 when it came first).
          */
-        fun handBackControllerAxes(moved: Map<Int, FloatArray>, afterMs: Long = 250) {
+        fun handBackControllers(moved: Set<Int>, afterMs: Long = 250) {
             if (moved.isEmpty() || !Root.knownAvailable()) return
             Thread({
                 Thread.sleep(afterMs)
-                for ((id, values) in moved) {
-                    val ok = runCatching { io.github.marsinsanity.mainui.core.VirtualKeys.axes(id, values) }.getOrDefault(false)
-                    io.github.marsinsanity.mainui.core.SessionLog.log("handed controller $id's axes back to ${instance?.foregroundPackage}: ${if (ok) "ok" else "FAILED"} ${values.joinToString(",") { "%.2f".format(it) }}")
+                for (id in moved) {
+                    val r = runCatching { io.github.marsinsanity.mainui.core.VirtualKeys.nudge(id) }.getOrElse { "error ${it.message}" }
+                    io.github.marsinsanity.mainui.core.SessionLog.log("controller $id re-reported its axes to ${instance?.foregroundPackage}: $r")
                 }
             }, "axes-handback").apply { isDaemon = true }.start()
         }

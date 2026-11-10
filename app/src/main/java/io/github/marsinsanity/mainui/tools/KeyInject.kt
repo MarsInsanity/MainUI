@@ -6,7 +6,6 @@ import android.os.SystemClock
 import android.view.InputDevice
 import android.view.InputEvent
 import android.view.KeyEvent
-import android.view.MotionEvent
 
 /**
  * Presses a key as if a real keyboard did, for apps that ignore keys from Android's virtual
@@ -18,6 +17,8 @@ import android.view.MotionEvent
  *
  * The key is held for holdMs (default 150) so it is seen on at least one frame, and stamped
  * with a keyboard-only input device that exists (e.g. "gpio-keys"), unless one is given.
+ * Only up to Android 11: since Android 12 every injected event arrives from device -1 whatever
+ * device it names. MainUI itself uses the [daemon]'s uinput keyboard.
  */
 /** Linux key codes of the keys the virtual keyboard has: F keys and modifiers. */
 val LINUX_KEYS = mapOf("F1" to 59, "F2" to 60, "F3" to 61, "F4" to 62, "F5" to 63, "F6" to 64,
@@ -28,52 +29,24 @@ val LINUX_KEYS = mapOf("F1" to 59, "F2" to 60, "F3" to 61, "F4" to 62, "F5" to 6
 external fun nativeOpen(name: String, keys: IntArray): Int
 external fun nativePress(fd: Int, keys: IntArray, holdMs: Int): Boolean
 external fun nativeClose(fd: Int)
-
-/** The controller axes [axes] carries, in this order (sticks, d-pad hat, triggers). */
-val CONTROLLER_AXES = intArrayOf(MotionEvent.AXIS_X, MotionEvent.AXIS_Y, MotionEvent.AXIS_Z, MotionEvent.AXIS_RZ,
-    MotionEvent.AXIS_RX, MotionEvent.AXIS_RY, MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_HAT_Y,
-    MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_RTRIGGER, MotionEvent.AXIS_BRAKE, MotionEvent.AXIS_GAS)
-
-/**
- * One controller motion event from [deviceId] with [values] for [CONTROLLER_AXES], to the window
- * in front. A game only learns a trigger or stick moved from such events: one released while
- * MainUI's menu had focus went to MainUI, and the game still thinks it is held.
- */
-private fun axes(inject: (InputEvent) -> Boolean, deviceId: Int, values: List<Float>): Boolean {
-    val now = SystemClock.uptimeMillis()
-    val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_UNKNOWN })
-    val coords = arrayOf(MotionEvent.PointerCoords().apply {
-        CONTROLLER_AXES.forEachIndexed { i, a -> setAxisValue(a, values.getOrElse(i) { 0f }) }
-    })
-    val e = MotionEvent.obtain(now, now, MotionEvent.ACTION_MOVE, 1, props, coords, 0, 0, 1f, 1f, deviceId, 0,
-        InputDevice.SOURCE_JOYSTICK, 0)
-    return try { inject(e) } finally { e.recycle() }
-}
+external fun nativeNudge(name: String, vendor: Int, product: Int): Int
 
 /**
  * `daemon <path of libmainuiinput.so>`: creates one virtual keyboard ("MainUI Keyboard", F keys
  * only) and keeps it while stdin is open, pressing keys on request: lines like "F1 250"
  * (key[+key] holdMs), answered "ok" / "error ...". One lasting device matters: RetroArch
- * registers at most three keyboards per run. "axes <deviceId> <v>..." sends a controller's
- * axis values (see [axes]).
+ * registers at most three keyboards per run.
  */
 private fun daemon(lib: String) {
     System.load(lib)
     val fd = nativeOpen("MainUI Keyboard", LINUX_KEYS.values.toIntArray())
     if (fd < 0) { println("error uinput $fd"); return }
-    val inject by lazy { injector() }
     println("ready")
     try {
         while (true) {
             val line = readLine() ?: break
             val parts = line.trim().split(Regex("\\s+"))
             if (parts.firstOrNull().isNullOrEmpty()) continue
-            if (parts[0] == "axes") {
-                val id = parts.getOrNull(1)?.toIntOrNull()
-                val ok = id != null && runCatching { axes(inject, id, parts.drop(2).map { it.toFloatOrNull() ?: 0f }) }.getOrDefault(false)
-                println(if (ok) "ok" else "error axes")
-                continue
-            }
             val codes = parts[0].split('+').map { LINUX_KEYS[it.uppercase().removePrefix("KEYCODE_")] }
             if (codes.any { it == null }) { println("error unknown key ${parts[0]}"); continue }
             nativePress(fd, codes.filterNotNull().toIntArray(), parts.getOrNull(1)?.toIntOrNull() ?: 200)
@@ -85,47 +58,34 @@ private fun daemon(lib: String) {
 }
 
 /**
- * The handheld's built-in controller: a gamepad that isn't external (and not virtual).
- * Keys "pressed on it" ([pad]) reach apps as that controller's, so RetroArch counts them for the
- * player the controller is, and no other input device ever appears.
+ * `inject <path of libmainuiinput.so>`: input as a real controller, without any device of its
+ * own. "nudge <vendor> <product> <name>" moves one stick axis of that controller a hair and
+ * back through its /dev/input node ([nativeNudge]), so the app in front hears from the real
+ * controller where its sticks and triggers are now. Answers "ok <axis+1>", "none" (no axis it
+ * can nudge unnoticed) or "error ...".
+ *
+ * Events injected through Android itself can't do this: since Android 12 they all arrive from
+ * device -1 ("Virtual") whatever device they name, and RetroArch takes that for a new
+ * controller and gives it a port (port 1 when it comes first).
  */
-fun builtInController(): InputDevice? = InputDevice.getDeviceIds().toList()
-    .mapNotNull { id: Int -> InputDevice.getDevice(id) }
-    .filter { d -> !d.isVirtual && d.id >= 0 && d.supportsSource(InputDevice.SOURCE_GAMEPAD) }
-    .sortedBy { d -> if (android.os.Build.VERSION.SDK_INT >= 29 && d.isExternal) 1 else 0 }
-    .firstOrNull()
-
-/** Presses [codes] (Android key codes, held together, in order) on the built-in controller. */
-private fun pad(inject: (InputEvent) -> Boolean, codes: List<Int>, holdMs: Long): String {
-    val d = builtInController() ?: return "error no controller"
-    val down = SystemClock.uptimeMillis()
-    fun send(action: Int, code: Int) = inject(KeyEvent(down, SystemClock.uptimeMillis(), action, code, 0, 0, d.id, 0,
-        KeyEvent.FLAG_FROM_SYSTEM, d.sources))
-    for (c in codes) { send(KeyEvent.ACTION_DOWN, c); Thread.sleep(60) } // a hotkey enable button first, a frame or more
-    Thread.sleep(holdMs)
-    for (c in codes.reversed()) { send(KeyEvent.ACTION_UP, c); Thread.sleep(20) }
-    return "ok ${d.id}"
-}
-
-/**
- * `inject`: like [daemon] but without any virtual keyboard: lines "pad <code>[+code] <holdMs>"
- * (keys pressed as the built-in controller, see [pad]) and "axes <deviceId> <v>..." ([axes]).
- */
-private fun injectDaemon() {
-    val inject = injector()
+private fun injectDaemon(lib: String?) {
+    val loaded = lib != null && runCatching { System.load(lib) }.isSuccess
     println("ready")
     while (true) {
-        val parts = (readLine() ?: break).trim().split(Regex("\\s+"))
+        val line = (readLine() ?: break).trim()
+        val parts = line.split(Regex("\\s+"), limit = 4)
         when (parts.firstOrNull()) {
-            "pad" -> {
-                val codes = parts.getOrNull(1)?.split('+')?.mapNotNull { it.toIntOrNull() }.orEmpty()
-                println(if (codes.isEmpty()) "error usage" else runCatching { pad(inject, codes, parts.getOrNull(2)?.toLongOrNull() ?: 200L) }
-                    .getOrElse { "error ${it.message}" })
-            }
-            "axes" -> {
-                val id = parts.getOrNull(1)?.toIntOrNull()
-                val ok = id != null && runCatching { axes(inject, id, parts.drop(2).map { it.toFloatOrNull() ?: 0f }) }.getOrDefault(false)
-                println(if (ok) "ok" else "error axes")
+            "nudge" -> {
+                val vendor = parts.getOrNull(1)?.toIntOrNull()
+                val product = parts.getOrNull(2)?.toIntOrNull()
+                val name = parts.getOrNull(3)
+                println(when {
+                    !loaded -> "error no native library"
+                    vendor == null || product == null || name.isNullOrEmpty() -> "error usage"
+                    else -> runCatching { nativeNudge(name, vendor, product) }.fold(
+                        { r -> if (r > 0) "ok $r" else if (r == 0) "none" else "error $r" },
+                        { "error ${it.message}" })
+                })
             }
             null, "" -> {}
             else -> println("error unknown command")
@@ -135,14 +95,7 @@ private fun injectDaemon() {
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "daemon") { daemon(args[1]); return }
-    if (args.firstOrNull() == "inject") { injectDaemon(); return }
-    // `axes <deviceId> <v>...`: one controller event (see [axes]), without making a virtual keyboard.
-    if (args.firstOrNull() == "axes") {
-        val id = args.getOrNull(1)?.toIntOrNull()
-        val ok = id != null && runCatching { axes(injector(), id, args.drop(2).map { it.toFloatOrNull() ?: 0f }) }.getOrDefault(false)
-        println(if (ok) "ok" else "error axes")
-        return
-    }
+    if (args.firstOrNull() == "inject") { injectDaemon(args.getOrNull(1)); return }
     if (args.firstOrNull() == "list") {
         for (id in InputDevice.getDeviceIds()) InputDevice.getDevice(id)?.let { d ->
             println("$id\t${d.name}\tsources=0x${Integer.toHexString(d.sources)}\tkeyboardType=${d.keyboardType}\tvirtual=${d.isVirtual}")

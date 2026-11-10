@@ -288,22 +288,19 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     private val axisState = HashMap<Btn, Boolean>()
 
     /**
-     * Each controller's latest trigger / stick / hat values seen here (device id -> values in
-     * KeyInject's CONTROLLER_AXES order). A game behind MainUI misses these changes: an R2 let go
-     * while MainUI had focus stays "held" in the game. The values are handed back to it when it
-     * gets focus again (see [takeControllerAxes]).
+     * The controllers (device ids) whose triggers / sticks / hat moved here. A game behind MainUI
+     * misses these changes: an R2 let go while MainUI had focus stays "held" in the game, so the
+     * controller is made to report its axes again when the game gets focus back (see
+     * [takeMovedControllers] and OverlayService.handBackControllers).
      */
-    private val controllerAxes = HashMap<Int, FloatArray>()
+    private val movedControllers = HashSet<Int>()
 
-    /** The controllers whose axes moved here since the last call, with their current values. */
-    fun takeControllerAxes(): Map<Int, FloatArray> = HashMap(controllerAxes).also { controllerAxes.clear() }
+    /** The controllers whose axes moved here since the last call. */
+    fun takeMovedControllers(): Set<Int> = HashSet(movedControllers).also { movedControllers.clear() }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (event.isFromSource(InputDevice.SOURCE_JOYSTICK) || event.isFromSource(InputDevice.SOURCE_GAMEPAD)) {
-            if (event.actionMasked == MotionEvent.ACTION_MOVE && event.deviceId >= 0) {
-                val axes = io.github.marsinsanity.mainui.tools.CONTROLLER_AXES
-                controllerAxes[event.deviceId] = FloatArray(axes.size) { event.getAxisValue(axes[it]) }
-            }
+            if (event.actionMasked == MotionEvent.ACTION_MOVE && event.deviceId >= 0) movedControllers += event.deviceId
             // The stick / hat stream was cut off (focus moved to a game): nothing stays held.
             if (event.actionMasked == MotionEvent.ACTION_CANCEL) { releaseAll(); return true }
             if (event.action == MotionEvent.ACTION_MOVE) {
