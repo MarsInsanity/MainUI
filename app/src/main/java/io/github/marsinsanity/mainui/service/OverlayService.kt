@@ -141,6 +141,11 @@ class OverlayService : AccessibilityService() {
         instance = this
         Freezer.thawAll()
         updateHotkeyListener()
+        runCatching {
+            registerReceiver(wakeReceiver, android.content.IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT)
+            })
+        }
         // Restarted (MainUI's process came back) with a game in front: it sends no window event
         // until it changes windows, so ask which app is in front instead of waiting for one.
         if (MainUI.sessions.active != null && Root.knownAvailable()) Thread {
@@ -150,6 +155,7 @@ class OverlayService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(wakeReceiver) }
         instance = null
         hotkeyGen.incrementAndGet()
         synchronized(hotkeyGen) { hotkeys?.stop(); hotkeys = null }
@@ -179,6 +185,40 @@ class OverlayService : AccessibilityService() {
         foregroundPackage = pkg
         lastWindowChangeAt = SystemClock.uptimeMillis()
         if (gameInFront()) prewarm()
+    }
+
+    /**
+     * Woken / unlocked: the lock screen (and the launcher behind it) sent window events, but the
+     * game coming back in front may send none, so MainUI could think it isn't in a game any more
+     * and HOME wouldn't open the menu. The app in front is read again (root) once things settle.
+     */
+    private val wakeReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            for (delay in longArrayOf(700, 2500)) main.postDelayed({ recheckForeground("after ${i.action?.substringAfterLast('.')}") }, delay)
+        }
+    }
+
+    private fun recheckForeground(why: String) {
+        val s = MainUI.sessions.active ?: return
+        if (!Root.knownAvailable()) { trustSession(why); return }
+        Thread {
+            val fg = runCatching { Root.foregroundPackage() }.getOrNull()
+            main.post {
+                if (fg == null || fg == "com.android.systemui") { trustSession(why); return@post }
+                if (fg != foregroundPackage) io.github.marsinsanity.mainui.core.SessionLog.log("foreground $why: $fg (was $foregroundPackage)")
+                foregroundPackage = fg
+                if (fg == s.pkg) prewarm()
+            }
+        }.start()
+    }
+
+    /** MainUI noted as in front while its screen isn't showing, with a game running: it's the game. */
+    private fun trustSession(why: String) {
+        val s = MainUI.sessions.active ?: return
+        if (foregroundPackage == packageName && MainActivity.instance?.isShowing != true) {
+            io.github.marsinsanity.mainui.core.SessionLog.log("foreground $why: ${s.pkg} (MainUI isn't showing)")
+            foregroundPackage = s.pkg
+        }
     }
 
     /** When SystemUI last showed a window (the shade pulled down...), 0 once dealt with. */
@@ -283,6 +323,8 @@ class OverlayService : AccessibilityService() {
         if (overlay != null) return HomePress.CLOSE
         // Its own press opens the menu; a second press while it opens must not close it again.
         if (opening) return HomePress.IGNORE
+        // (A stale "MainUI is in front", from the lock screen after waking: the game is.)
+        trustSession("on HOME")
         if (foregroundPackage == packageName) return HomePress.MAINUI
         val press = MainUI.settings.homePress
         val hold = MainUI.settings.homeHold
