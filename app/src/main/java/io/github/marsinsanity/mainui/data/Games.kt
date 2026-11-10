@@ -216,8 +216,17 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             it.name.lowercase() !in SystemRegistry.IGNORED_FOLDERS && hasRoms(system, it, depth + 1) }
     }
 
-    /** A .dat is metadata (a Logiqx DAT), unless the system plays .dat files (ONScripter's nscript.dat). */
-    private fun isMetaDat(system: GameSystem, f: File) = f.name.endsWith(".dat", true) && "dat" !in system.def.extensions
+    /**
+     * A .dat is metadata (a Logiqx DAT), unless the system plays .dat files (ONScripter's
+     * nscript.dat, Naomi images): then only MainUI's own DAT and the folder's XML DAT (the one
+     * read for names, which the scraper writes into) are metadata.
+     */
+    private fun isMetaDat(system: GameSystem, f: File): Boolean {
+        if (!f.name.endsWith(".dat", true)) return false
+        if ("dat" !in system.def.extensions || f.name.endsWith(".mainui.dat", true)) return true
+        val dir = f.parentFile ?: return false
+        return LogiqxDat.locate(dir)?.absolutePath == f.absolutePath
+    }
 
     /** gamelist.xml lives in the system's top folder even for games in sub folders. */
     fun systemRootFor(system: GameSystem, dir: File): File =

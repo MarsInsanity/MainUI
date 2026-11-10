@@ -209,10 +209,11 @@ class InGameMenuScene(
                 val ok = controller.save(slot)
                 if (ok) screenshot?.let { saveThumb(it) }
                 if (ok) "State saved to slot $slot" else "Save failed (run Configure RetroArch)"
-            } else hotkeyAction("Save") { controller.save(0).also { ok -> if (ok) screenshot?.let { saveThumb(it) } } }
+            } else hotkeyAction("Save") { controller.save(0).also { ok -> if (ok) { screenshot?.let { saveThumb(it) }; MainUI.sessions.loadDone(session) } } }
+            // Loaded by hand: what runs is what the user wants, so it is saved again on leaving.
             Action.LOAD -> if (controller.states == StateSupport.API) apiAction("Loading...") {
-                if (controller.load(slot)) "State loaded from slot $slot" else "Load failed"
-            } else hotkeyAction("Load") { controller.load(0) }
+                if (controller.load(slot)) { MainUI.sessions.loadDone(session); "State loaded from slot $slot" } else "Load failed"
+            } else hotkeyAction("Load") { controller.load(0).also { ok -> if (ok) MainUI.sessions.loadDone(session) } }
             // From the fallback menu the game's task comes back first, which takes longer.
             Action.STATES_MENU, Action.NATIVE -> leaveThen(if (overlayMode) 250L else keyDelay) { controller.openNativeMenu() }
             Action.SWITCHER -> {
@@ -237,6 +238,7 @@ class InGameMenuScene(
                     }
                     return
                 }
+                sayNotSaved()
                 resumeOnce()
                 closeMenu()
                 if (overlayMode) {
@@ -395,16 +397,25 @@ class InGameMenuScene(
         if (it) io.github.marsinsanity.mainui.core.SessionLog.log("${session.name}: not saved on leaving, its last save wasn't loaded yet")
     }
 
+    /** Auto save is on but this game isn't saved on leaving (its last save wasn't loaded yet): said. */
+    private fun sayNotSaved() {
+        if (MainUI.settings.autoSaveOnExit && MainUI.sessions.autoLoadPending(session))
+            MainUI.sessions.toast("${session.name} wasn't saved: its last save wasn't loaded yet (Load it from this menu first)")
+    }
+
     private fun exitGame() {
         val ctx = host.hostContext
         if (saveByKey) {
             // Close the menu and let the game run, save with its key, then stop it.
             Toast.makeText(ctx, "Saving and exiting...", Toast.LENGTH_SHORT).show()
+            // HOME meanwhile must not open the menu again (it would freeze the game mid-save).
+            io.github.marsinsanity.mainui.service.OverlayService.instance?.markLeaving()
             leaveThen(keyDelay) {
                 val ok = controller.quit(true)
                 // Not saved: not stopped either. The game keeps running and the user hears why.
                 val problem = controller.saveProblem
                 if (!ok && problem != null) {
+                    io.github.marsinsanity.mainui.service.OverlayService.instance?.clearLeaving()
                     io.github.marsinsanity.mainui.core.SessionLog.log("exit ${session.name}: not saved, left running: $problem")
                     MainUI.sessions.toast("${session.name} wasn't saved, so it is still running: $problem")
                     return@leaveThen
@@ -415,6 +426,7 @@ class InGameMenuScene(
             }
             return
         }
+        sayNotSaved()
         busy = "Exiting..."
         invalidate()
         resumed = true // quitting: force stop also kills a frozen process

@@ -126,15 +126,15 @@ class SessionManager(
             intent.component?.className, System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME))
         // The new session is in place before the game appears (MainActivity.onPause reads it while
         // the start is still under way); the previous one comes back if the start fails.
-        val prev = swapIn(s)
+        val sw = swapIn(s)
         val err = try {
             if (rootLaunch) Root.startActivity(intent)?.let { "Could not start ${option.name}: $it" }
             else { ctx.startActivity(intent); null }
         } catch (e: Exception) {
             "Could not start ${option.name}: ${e.message}"
         }
-        if (err != null) { swapBack(s, prev); return err }
-        prev?.let { account(it) }
+        if (err != null) { swapBack(s, sw); return err }
+        sw.prev?.let { account(it) }
         io.github.marsinsanity.mainui.core.SessionLog.log("launch ${game.name} with ${option.ref} ($pkg)")
         library.addRecent(game, option.ref)
         if (option.isRetroArch) introduceKeyboard(s) else autoLoad(s)
@@ -145,19 +145,27 @@ class SessionManager(
      * Makes [s] the active session for a start that is about to happen, the paused game (the
      * new one may start in the same emulator) running again first. Returns the previous one.
      */
-    private fun swapIn(s: Session): Session? {
+    private fun swapIn(s: Session): Swapped {
         unpark()
-        val prev = synchronized(this) { active.also { active = s } }
+        val sw = synchronized(this) { Swapped(active, shownAt, loadPending).also { active = s } }
         loadPending = null
         shownAt = android.os.SystemClock.uptimeMillis()
         launchedPackages += s.pkg
         persist()
-        return prev
+        return sw
     }
 
-    /** The start of [s] failed: [prev] (still running) is the session again, paused again behind MainUI. */
-    private fun swapBack(s: Session, prev: Session?) {
-        synchronized(this) { if (active === s) active = prev }
+    /** What [swapIn] replaced: the previous session and its state, back if the start fails. */
+    private class Swapped(val prev: Session?, val shownAt: Long, val loadPending: Session?)
+
+    /**
+     * The start of [s] failed: the previous session (still running) is the session again, as it
+     * was (when it was shown, its pending auto load), paused again behind MainUI.
+     */
+    private fun swapBack(s: Session, sw: Swapped) {
+        synchronized(this) {
+            if (active === s) { active = sw.prev; shownAt = sw.shownAt; loadPending = sw.loadPending }
+        }
         persist()
         park()
     }
@@ -171,17 +179,17 @@ class SessionManager(
         val g = Game(SystemDef.ANDROID.id, null, label, pkg = pkg)
         val s = if (asGame) Session(g.key, g.systemId, null, label, null, pkg, intent.component?.className,
             System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME)) else null
-        val prev = s?.let { swapIn(it) }
+        val sw = s?.let { swapIn(it) }
         return try {
             ctx.startActivity(intent)
             launchedPackages += pkg
             if (s != null) {
-                prev?.let { account(it) }
+                sw?.prev?.let { account(it) }
                 library.addRecent(g, null)
             }
             null
         } catch (e: Exception) {
-            if (s != null) swapBack(s, prev)
+            if (s != null && sw != null) swapBack(s, sw)
             "Could not start $label: ${e.message}"
         }
     }
@@ -397,6 +405,12 @@ class SessionManager(
     /** True while [s]'s auto load hasn't happened yet (see [loadPending]). */
     fun autoLoadPending(s: Session?) = s != null && loadPending === s
 
+    /**
+     * [s] was loaded (or saved) by hand from the menu: what runs now is what the user wants kept,
+     * so automatic saves are made again (and a pending auto load doesn't load over it).
+     */
+    fun loadDone(s: Session?) { if (s != null && loadPending === s) { loadPending = null; io.github.marsinsanity.mainui.core.SessionLog.log("${s.name}: loaded / saved by hand, auto save on again") } }
+
     private fun autoLoad(s: Session) {
         val log = io.github.marsinsanity.mainui.core.SessionLog::log
         if (!settings.autoSaveOnExit) return
@@ -434,7 +448,12 @@ class SessionManager(
                     Thread.sleep(250)
                 }
             } else Thread.sleep(settle + 4000)
+            // MainUI's menu open just then: after it closes (the user may have loaded by hand meanwhile).
+            val waitFrom = now()
+            while (overlay()?.overlayShowing == true && active === s && loadPending === s && now() - waitFrom < 300_000) Thread.sleep(250)
+            if (now() - waitFrom > 250) Thread.sleep(1500) // the game running again
             val o = overlay()
+            if (loadPending !== s) { log("auto load ${s.name}: not needed, loaded or saved by hand"); return@Thread }
             if (active !== s || (o != null && (o.foregroundPackage != s.pkg || o.overlayShowing))) {
                 log("auto load ${s.name}: cancelled (in front: ${o?.foregroundPackage}, menu open: ${o?.overlayShowing})"); return@Thread
             }

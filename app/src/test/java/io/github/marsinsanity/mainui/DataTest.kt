@@ -1595,6 +1595,30 @@ class BugHuntFixesTest {
         assertTrue(img.isFile)
     }
 
+    @Test fun deletingOneDiscOfM3uTakesItsTracks() = withDir { dir ->
+        File(dir, "G1.cue").writeText("FILE \"G1.bin\" BINARY\n"); File(dir, "G1.bin").writeText("x")
+        File(dir, "G2.cue").writeText("FILE \"G2.bin\" BINARY\n"); File(dir, "G2.bin").writeText("x")
+        File(dir, "G.m3u").writeText("G1.cue\nG2.cue\n")
+        // The m3u (kept) names G1.cue, but G1.bin still goes with the deleted G1.cue.
+        assertEquals(setOf("G1.cue", "G1.bin"), io.github.marsinsanity.mainui.data.RomFiles.related(File(dir, "G1.cue")).map { it.name }.toSet())
+    }
+
+    @Test fun multiDiscZipKeepsItsDiscs() = withDir { dir ->
+        val zip = File(dir, "Tales.zip")
+        java.util.zip.ZipOutputStream(zip.outputStream()).use { z ->
+            for (n in listOf("Tales (Disc 2).rvz", "Tales (Disc 1).rvz")) { z.putNextEntry(java.util.zip.ZipEntry(n)); z.write(ByteArray(10)); z.closeEntry() }
+        }
+        val zi = io.github.marsinsanity.mainui.emu.ZipImages
+        assertEquals(listOf("Tales (Disc 1).rvz", "Tales (Disc 2).rvz"), zi.images(zip, setOf("rvz")).map { it.first })
+        val d2 = zi.unpack(zip, setOf("rvz"), { _, _ -> }, { false }, "Tales (Disc 2).rvz")
+        assertEquals("Tales (Disc 2).rvz", d2.name)
+        assertEquals(10L, d2.length())
+        // Deleting one unpacked disc keeps the zip (it holds the other disc).
+        assertEquals(listOf(d2), io.github.marsinsanity.mainui.data.RomFiles.related(d2, setOf("rvz")))
+        // Deleting the zip takes its unpacked discs.
+        assertEquals(setOf("Tales.zip", "Tales (Disc 2).rvz"), io.github.marsinsanity.mainui.data.RomFiles.related(zip, setOf("rvz")).map { it.name }.toSet())
+    }
+
     @Test fun megaCdSerialKeepsLeadingZero() {
         fun sector(header: String) = ("SEGADISCSYSTEM  " + " ".repeat(100) + header + " ".repeat(64)).toByteArray(Charsets.ISO_8859_1)
         assertEquals("T-06204", id.megaCdSerial(sector("GM T-06204 -00")))

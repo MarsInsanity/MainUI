@@ -35,8 +35,15 @@ object RomFiles {
         val types = unzipTypes.map { it.lowercase() }
         if (types.isNotEmpty()) {
             val ext = rom.extension.lowercase()
-            if (ext == "zip") types.mapNotNullTo(out) { sibling("$base.$it") }
-            else if (ext in types) sibling("$base.zip")?.let { out += it }
+            val images = if (ext == "zip") runCatching { io.github.marsinsanity.mainui.emu.ZipImages.images(rom, types.toSet()) }.getOrDefault(emptyList()) else emptyList()
+            if (ext == "zip") {
+                types.mapNotNullTo(out) { sibling("$base.$it") }
+                // A multi-disc zip's discs, unpacked beside it under their own names.
+                if (images.size > 1) images.mapNotNullTo(out) { (n, _) -> sibling(n.replace('\\', '/').substringAfterLast('/')) }
+            }
+            // An image unpacked from a zip goes with it, unless the zip holds other discs too.
+            else if (ext in types) sibling("$base.zip")?.takeIf { z ->
+                runCatching { io.github.marsinsanity.mainui.emu.ZipImages.imageCount(z, types.toSet()) }.getOrDefault(1) <= 1 }?.let { out += it }
         }
         // Keep what other games in the folder still use: what their descriptors name, and what those
         // name or come with (a Game.ccd kept beside the deleted Game.cue still needs Game.img).
@@ -47,7 +54,8 @@ object RomFiles {
         while (q.isNotEmpty()) {
             val o = q.removeFirst()
             if (!seen.add(canon(o))) continue
-            for (r in refs(o) + companions(o, dir, names)) if (shared.add(canon(r))) q += r
+            // (Never through the rom itself: it goes anyway, and what it names goes with it.)
+            for (r in refs(o) + companions(o, dir, names)) if (canon(r) != canon(rom) && shared.add(canon(r))) q += r
         }
         return out.filter { it == rom || canon(it) !in shared }
     }

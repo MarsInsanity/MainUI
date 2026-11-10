@@ -99,15 +99,17 @@ object Launch {
      * earlier launch unpacked beside the zip, or offer to unpack it now (once).
      */
     private fun startZipped(host: SceneHost, def: SystemDef, game: Game, zip: java.io.File) {
-        // Through the running-game check: the image may be the game running right now (resumed, not restarted).
-        ZipImages.unpacked(zip, def.unzip)?.let { Launch.game(host, imageGame(game, it)); return }
-        host.io({ runCatching { ZipImages.entry(zip, def.unzip) } }) { r ->
-            val e = r.getOrNull()
-            if (e == null) {
+        host.io({ runCatching { ZipImages.images(zip, def.unzip) } }) { r ->
+            val images = r.getOrNull().orEmpty()
+            if (images.isEmpty()) {
                 host.push(DialogScene(host, "Can't start game", r.exceptionOrNull()?.let { "${zip.name} can't be read: ${it.message}" }
                     ?: "${zip.name} holds no ${def.unzip.joinToString("/") { ".$it" }} image.", "OK", null))
                 return@io
             }
+            if (images.size > 1) { pickDisc(host, def, game, zip, images); return@io }
+            // Through the running-game check: the image may be the game running right now (resumed, not restarted).
+            ZipImages.unpacked(zip, def.unzip)?.let { Launch.game(host, imageGame(game, it)); return@io }
+            val e = images[0]
             val emu = MainUI.emulators.choose(def, game)?.name ?: "The emulator"
             val type = e.first.substringAfterLast('.').lowercase()
             host.push(DialogScene(host, "Unpack ${game.name}?",
@@ -116,7 +118,25 @@ object Launch {
         }
     }
 
-    private fun unpack(host: SceneHost, def: SystemDef, game: Game, zip: java.io.File) {
+    /**
+     * A zip with several discs: which one to play. Each disc is unpacked (once) beside the zip
+     * under its own name, so every disc can be reached and the zip, holding them all, stays.
+     */
+    private fun pickDisc(host: SceneHost, def: SystemDef, game: Game, zip: java.io.File, images: List<Pair<String, Long>>) {
+        val items = images.map { (name, size) ->
+            val f = ZipImages.discTarget(zip, name)
+            val done = f.isFile && (size <= 0 || f.length() == size)
+            io.github.marsinsanity.mainui.ui.UiItem(f.name, sub = if (done) "unpacked" else ZipImages.gb(size), onSelect = {
+                if (done) Launch.game(host, imageGame(game, f))
+                else host.push(DialogScene(host, "Unpack ${f.name}?",
+                    "MainUI unpacks this disc (${ZipImages.gb(size)}) next to the zip, once; the zip and its other discs stay.",
+                    "UNPACK", "CANCEL") { unpack(host, def, game, zip, name) })
+            })
+        }
+        host.push(io.github.marsinsanity.mainui.ui.PopMenuScene(host, "${game.name}: which disc?", items))
+    }
+
+    private fun unpack(host: SceneHost, def: SystemDef, game: Game, zip: java.io.File, entryName: String? = null) {
         val stop = java.util.concurrent.atomic.AtomicBoolean(false)
         val main = android.os.Handler(android.os.Looper.getMainLooper())
         val busy = BusyScene(host, "Unpacking ${game.name}...") { stop.set(true) }
@@ -126,7 +146,7 @@ object Launch {
                 ZipImages.unpack(zip, def.unzip, { done, total ->
                     busy.text = "Unpacking ${game.name}\n${ZipImages.gb(done)} / ${ZipImages.gb(total)}"
                     main.post { host.invalidate() }
-                }, { stop.get() })
+                }, { stop.get() }, entryName)
             }
         }) { r ->
             host.pop(busy)
@@ -136,9 +156,8 @@ object Launch {
                 return@io
             }
             val play = { Launch.game(host, imageGame(game, img)) }
-            // More than one disc in the zip: only one was unpacked, so the zip (the other discs) stays.
-            if (runCatching { ZipImages.imageCount(zip, def.unzip) }.getOrDefault(2) > 1) {
-                host.toast("${zip.name} holds more than one disc: it is kept", 3000)
+            // One disc of several: the zip (the other discs) stays.
+            if (entryName != null || runCatching { ZipImages.imageCount(zip, def.unzip) }.getOrDefault(2) > 1) {
                 play()
                 return@io
             }

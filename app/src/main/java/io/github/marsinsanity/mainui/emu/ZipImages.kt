@@ -27,10 +27,22 @@ object ZipImages {
             .maxByOrNull { it.size }?.let { it.name to it.size }
     }
 
-    /** How many images of [types] [zip] holds (a multi-disc zip has several: only one is unpacked). */
+    /** How many images of [types] [zip] holds (a multi-disc zip has several, see [discTarget]). */
     fun imageCount(zip: File, types: Set<String>): Int = ZipFile(zip).use { z ->
         z.entries().asSequence().count { !it.isDirectory && it.name.substringAfterLast('.').lowercase() in types }
     }
+
+    /** The images of [types] in [zip] (entry name, size), in name order: Disc 1, Disc 2... */
+    fun images(zip: File, types: Set<String>): List<Pair<String, Long>> = ZipFile(zip).use { z ->
+        z.entries().asSequence().filter { !it.isDirectory && it.name.substringAfterLast('.').lowercase() in types }
+            .map { it.name to it.size }.sortedBy { it.first.lowercase() }.toList()
+    }
+
+    /**
+     * Where a disc of a multi-disc zip goes: beside the zip under its own file name ("Game
+     * (Disc 2).rvz"), so each disc is a file of its own (Dolphin finds the next disc beside it).
+     */
+    fun discTarget(zip: File, entryName: String): File = File(zip.parentFile, entryName.replace('\\', '/').substringAfterLast('/'))
 
     /** The name the image gets beside the zip ("Halo.zip" holding "Halo (USA).iso" -> "Halo.iso"). */
     fun target(zip: File, entryName: String): File =
@@ -41,12 +53,13 @@ object ZipImages {
      * or failed unpack never leaves a broken image behind. Throws IOException with a message for
      * the user (no image inside, not enough space, stopped).
      */
-    fun unpack(zip: File, types: Set<String>, progress: (Long, Long) -> Unit, cancelled: () -> Boolean): File {
+    fun unpack(zip: File, types: Set<String>, progress: (Long, Long) -> Unit, cancelled: () -> Boolean, entryName: String? = null): File {
         ZipFile(zip).use { z ->
-            val e = z.entries().asSequence().filter { !it.isDirectory && it.name.substringAfterLast('.').lowercase() in types }
-                .maxByOrNull { it.size }
+            // [entryName]: that disc of a multi-disc zip, under its own name; else the (one) image.
+            val e = (if (entryName != null) z.getEntry(entryName)
+                else z.entries().asSequence().filter { !it.isDirectory && it.name.substringAfterLast('.').lowercase() in types }.maxByOrNull { it.size })
                 ?: throw IOException("${zip.name} holds no ${types.joinToString("/") { ".$it" }} image")
-            val dest = target(zip, e.name)
+            val dest = if (entryName != null) discTarget(zip, e.name) else target(zip, e.name)
             val dir = dest.parentFile!!
             val need = e.size.coerceAtLeast(0)
             if (need > 0 && dir.usableSpace < need + (64L shl 20))
