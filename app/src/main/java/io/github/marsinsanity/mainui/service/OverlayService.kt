@@ -155,6 +155,9 @@ class OverlayService : AccessibilityService() {
         if (gameInFront()) prewarm()
     }
 
+    /** MainUI's in-game menu (or popup) is showing or opening over the app in front. */
+    val overlayShowing: Boolean get() = overlay != null || opening
+
     private fun gameInFront(): Boolean {
         val s = MainUI.sessions.active ?: return false
         return foregroundPackage == s.pkg

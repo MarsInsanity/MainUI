@@ -326,7 +326,12 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
  * save/load hotkeys declared in emulators.json (root) for emulators that let
  * you bind hotkeys.
  */
-class StandaloneController(private val pkg: String, private val def: EmuDef?) : GameController {
+class StandaloneController(
+    private val pkg: String,
+    private val def: EmuDef?,
+    /** The save key reached the emulator (MainUI then loads that state when the game starts again). */
+    private val onSaved: () -> Unit = {},
+) : GameController {
     /** The emulator's id in emulators.json (null for Android games). */
     val emuId: String? get() = def?.id
 
@@ -364,7 +369,7 @@ class StandaloneController(private val pkg: String, private val def: EmuDef?) : 
         frozen = false
     }
 
-    override fun save(slot: Int) = keys(saveSpec)
+    override fun save(slot: Int) = keys(saveSpec).also { if (it) onSaved() }
     override fun load(slot: Int) = keys(loadSpec)
 
     override fun openNativeMenu(): Boolean {
@@ -380,7 +385,7 @@ class StandaloneController(private val pkg: String, private val def: EmuDef?) : 
     /** [autoSave]: the save key first; the game must be in front and running (see InGameMenuScene.exitGame). */
     override fun quit(autoSave: Boolean): Boolean {
         if (autoSave && states == StateSupport.HOTKEY && saveSpec != null) {
-            unpause(); keys(saveSpec); Thread.sleep(1200)
+            unpause(); if (keys(saveSpec)) onSaved(); Thread.sleep(1200)
         }
         return Root.forceStop(pkg)
     }
