@@ -138,11 +138,15 @@ class MainActivity : Activity() {
         MainUI.themes.resumeBgm()
         view.top()?.onResume()
         view.invalidate()
+        // A standalone emulator's game behind MainUI (Game Switcher, menus) is paused meanwhile.
+        MainUI.sessions.park()
     }
 
     override fun onPause() {
         super.onPause()
         resumed = false
+        // Whatever comes next (the game, another app, the screen going off): never a frozen game.
+        Thread({ MainUI.sessions.unpark() }, "unpark").apply { isDaemon = true }.start()
         leftForSession = MainUI.sessions.active != null
         // Back to a game that was running (Game Switcher, fallback menu): hand it the triggers /
         // sticks that moved here. Not for a game starting now: it reads the controller fresh.

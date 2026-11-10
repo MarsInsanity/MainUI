@@ -112,7 +112,7 @@ class SessionManager(
         if (option.installed == false) return "${option.name} is not installed"
         if (option.isRetroArch) runCatching { emulators.ensureRetroArchConfigured() }
         val intent = try { emulators.buildIntent(game, option) } catch (e: IllegalStateException) { return e.message }
-        endActive()
+        endActive() // (thaws a paused emulator first: the new game may start in the same one)
         return try {
             if (emulators.defFor(option.ref)?.rootLaunch == true) {
                 if (!Root.available()) return "${option.name} can only be started by MainUI with root"
@@ -133,6 +133,7 @@ class SessionManager(
 
     /** Launches an Android app / Android game. */
     fun launchApp(pkg: String, label: String, asGame: Boolean): String? {
+        unpark() // never leave a paused game frozen behind another app
         val apps = io.github.marsinsanity.mainui.MainUI.apps
         val intent = apps.launchIntent(pkg) ?: return "$label cannot be launched"
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
@@ -159,8 +160,57 @@ class SessionManager(
         persist()
     }
 
+    // ---- the game paused while MainUI is in front --------------------------------------
+    // Standalone emulators keep running behind MainUI's own screens (ARMSX2 plays on behind the
+    // Game Switcher, sound and all): Android only tells them they're in the background. So while
+    // MainUI's screen is in front with a standalone emulator's game behind it, the emulator is
+    // frozen like for the in-game menu (root), and thawed before anything brings it back or
+    // starts something else. RetroArch pauses itself (pause_nonactive); Android games are theirs.
+
+    private val parkLock = Any()
+    @Volatile private var parkWanted = false
+    /** (package, Freezer generation) of the game frozen while MainUI is in front. */
+    @Volatile private var parked: Pair<String, Int>? = null
+
+    /**
+     * MainUI's screen came to the front: freeze the active standalone emulator's game after
+     * [delayMs] (time for the emulator to take in that it's in the background), unless
+     * [unpark] comes first.
+     */
+    fun park(delayMs: Long = 800) {
+        val s = active ?: return
+        if (s.emuRef?.startsWith("sa:") != true || !settings.freezeStandalone || !Root.knownAvailable()) return
+        parkWanted = true
+        Thread({
+            Thread.sleep(delayMs)
+            synchronized(parkLock) {
+                if (!parkWanted || parked != null || active !== s) return@Thread
+                val def = s.emuRef?.let { emulators.defFor(it) }
+                if (Freezer.freeze(s.pkg, def?.freezeOnly)) {
+                    parked = s.pkg to Freezer.generation
+                    io.github.marsinsanity.mainui.core.SessionLog.log("paused ${s.name} (${s.pkg}) while MainUI is in front")
+                }
+            }
+        }, "park").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * Thaws the game [park] froze (and stops a pending [park]). Called before the game comes
+     * back, before anything is launched, when the session ends and when MainUI's screen leaves.
+     */
+    fun unpark() {
+        parkWanted = false
+        synchronized(parkLock) {
+            val p = parked ?: return
+            parked = null
+            Freezer.thaw(p.first, p.second)
+            io.github.marsinsanity.mainui.core.SessionLog.log("resumed ${p.first}")
+        }
+    }
+
     /** Ends the running session (play time accounting). Does not kill anything. */
     fun endActive() {
+        unpark()
         // Taken under the lock, so two callers at once (exit thread, onResume) count it once.
         val s = synchronized(this) { active.also { active = null } } ?: return
         val secs = (System.currentTimeMillis() - s.startedAt) / 1000
@@ -199,6 +249,7 @@ class SessionManager(
 
     private fun resumeSession(s: Session): Boolean {
         io.github.marsinsanity.mainui.core.SessionLog.log("resume ${s.name} (${s.pkg})")
+        unpark() // running again before it is in front
         if (Root.knownAvailable()) {
             val id = runCatching { Tasks.idOf(Root.Shell.run("dumpsys activity recents", 4000).out, s.pkg) }.getOrNull()
             if (id != null && runCatching {
