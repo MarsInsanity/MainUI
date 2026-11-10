@@ -365,7 +365,8 @@ def home_tile(glyph, focused):
     w, h = 156, 278
     im = card(w, h, focused, r=20, pad=6)
     g = canvas(w, h)
-    glyph(ImageDraw.Draw(g), w / 2, 112, 38, TEXT + (255,) if focused else GLYPH_N + (235,), 5.5)
+    if glyph is not None:  # None: the blank tile MainUI draws system icons on (bg-home-tile-*)
+        glyph(ImageDraw.Draw(g), w / 2, 112, 38, TEXT + (255,) if focused else GLYPH_N + (235,), 5.5)
     g = finish(g)
     if focused:
         shadow = g.filter(ImageFilter.GaussianBlur(4))
@@ -580,6 +581,9 @@ def main():
     for k, g in TILES.items():
         put(f"ic-{k}-n", home_tile(g, False))
         put(f"ic-{k}-f", home_tile(g, True))
+    # The same tile without a glyph: the Games row view draws each system's icon on it.
+    put("bg-home-tile-n", home_tile(None, False))
+    put("bg-home-tile-f", home_tile(None, True))
     put("bg-game-item-n", card(155, 170, False, r=16, pad=5))
     put("bg-game-item-f", card(155, 170, True, r=16, pad=5))
     put("icon-A-54", button_icon("A", (58, 150, 255)))

@@ -32,4 +32,21 @@ class LayoutTest {
         assertEquals(3, Gfx.dotsPerGroup(51, 24f, 610f))
         assertEquals(1, Gfx.dotsPerGroup(0, 24f, 610f))
     }
+
+    @Test fun longSystemNamesShrinkThenWrap() {
+        val fit = io.github.marsinsanity.mainui.ui.scenes.TileStrip.Companion::fitLabel
+        // A pretend font: 10 px per character at size 20, a tile room of 140 px.
+        val fits = { s: String, size: Float -> s.length * size / 2f <= 140f }
+        assertEquals(listOf("Games") to 28f, fit("Games", 28f, 20f, fits))
+        // 15 characters fit at 18 px only: too small for one line, so two lines.
+        val (lines, size) = fit("Nintendo Switch", 28f, 20f, fits)
+        assertEquals(listOf("Nintendo", "Switch"), lines)
+        assertEquals(23f, size, 0.01f)
+        // 13 characters still fit on one line once a little smaller.
+        assertEquals(listOf("PlayStation 2") to 21f, fit("PlayStation 2", 28f, 20f, fits))
+        // Split after a slash when there is no space.
+        assertEquals(listOf("Genesis/", "Megadrive"), fit("Genesis/Megadrive", 28f, 20f, fits).first)
+        // Nowhere to split: one line at the smallest size (scrolled when selected).
+        assertEquals(listOf("Supercalifragilistic") to 20f, fit("Supercalifragilistic", 28f, 20f, fits))
+    }
 }
