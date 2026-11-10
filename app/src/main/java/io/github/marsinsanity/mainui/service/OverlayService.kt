@@ -462,9 +462,12 @@ class OverlayService : AccessibilityService() {
     fun removeOverlay() {
         val v = overlay ?: return
         overlay = null
+        val moved = v.takeControllerAxes()
         runCatching { getSystemService(WindowManager::class.java).removeView(v) }
         v.destroy()
+        handBackControllerAxes(moved)
     }
+
 
     fun openGameSwitcher() {
         // Remember the current frame for the switcher, then bring MainUI forward.
@@ -515,6 +518,19 @@ class OverlayService : AccessibilityService() {
     }
 
     companion object {
+        /**
+         * Triggers / sticks that moved while MainUI had focus: once the game has it back, tell it
+         * where they are now, or a trigger let go in the menu (R2: RetroArch's fast-forward, sound
+         * muted) stays held in the game. Root only.
+         */
+        fun handBackControllerAxes(moved: Map<Int, FloatArray>, afterMs: Long = 250) {
+            if (moved.isEmpty() || !Root.knownAvailable()) return
+            Thread({
+                Thread.sleep(afterMs)
+                for ((id, values) in moved) runCatching { io.github.marsinsanity.mainui.core.VirtualKeys.axes(id, values) }
+            }, "axes-handback").apply { isDaemon = true }.start()
+        }
+
         private const val TAG = "MainUI.Overlay"
         /** Raw names of a handheld's HOME button (Linux KEY_HOMEPAGE, a gamepad's BTN_MODE). */
         val HOME_BUTTONS = setOf("KEY_HOMEPAGE", "BTN_MODE")

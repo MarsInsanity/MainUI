@@ -45,7 +45,7 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
 | 4 | **Scraper** | ScreenScraper (multi-threaded: uses the `maxthreads` your account allows, honours per-minute limits, CRC/MD5/SHA1 matching, region and language priority, 8 media types) plus box art without an account from **GameTDB**, **libretro thumbnails** and the **LaunchBox Games DB**, matched exactly by game id, CRC or the serial in the cartridge / disc header, then by strict title only. Saves images to the **SD card or internal storage** and updates `gamelist.xml`. Runs as a foreground service. |
 | 5 | **Emulator / core detection** | Detects RetroArch and its cores wherever they are: the `libretro_directory` from `retroarch.cfg`, `/data/data/<pkg>/cores`, the app's native libraries and split APKs (Play Store builds), re-checked when you come back to MainUI and before every launch. 25+ standalone emulators (ES-DE's launch rules). Per-system and per-game core selection like Onion (`SELECT` on a game > Core). **Missing cores are downloaded** from the libretro buildbot (same files as RetroArch's Online Updater) when you launch a game or pick one; *Get cores for my games* fetches one for every system that has roms but no core. Custom builds go in `MainUI/cores`. |
 | 6 | **Rom search** | Search tile in the games grid (or `Y` on most screens): on-screen keyboard (A types, B deletes, START or OK confirms, SELECT or CANCEL leaves without changes), results across every system and Android games. |
-| 7 | **Game Switcher** | Onion's GameSwitcher: full screen screenshots of recent games, `LEFT/RIGHT` browse, `A` resume, `X` remove, `Y` view mode, `SELECT` play time, `UP/DOWN` brightness, `gs-top-bar` / `gs-bottom-bar` / `gs-legend` / `lum0-10` theme art. |
+| 7 | **Game Switcher** | Onion's GameSwitcher: full screen screenshots of recent games, `LEFT/RIGHT` browse, `A` resume, `X` remove, `Y` view mode, `SELECT` play time, `UP/DOWN` brightness, `gs-top-bar` / `gs-bottom-bar` / `gs-legend` / `lum0-10` theme art. Like Onion: the footer shows **A RESUME / B BACK** and the game count (a theme's `gs-bottom-bar` replaces it), and the legend (Y view, X remove, SELECT time, START full screen) shows for 5 s on entering and after SELECT, drawn by MainUI when the theme has no `gs-legend`. |
 | 8 | **Apps menu** | Every launchable Android app with its icon. `Y` hides an app; hidden apps live in their own **Hidden apps** menu (with *Edit hidden apps...* to toggle any app). `SELECT` for app info, uninstall, move to Android games. |
 | 9 | **Theme Switcher + downloader** | Full screen previews, applies instantly, installs `.zip` themes dropped into a `Themes` folder. **Theme Downloader** browses the [OnionUI theme repository](https://github.com/OnionUI/Themes) on GitHub (200+ themes, the repository's featured ones first) with previews: `A` get, `Y` get and apply, `START` refresh. |
 | 10 | **Android system** | An "Android" system for native games. Add games by hand or let MainUI sort apps that declare themselves games into it automatically on install. |
@@ -162,10 +162,11 @@ Differences from a Miyoo Mini, due to the screen:
 | | Y | Search |
 | | START (grid) | Rescan roms |
 | Game list | Y | Toggle favorite |
+| | X | Search this system's games |
 | | SELECT | Game options: favorite, core for this game (*Default* follows the system's core), system core, scrape, info, **Delete ROM** (asks first; also deletes the files that belong to the game: `.cue` / `.gdi` tracks, `.m3u` discs, CloneCD / Alcohol companions, the zip an image was unpacked from, its box art and gamelist entry, never a track another game uses) |
 | Game Switcher | A / B / X / Y | Resume / back / remove / view mode |
 | | SELECT / UP / DOWN | Play time / brightness |
-| In game | Home | In-game menu, opened on the press itself (hold: Game Switcher) |
+| In game | Home | In-game menu, opened on the press itself (hold: Game Switcher). A trigger or stick that moves while MainUI's menu or Game Switcher has focus is handed back to the game afterwards (root), so a held R2 doesn't stay "held" in it (RetroArch: fast-forward, muted). |
 | Anywhere | hold Back | Process manager popup (Settings > Controls > Hold Back) |
 | Touch | tap / drag / swipe / long press | Select, tap a hint to use it / scroll / next page / SELECT |
 
