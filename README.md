@@ -51,7 +51,7 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
 | 10 | **Android system** | An "Android" system for native games. Add games by hand or let MainUI sort apps that declare themselves games into it automatically on install. |
 | 11 | **Process manager** | The apps that are running, one row per app, with memory and CPU; the current game and apps MainUI launched come first. Only apps you open yourself are listed: System UI, Google Play services, the keyboard, the launcher, accessibility services and other parts of Android are never offered. Switch to one, force stop one, or stop everything MainUI launched (root). **Hold Back anywhere** for a compact version: a rounded panel over the app in front (which stays visible around it), with A switch, X twice to stop, Y refresh, B or a tap outside to close. |
 | 12 | **In-game menu** | Press **Home** in a game: the game is paused, then a Miyoo style menu appears over it (one press, flush with the top of the screen) with **Continue, Save / Load, Native Menu, Game Switcher, Exit Game**. Hold Home for the Game Switcher; both are configurable, also for Home inside MainUI. See [Emulators](#emulators) for what Save/Load can do per emulator. |
-| 13 | **App Store** | Controller driven client for F-Droid compatible repositories (F-Droid and IzzyOnDroid by default, add your own with `?fingerprint=`): signed index verification, search, categories, updates, install (silent with root, otherwise Android's installer). Downloads (indexes, APKs, cores, themes) use up to 6 parallel connections when the server supports ranges, an unchanged index is not downloaded again, repositories refresh at the same time, and the mirrors listed in a repository's signed index are used if the repository itself fails. Its **Emulators** section lists every emulator MainUI can launch, what it runs, and installs it from the best source: an F-Droid repository (RetroArch, PPSSPP, Dolphin...), the project's latest GitHub release (Azahar, Flycast, melonDS, MAME4droid, hakuX, Vita3K, ARMSX3, RPCSX; when a release has builds per Android version or CPU level, the newest one this device can run), or retroarch.com; otherwise it opens the Google Play page or website. Launching a game whose emulator is missing offers its page. |
+| 13 | **App Store** | Controller driven client for F-Droid compatible repositories (F-Droid and IzzyOnDroid by default, add your own with `?fingerprint=`): signed index verification, search, categories, updates, install (silent with root, otherwise Android's installer). Downloads (indexes, APKs, cores, themes) use up to 6 parallel connections when the server supports ranges, an unchanged index is not downloaded again, repositories refresh at the same time, and the mirrors listed in a repository's signed index are used if the repository itself fails. Its **Emulators** section lists every emulator MainUI can launch, what it runs, and installs it from the best source: an F-Droid repository (RetroArch, PPSSPP, Dolphin...), the project's latest GitHub release (Azahar, Flycast, melonDS, MAME4droid, hakuX, Vita3K, ARMSX2, ARMSX3, RPCSX, PICO-8; when a release has builds per Android version or CPU level, the newest one this device can run), or retroarch.com; otherwise it opens the Google Play page or website. Launching a game whose emulator is missing offers its page. |
 | 14 | **About** | Device, chipset, CPU, display, RAM and storage use, battery, MainUI / Android / kernel versions, root and RetroArch status. *Build number* opens Developer options (turning them on first with root). |
 | 15 | **Touch** | Tap to select / open, tap the button hints (`B BACK` etc.), drag to scroll, swipe to change page. |
 
@@ -208,6 +208,7 @@ exposes:
 | M64Plus FZ | N64 (`n64`) | Hotkeys F1 / F2 |
 | Dolphin MMJR, Citra MMJ, Redream, Yaba Sanshiro 2, MAME4droid | | Through the emulator's own menu |
 | Eden, Kenji-NX | Switch (`switch`) | No save states |
+| PICO-8 ([pico8-android](https://github.com/Macs75/pico8-android): runs your own PICO-8 Raspberry Pi zip from lexaloffle.com) | PICO-8 (`pico-8/carts`, or ES-DE's `pico8`; `.p8`, `.p8.png`) | No save states (PICO-8 has none) |
 
 **No Android emulator offers a remote save/load command.** RetroArch has one (network commands),
 but the official Android builds are compiled without it (checked in 1.22.2). Keys injected the usual
@@ -260,7 +261,9 @@ the ROMs folder (`roms`), so give the emulator that one.
    can't acknowledge it and would be reported as *not responding* after 5 s, so MainUI lets the
    game's main thread run just long enough to handle it (until it is back in its event loop, usually
    a few milliseconds) and freezes it again. RetroArch is also set to pause itself on focus loss.
-   Freezing goes through one persistent root shell, so it takes milliseconds.
+   Freezing goes through one persistent root shell, so it takes milliseconds. An emulator that runs
+   the game in helper programs of its own has just those frozen (`"freeze"` in `emulators.json`):
+   PICO-8 runs it in `proot` / `pico8_64`, and freezing those is how the app pauses itself.
 3. Every way out of the menu (Continue, Native Menu, Save, Load, Game Switcher, Home, the overlay
    service stopping) resumes the game. The frozen package is also remembered on disk and thawed when
    MainUI or the service starts, so a crash can't leave a game frozen.
