@@ -166,6 +166,7 @@ object Root {
         }.getOrDefault(false)
         if (!hasBinary) {
             cached = false
+            remember(false)
             return false
         }
         val r = run(rootArgv("id"), 15)
@@ -176,11 +177,27 @@ object Root {
             detectNamespace()
             cached = true
         }
+        remember(ok)
         return ok
     }
 
-    /** Last known state without spawning a process. */
-    fun knownAvailable(): Boolean = cached == true
+    private const val PREF_ROOT = "root_seen"
+
+    /** Root as the last run of MainUI found it (MainUI expects a rooted handheld). */
+    private val lastRun: Boolean by lazy {
+        runCatching { io.github.marsinsanity.mainui.MainUI.settings.prefs.getBoolean(PREF_ROOT, false) }.getOrDefault(false)
+    }
+
+    private fun remember(ok: Boolean) {
+        runCatching { io.github.marsinsanity.mainui.MainUI.settings.prefs.edit().putBoolean(PREF_ROOT, ok).apply() }
+    }
+
+    /**
+     * Last known state without spawning a process: this run's check, or until there has been
+     * one, the last run's. So a game started right after MainUI (re)starts gets the root
+     * features (keyboard hotkeys, auto load, freezing) instead of quietly going without them.
+     */
+    fun knownAvailable(): Boolean = cached ?: lastRun
 
 
     /** Makes sure the namespace is known before a root command runs. */

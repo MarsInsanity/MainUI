@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import io.github.marsinsanity.mainui.core.Root
 import io.github.marsinsanity.mainui.core.Settings
 import io.github.marsinsanity.mainui.core.Storage
 import io.github.marsinsanity.mainui.data.Apps
@@ -63,6 +64,15 @@ class App : Application() {
         MainUI.themes.reloadSounds()
 
         io.github.marsinsanity.mainui.emu.Freezer.thawAll()
+        // Root first (MainUI is made for rooted handhelds): the root shell and the virtual
+        // keyboard are ready before the first game, so its first Save / Load doesn't wait ~1 s
+        // for them, and RetroArch can see the keyboard from the start.
+        Thread({
+            if (Root.available()) {
+                Root.Shell.run("true", 5000)
+                io.github.marsinsanity.mainui.core.VirtualKeys.warmUp()
+            }
+        }, "root-warmup").apply { isDaemon = true }.start()
         MainUI.worker.execute {
             MainUI.emulators.refresh()
             MainUI.apps.reconcileNewInstalls(MainUI.emulators)

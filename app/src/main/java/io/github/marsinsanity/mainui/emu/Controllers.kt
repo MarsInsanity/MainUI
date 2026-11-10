@@ -203,8 +203,42 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     override fun prepare() {
         if (reachable == null) reachable = probe(rememberNo = true)
         // Official builds: keyboard hotkeys through MainUI's virtual keyboard (needs root).
-        if (reachable == false && Root.available()) io.github.marsinsanity.mainui.core.VirtualKeys.warmUp()
+        if (reachable == false && Root.available()) {
+            io.github.marsinsanity.mainui.core.VirtualKeys.warmUp()
+            snapshotStates()
+        }
     }
+
+    /** The game's state files as they were before a Save (see [saveByKey]), read in the background. */
+    private class StateFiles(val base: String, val dirs: List<String>, val find: String, val files: Map<String, String>)
+    @Volatile private var stateFiles: StateFiles? = null
+    @Volatile private var snapshot: Thread? = null
+
+    /**
+     * Reads the game's state files now, while the menu is open (nothing saves meanwhile), so a
+     * Save doesn't wait for it before pressing F2.
+     */
+    private fun snapshotStates() {
+        val p = pkg ?: return
+        val r = rom ?: return
+        if (snapshot != null) return
+        snapshot = Thread({ stateFiles = runCatching { readStates(p, r) }.getOrNull() }, "ra-states").apply { isDaemon = true; start() }
+    }
+
+    private fun readStates(p: String, r: String): StateFiles {
+        val cfg = Root.readFile(MainUI.emulators.raConfigPath(p))
+        val base = java.io.File(r).nameWithoutExtension
+        val dirs = RetroArchCores.stateDirs(cfg, p, java.io.File(r).parent)
+        val find = "find ${dirs.joinToString(" ") { Root.q(it) }} -maxdepth 3 -type f " +
+            "-name ${Root.q(RetroArchCores.globEscape(base) + ".state*")} -exec stat -c '%Y %s %n' {} + 2>/dev/null"
+        return StateFiles(base, dirs, find, listStates(find, base))
+    }
+
+    /** "<mtime> <size>" by path of the game's state files (not their thumbnails). */
+    private fun listStates(find: String, base: String): Map<String, String> =
+        Root.Shell.run(find, 5000).out.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            .associate { l -> l.split(' ', limit = 3).let { it.getOrElse(2) { "" } to "${it[0]} ${it.getOrElse(1) { "" }}" } }
+            .filterKeys { path -> RetroArchCores.stateSlotOf(path.substringAfterLast('/'), base) != null }
 
     /** Right after the game appears RetroArch may not listen yet: a "no" isn't remembered then. */
     override fun warmUp() {
@@ -301,14 +335,16 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
 
     /**
      * Presses RetroArch's keyboard hotkey [key] (F1 menu, F2 save state, F4 load state) on MainUI's
-     * virtual keyboard, held long enough to be seen on a frame. Ctrl is tapped first: RetroArch
-     * forgets its keyboards whenever its input restarts and ignores a new keyboard's first key.
+     * virtual keyboard, held long enough to be seen on a frame. RetroArch ignores a new keyboard's
+     * first key, so Ctrl is tapped first the first time for a RetroArch process (and keyboard).
      *
      * Not as the handheld's controller: since Android 12 an injected event arrives from device -1
      * ("Virtual") whatever device it names, and RetroArch made that a new controller with a port.
      */
     private fun hotkey(key: String): Boolean {
-        val primed = io.github.marsinsanity.mainui.core.VirtualKeys.primeFor(pkg, always = true)
+        // Introduced once per RetroArch process and keyboard (when the game started, see
+        // SessionManager.introduceKeyboard), not before every key: that cost ~0.4 s each time.
+        val primed = io.github.marsinsanity.mainui.core.VirtualKeys.primeFor(pkg)
         val ok = io.github.marsinsanity.mainui.core.VirtualKeys.press(key, 250)
         io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch hotkey $key on MainUI Keyboard: ${if (ok) "pressed" else "FAILED"}${if (primed) "" else " (not primed)"}")
         return ok
@@ -332,17 +368,14 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
         val r = rom
         if (p == null || r == null) return hotkey("F2").also { if (!it) saveProblem = "Couldn't press RetroArch's save key (needs root)" }
         val log = io.github.marsinsanity.mainui.core.SessionLog::log
-        val cfg = Root.readFile(MainUI.emulators.raConfigPath(p))
-        val base = java.io.File(r).nameWithoutExtension
-        val dirs = RetroArchCores.stateDirs(cfg, p, java.io.File(r).parent)
-        val find = "find ${dirs.joinToString(" ") { Root.q(it) }} -maxdepth 3 -type f " +
-            "-name ${Root.q(RetroArchCores.globEscape(base) + ".state*")} -exec stat -c '%Y %s %n' {} + 2>/dev/null"
-        // "<mtime> <size> <path>" of the game's state files (not their thumbnails).
-        fun states(): Map<String, String> = Root.Shell.run(find, 5000).out.lines().map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .associate { l -> l.split(' ', limit = 3).let { it.getOrElse(2) { "" } to "${it[0]} ${it.getOrElse(1) { "" }}" } }
-            .filterKeys { path -> RetroArchCores.stateSlotOf(path.substringAfterLast('/'), base) != null }
-        val before = states()
+        // Read while the menu was open when possible (see snapshotStates); taken once.
+        snapshot?.join(5000)
+        val known = stateFiles.also { stateFiles = null; snapshot = null }
+        val sf = known ?: readStates(p, r)
+        val base = sf.base
+        val dirs = sf.dirs
+        fun states() = listStates(sf.find, base)
+        val before = sf.files
         repeat(2) { attempt ->
             if (!hotkey("F2")) { saveProblem = "Couldn't press RetroArch's save key (needs root)"; return false }
             val t0 = android.os.SystemClock.uptimeMillis()

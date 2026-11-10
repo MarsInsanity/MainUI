@@ -231,6 +231,15 @@ not affected. Without root, *Native Menu* sends Back. For the
 "hotkeys" emulators MainUI closes the menu, unpauses the game and presses the key with root, on its
 virtual keyboard (F keys and Shift / Ctrl / Alt), so the emulator sees the same device every time.
 
+**Save / Load are pressed quickly:** 150 ms after the menu closes for RetroArch, 250 ms for
+standalone emulators (counted from when the frozen game runs again; a key sent to a frozen game
+arrives pressed and released at once and can be missed), 450 ms from the fallback menu. Android
+hands the game its focus back within a frame or two and holds keys for it meanwhile. RetroArch's
+state files are read while the menu is open, and its keyboard is introduced once per RetroArch run
+(when the game starts), not before every key. MainUI is root-first: it checks root, opens its root
+shell and creates its virtual keyboard as soon as it starts, and remembers root from its last run,
+so a game started right after MainUI (re)starts gets every root feature at once.
+
 **Save / load keys...** in the in-game menu sets those keys for any standalone emulator, including
 ones MainUI knows no keys for: *Save key* and *Load key* change with left / right (F1-F12, alone or
 with Shift, Ctrl or Alt) and are kept per emulator; once both are set, the menu gets **Save** and
