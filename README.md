@@ -284,7 +284,14 @@ the ROMs folder (`roms`), so give the emulator that one.
    the game in helper programs of its own has just those frozen (`"freeze"` in `emulators.json`):
    PICO-8 runs it in `proot` / `pico8_64`, and freezing those is how the app pauses itself.
 3. Every way out of the menu (Continue, Native Menu, Save, Load, Game Switcher, Home, the overlay
-   service stopping) resumes the game. The frozen package is also remembered on disk and thawed when
+   service stopping) resumes the game. **Behind MainUI's own screen** (the Game Switcher, MainUI's
+   menus) a standalone emulator's game is paused the same way: emulators like ARMSX2 keep playing
+   in the background, sound and all, since Android only tells them they're not in front. It is
+   frozen 0.8 s after MainUI's screen appears (once the emulator has taken in that it's in the
+   background, and after the Game Switcher's save) and thawed before it is brought back, before
+   any other game or app is started, when the session ends, and whenever MainUI's screen goes
+   (another app, the screen turning off). RetroArch pauses itself; Android games are left alone.
+   Follows the *Freeze standalone emulators (root)* setting like the menu does. The frozen package is also remembered on disk and thawed when
    MainUI or the service starts, so a crash can't leave a game frozen.
 4. *Native Menu* opens the emulator's own menu (Back, or `MENU_TOGGLE` where RetroArch has commands).
    *Exit Game* force stops the emulator with root (RetroArch flushes SRAM saves every 10 s once
