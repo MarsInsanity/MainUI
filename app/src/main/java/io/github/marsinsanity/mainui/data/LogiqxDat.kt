@@ -101,7 +101,8 @@ class LogiqxDat(val file: File) : MetaLookup {
         loadedMtime = file.lastModified()
         if (!file.isFile) return this
         // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
-        val raw = runCatching { GameListXml.readXmlText(file) }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
+        var lossy = false
+        val raw = runCatching { GameListXml.readXmlText(file) { lossy = true } }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
         if (GameListXml.isEmptyXml(raw)) return this
         doctype = doctypeOf(raw)
         val p = GameListXml.newParser()
@@ -174,6 +175,7 @@ class LogiqxDat(val file: File) : MetaLookup {
             if (!sawRoot) throw org.xmlpull.v1.XmlPullParserException("no XML elements in it")
             // Cut short (a copy that didn't finish): the parser just stops, with elements still open.
             if (depth != 0) throw org.xmlpull.v1.XmlPullParserException("unexpected end of file")
+            if (lossy) parseError = "not valid UTF-8 (read, but not rewritten)"
         } catch (e: Exception) {
             parseError = e.message ?: e.javaClass.simpleName
             runCatching { android.util.Log.w("MainUI.Logiqx", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
@@ -347,7 +349,8 @@ class LogiqxDat(val file: File) : MetaLookup {
             files.firstOrNull { it.isFile && it.name.equals("${dir.name}.mainui.dat", true) }?.let { return it }
             // Only XML DATs: a clrmamepro text DAT or a .dat rom image (Naomi) is no metadata of ours.
             fun head(f: File, n: Int) = runCatching { f.bufferedReader().use { r -> CharArray(n).let { b -> String(b, 0, r.read(b).coerceAtLeast(0)) } } }.getOrDefault("")
-            fun isXmlDat(f: File) = head(f, 4096).let { it.contains("<datafile") || it.contains("<mame") || it.contains("<softwarelist") || GameListXml.isEmptyXml(it) && f.length() < 4096 }
+            // (MAME's -listxml has a 7 KB inline DTD before its <mame> root.)
+            fun isXmlDat(f: File) = head(f, 16384).let { it.contains("<datafile") || it.contains("<mame") || it.contains("<softwarelist") || GameListXml.isEmptyXml(it) && f.length() < 4096 }
             files.firstOrNull { it.isFile && it.name.equals("${dir.name}.dat", true) && isXmlDat(it) }?.let { return it }
             files.filter { it.isFile && it.extension.equals("dat", true) && !it.name.equals("${dir.name}.dat", true) && it.length() < 512L * 1024 * 1024 }
                 .sortedBy { it.name.length }.firstOrNull { isXmlDat(it) }?.let { return it }

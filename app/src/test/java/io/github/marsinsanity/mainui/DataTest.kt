@@ -1619,6 +1619,17 @@ class BugHuntFixesTest {
         assertEquals(setOf("Tales.zip", "Tales (Disc 2).rvz"), io.github.marsinsanity.mainui.data.RomFiles.related(zip, setOf("rvz")).map { it.name }.toSet())
     }
 
+    @Test fun mostlyUtf8GamelistIsReadButNeverRewritten() = withDir { dir ->
+        val good = "<?xml version=\"1.0\"?>\n<gameList><game><path>./p.gb</path><name>Pok\u00e9mon \u30dd\u30b1\u30e2\u30f3</name><desc>it\u0092s</desc></game></gameList>"
+        // UTF-8 with a BOM and one stray Windows byte (0x92) in a description.
+        val bytes = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) +
+            good.replace("\u0092", "\u0001").toByteArray(Charsets.UTF_8).map { if (it == 1.toByte()) 0x92.toByte() else it }.toByteArray()
+        File(dir, "gamelist.xml").writeBytes(bytes)
+        val gl = GameListXml(dir).load()
+        assertEquals("Pok\u00e9mon \u30dd\u30b1\u30e2\u30f3", gl.get(File(dir, "p.gb"))?.name)
+        assertTrue(gl.parseError != null) // read, never written back with the replacement character
+    }
+
     @Test fun megaCdSerialKeepsLeadingZero() {
         fun sector(header: String) = ("SEGADISCSYSTEM  " + " ".repeat(100) + header + " ".repeat(64)).toByteArray(Charsets.ISO_8859_1)
         assertEquals("T-06204", id.megaCdSerial(sector("GM T-06204 -00")))
