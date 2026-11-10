@@ -49,4 +49,13 @@ class LayoutTest {
         // Nowhere to split: one line at the smallest size (scrolled when selected).
         assertEquals(listOf("Supercalifragilistic") to 20f, fit("Supercalifragilistic", 28f, 20f, fits))
     }
+
+    @Test fun drawnTilesUseTheThemeGeneratorsColours() {
+        // MainUI's accent #3A96FF gives the generator's tile colours (within rounding).
+        val a = 0xFF3A96FF.toInt()
+        fun rgb(c: Int) = Triple((c shr 16) and 0xFF, (c shr 8) and 0xFF, c and 0xFF)
+        assertEquals(Triple(63, 150, 255), rgb(io.github.marsinsanity.mainui.ui.tileTop(a)))
+        assertEquals(Triple(20, 62, 150), rgb(io.github.marsinsanity.mainui.ui.tileBottom(a)))
+        assertEquals(Triple(85, 220, 255), rgb(io.github.marsinsanity.mainui.ui.tileHighlight(a)))
+    }
 }

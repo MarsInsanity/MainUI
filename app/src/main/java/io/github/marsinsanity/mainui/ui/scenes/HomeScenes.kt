@@ -230,6 +230,9 @@ class TileStrip {
                 val box = w * 0.66f
                 val icon = HomeScenes.tileIcon(g, t, sel)
                 when {
+                    // Selected: with the soft glow the main menu's selected glyph has.
+                    icon != null && sel -> g.bmpFitGlow(icon, cx - box / 2, cy - box / 2, box, box,
+                        io.github.marsinsanity.mainui.ui.withAlpha(io.github.marsinsanity.mainui.ui.tileHighlight(g.theme.accent), 150))
                     icon != null -> g.bmpFit(icon, cx - box / 2, cy - box / 2, box, box)
                     t.glyph == "game" -> g.systemTile(t.short, cx - box / 2, cy - box * 0.38f, box, box * 0.76f, sel)
                     else -> g.glyph(t.glyph, cx, cy, w * 0.26f, if (sel) Color.WHITE else Color.argb(200, 255, 255, 255))
