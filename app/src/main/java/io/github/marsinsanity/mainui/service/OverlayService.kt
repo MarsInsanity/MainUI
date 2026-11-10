@@ -71,11 +71,18 @@ class OverlayService : AccessibilityService() {
     private var holdHandledAt = -10_000L
     /** A hold ran before Android delivered that press's HOME: ignore it when it comes (until then). */
     private var lateHomeUntil = 0L
+    /** [lateHomeUntil] waits for the raw button's release, which sets the real window. */
+    private var lateHomeOnRelease = false
+    /** Leaving for the Game Switcher (its save runs first): HOME waits until then. */
+    @Volatile private var leavingUntil = 0L
 
     private fun holdRan(now: Long) {
         holdHandledAt = now
         longFired = true
-        lateHomeUntil = if (homeState == null) now + 2500 else 0L
+        // Android only gets HOME when the button is released on some handhelds, however long it
+        // was held: ignored until shortly after the release, not for a fixed time after the hold.
+        lateHomeOnRelease = homeState == null
+        lateHomeUntil = if (homeState == null) now + 60_000 else 0L
     }
     private val longPress = Runnable { homeHeld(raw = false) }
     private val rawLongPress = Runnable { homeHeld(raw = true) }
@@ -87,7 +94,7 @@ class OverlayService : AccessibilityService() {
      */
     private fun homeHeld(raw: Boolean) {
         val now = SystemClock.uptimeMillis()
-        if (now - holdHandledAt < 1500) return
+        if (now - holdHandledAt < 1500 || now < leavingUntil) return
         if (foregroundPackage == packageName && overlay == null && !opening) {
             // MainUI in front: homeInMainUI handles it; the raw button helps where HOME comes late.
             if (raw && MainUI.settings.homeHoldInMainUI == "gs") {
@@ -118,6 +125,10 @@ class OverlayService : AccessibilityService() {
     private fun rawHome(down: Boolean) {
         main.removeCallbacks(rawLongPress)
         if (down) main.postDelayed(rawLongPress, MainUI.settings.homeHoldMs.toLong().coerceIn(200, 3000))
+        else if (lateHomeOnRelease) {
+            lateHomeOnRelease = false
+            if (lateHomeUntil != 0L) lateHomeUntil = SystemClock.uptimeMillis() + 1500
+        }
     }
 
     private val backHold = Runnable {
@@ -130,6 +141,12 @@ class OverlayService : AccessibilityService() {
         instance = this
         Freezer.thawAll()
         updateHotkeyListener()
+        // Restarted (MainUI's process came back) with a game in front: it sends no window event
+        // until it changes windows, so ask which app is in front instead of waiting for one.
+        if (MainUI.sessions.active != null && Root.knownAvailable()) Thread {
+            val fg = runCatching { Root.foregroundPackage() }.getOrNull()
+            main.post { if (foregroundPackage == null && fg != null) { foregroundPackage = fg; if (gameInFront()) prewarm() } }
+        }.start()
     }
 
     override fun onDestroy() {
@@ -149,15 +166,22 @@ class OverlayService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName) {
             // MainUI's own activity counts as "in front"; its overlay windows don't.
-            if (event.className?.toString() == MainActivity::class.java.name) foregroundPackage = pkg
+            if (event.className?.toString() == MainActivity::class.java.name) { foregroundPackage = pkg; leavingUntil = 0L }
             return
         }
         if (pkg == "com.android.systemui" || pkg.contains("inputmethod")) return
+        // Any keyboard (SwiftKey, ...): it comes and goes over the game, which sends no event when
+        // it is back, so the keyboard must never count as the app in front.
+        if (pkg != foregroundPackage && (event.className?.toString() == "android.inputmethodservice.SoftInputWindow" || isKeyboard(pkg))) return
         if (pkg != foregroundPackage) Log.d(TAG, "foreground: $pkg")
         foregroundPackage = pkg
         lastWindowChangeAt = SystemClock.uptimeMillis()
         if (gameInFront()) prewarm()
     }
+
+    private fun isKeyboard(pkg: String): Boolean = runCatching {
+        getSystemService(android.view.inputmethod.InputMethodManager::class.java).enabledInputMethodList.any { it.packageName == pkg }
+    }.getOrDefault(false)
 
     /** MainUI's in-game menu (or popup) is showing or opening over the app in front. */
     val overlayShowing: Boolean get() = overlay != null || opening
@@ -177,7 +201,12 @@ class OverlayService : AccessibilityService() {
         warmed = s
         Thread({
             runCatching {
-                if (Root.available()) Root.Shell.run("true", 5000)
+                if (Root.available()) {
+                    Root.Shell.run("true", 5000)
+                    // Root granted after the service started, or getevent gone: the raw button
+                    // listener (menu combo, HOME hold) starts now.
+                    if (hotkeys?.alive != true) main.post { if (instance === this) updateHotkeyListener() }
+                }
                 MainUI.sessions.controllerFor(s).warmUp()
             }
         }, "menu-prewarm").apply { isDaemon = true }.start()
@@ -222,10 +251,14 @@ class OverlayService : AccessibilityService() {
     private fun homeDown(): HomePress {
         main.removeCallbacks(longPress)
         // Android's HOME for a button that was just held (and handled through the raw button).
-        if (SystemClock.uptimeMillis() < lateHomeUntil) { lateHomeUntil = 0L; return HomePress.IGNORE }
+        if (SystemClock.uptimeMillis() < lateHomeUntil) { lateHomeUntil = 0L; lateHomeOnRelease = false; return HomePress.IGNORE }
+        // The save before the Game Switcher is running: another press must not open the menu
+        // behind it (the menu would then show up over the Game Switcher).
+        if (SystemClock.uptimeMillis() < leavingUntil) return HomePress.IGNORE
         if (opening && SystemClock.uptimeMillis() - openingSince > 10_000) {
             Log.w(TAG, "menu still opening after 10 s, giving up on it")
             opening = false
+            openId++ // its late arrival is dropped (and its pause undone)
         }
         if (overlay != null) return HomePress.CLOSE
         // Its own press opens the menu; a second press while it opens must not close it again.
@@ -233,7 +266,10 @@ class OverlayService : AccessibilityService() {
         if (foregroundPackage == packageName) return HomePress.MAINUI
         val press = MainUI.settings.homePress
         val hold = MainUI.settings.homeHold
-        if (!gameInFront() || (press == "home" && hold == "home")) {
+        // On the lock screen (over a game): the menu would show and save the lock screen, and
+        // offer Exit / Save / Load without unlocking.
+        val locked = runCatching { getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked }.getOrDefault(false)
+        if (locked || !gameInFront() || (press == "home" && hold == "home")) {
             Log.d(TAG, "HOME passed through (fg=$foregroundPackage, session=${MainUI.sessions.active?.pkg})")
             return HomePress.PASS
         }
@@ -311,6 +347,7 @@ class OverlayService : AccessibilityService() {
     private fun leaveForSwitcher(settleMs: Long) {
         val s = MainUI.sessions.active
         if (s == null || !MainUI.settings.autoSaveOnExit) { startGameSwitcher(); return }
+        markLeaving()
         worker.execute {
             runCatching {
                 val c = MainUI.sessions.controllerFor(s)
@@ -318,9 +355,9 @@ class OverlayService : AccessibilityService() {
                 if (MainUI.sessions.autoLoadPending(s)) {
                     // Its last save isn't loaded yet: saving the fresh start would overwrite it.
                     io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: ${s.name} not saved, its last save wasn't loaded yet")
-                } else if (c.states == io.github.marsinsanity.mainui.emu.StateSupport.HOTKEY) {
+                } else if (c.savesToResume) {
                     if (settleMs > 0) Thread.sleep(settleMs)
-                    val ok = c.save(0)
+                    val ok = c.saveToResume()
                     io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save for ${s.name}: ${if (ok) "done" else "FAILED ${c.saveProblem ?: ""}"}")
                     // RetroArch's save is checked (written and copied by now); others get time to write.
                     if (ok && c !is io.github.marsinsanity.mainui.emu.RetroArchController) Thread.sleep(800)
@@ -332,6 +369,9 @@ class OverlayService : AccessibilityService() {
             main.post { startGameSwitcher() }
         }
     }
+
+    /** The in-game menu leaves for the Game Switcher (saving first): HOME waits until MainUI is in front. */
+    fun markLeaving() { leavingUntil = SystemClock.uptimeMillis() + 30_000 }
 
     /** Runs one of the configurable HOME actions. */
     fun perform(action: String) {
@@ -354,6 +394,9 @@ class OverlayService : AccessibilityService() {
         openingSince = SystemClock.uptimeMillis()
         val id = ++openId
         Log.d(TAG, "showing in-game menu for ${s.name}")
+        // The notification shade over the game would be the menu's background and the game's
+        // screenshot: closed first.
+        if (Build.VERSION.SDK_INT >= 31) runCatching { performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE) }
         worker.execute {
             val controller = MainUI.sessions.controllerFor(s)
             runCatching { controller.prepare() }
@@ -366,6 +409,14 @@ class OverlayService : AccessibilityService() {
                         // Given up on (too slow) and opened again since: this open shows nothing,
                         // and its pause is undone (a stale thaw is ignored if the newer one froze).
                         Log.w(TAG, "late menu open $id dropped")
+                        worker.execute { runCatching { controller.unpause() } }
+                        return@post
+                    }
+                    if (MainUI.sessions.active !== s || foregroundPackage != s.pkg) {
+                        // The game was left meanwhile (Game Switcher, exit): no menu over what is in front now.
+                        Log.w(TAG, "menu open dropped, ${s.pkg} is no longer in front (${foregroundPackage})")
+                        opening = false
+                        pendingHold = null
                         worker.execute { runCatching { controller.unpause() } }
                         return@post
                     }
@@ -477,12 +528,15 @@ class OverlayService : AccessibilityService() {
         runCatching { getSystemService(WindowManager::class.java).removeView(v) }
         v.destroy()
         handBackControllers(moved)
+        // A popup over MainUI itself paused its music; MainUI stayed resumed, so nothing else restarts it.
+        if (foregroundPackage == packageName) MainUI.themes.resumeBgm()
     }
 
 
     fun openGameSwitcher() {
         // Remember the current frame for the switcher, then bring MainUI forward.
         val s = MainUI.sessions.active
+        markLeaving()
         capture { bmp ->
             if (bmp != null && s != null) MainUI.sessions.saveScreenshot(s.gameKey, bmp)
             main.post { leaveForSwitcher(0) }
@@ -490,6 +544,8 @@ class OverlayService : AccessibilityService() {
     }
 
     private fun startGameSwitcher() {
+        // Until MainUI is in front (its window event), which takes a moment.
+        leavingUntil = SystemClock.uptimeMillis() + 1000
         startActivity(Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             .putExtra(MainActivity.EXTRA_GAME_SWITCHER, true))
@@ -521,7 +577,7 @@ class OverlayService : AccessibilityService() {
                 // A newer update (or the service ending) came while root was being checked.
                 if (gen != hotkeyGen.get()) return@Thread
                 hotkeys?.stop()
-                hotkeys = HotkeyListener(combo, { main.post { if (instance === this && gameInFront()) showMenu() } }) { key, down ->
+                hotkeys = HotkeyListener(combo, { main.post { if (instance === this && gameInFront() && SystemClock.uptimeMillis() >= leavingUntil) showMenu() } }) { key, down ->
                     if (key in HOME_BUTTONS) main.post { if (instance === this) rawHome(down) }
                 }.also { it.start() }
             }
@@ -576,28 +632,46 @@ class HotkeyListener(
     private val onKey: (String, Boolean) -> Unit = { _, _ -> },
 ) {
     @Volatile private var running = true
-    private var process: Process? = null
+    @Volatile private var process: Process? = null
+    /** Still listening (false once getevent is gone for good: started again by the service). */
+    @Volatile var alive = true
+        private set
 
     fun start() {
         Thread {
             try {
-                val p = ProcessBuilder(*Root.rootArgv("getevent -ql")).redirectErrorStream(true).start()
-                process = p
-                val down = HashSet<String>()
-                p.inputStream.bufferedReader().useLines { lines ->
-                    for (line in lines) {
-                        if (!running) break
-                        val parts = line.substringAfter(':').trim().split(Regex("\\s+"))
-                        if (parts.size < 3 || parts[0] != "EV_KEY") continue
-                        val key = parts[1]
-                        when (parts[2]) {
-                            "DOWN" -> { down += key; onKey(key, true); if (combo.isNotEmpty() && down.containsAll(combo)) { down.clear(); onCombo() } }
-                            "UP" -> { down -= key; onKey(key, false) }
+                // getevent ending by itself (killed, a device change) is restarted a few times.
+                var restarts = 0
+                while (running) {
+                    val t0 = android.os.SystemClock.uptimeMillis()
+                    try {
+                        val p = ProcessBuilder(*Root.rootArgv("getevent -ql")).redirectErrorStream(true).start()
+                        process = p
+                        if (!running) { p.destroy(); break }
+                        val down = HashSet<String>()
+                        p.inputStream.bufferedReader().useLines { lines ->
+                            for (line in lines) {
+                                if (!running) break
+                                val parts = line.substringAfter(':').trim().split(Regex("\\s+"))
+                                if (parts.size < 3 || parts[0] != "EV_KEY") continue
+                                val key = parts[1]
+                                when (parts[2]) {
+                                    "DOWN" -> { down += key; onKey(key, true); if (combo.isNotEmpty() && down.containsAll(combo)) { down.clear(); onCombo() } }
+                                    "UP" -> { down -= key; onKey(key, false) }
+                                }
+                            }
                         }
+                    } catch (e: Exception) {
+                        Log.w("MainUI.Hotkeys", "listener stopped", e)
                     }
+                    if (!running) break
+                    // A run that lasted a while starts the count again; one that fails at once gives up soon.
+                    if (android.os.SystemClock.uptimeMillis() - t0 > 60_000) restarts = 0
+                    if (++restarts > 5) break
+                    Thread.sleep(2000)
                 }
-            } catch (e: Exception) {
-                Log.w("MainUI.Hotkeys", "listener stopped", e)
+            } finally {
+                alive = false
             }
         }.apply { isDaemon = true; name = "mainui-hotkeys"; start() }
     }

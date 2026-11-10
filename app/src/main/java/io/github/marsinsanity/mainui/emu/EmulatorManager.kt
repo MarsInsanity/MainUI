@@ -205,6 +205,9 @@ class EmulatorManager(
                 .map { it.activityInfo.applicationInfo }.distinctBy { it.packageName }
                 .map { it.packageName to pm.getApplicationLabel(it).toString() }
         }.getOrDefault(emptyList())
+        // Packages a recipe names are that recipe's: never "another build" of a different one
+        // (Citra MMJ's org.citra.emu, labelled "Citra", is not the Citra recipe's).
+        val listed = HashSet<String>().apply { standalone.values.forEach { d -> d.components.forEach { add(it.first) } }; addAll(retroarch.packages) }
         for ((id, d) in standalone) {
             // First recipe component whose package is installed and whose activity exists.
             val c = d.components.firstOrNull { (pkg, act) -> installed(pkg) && (act == null || hasActivity(pkg, act)) }
@@ -212,7 +215,7 @@ class EmulatorManager(
                     // Package installed but the recipe's activity was renamed: use its launcher activity.
                     pkg to launcherOf(pkg)
                 }
-                ?: launchable.firstOrNull { (pkg, label) -> variantOf(d, pkg, label) }?.let { (pkg, _) ->
+                ?: launchable.firstOrNull { (pkg, label) -> pkg !in listed && variantOf(d, pkg, label) }?.let { (pkg, _) ->
                     // Another build of it (".debug", ".nightly", a fork): the recipe's activity classes
                     // keep their names under another application id; else its launcher activity.
                     pkg to (d.components.mapNotNull { it.second }.distinct().firstOrNull { hasActivity(pkg, it) } ?: launcherOf(pkg))
@@ -384,9 +387,12 @@ class EmulatorManager(
                 if (ref in known) continue
                 // Containers (.zip, .chd, .iso...) say nothing about the system: a Saturn core
                 // listing .zip must not show up for NES. Match on the specific extensions only.
-                val exts = (synchronized(coreInfo) { coreInfo[c]?.second } ?: emptySet()) - GENERIC_EXTENSIONS
+                val all = synchronized(coreInfo) { coreInfo[c]?.second } ?: emptySet()
+                val exts = all - GENERIC_EXTENSIONS
+                // A core with only containers (MAME 2003-Plus: zip) is offered for systems that
+                // only list containers (Arcade), to be picked by hand; it is never chosen by itself.
                 // Unknown folders (no extension list) offer every core, so one can be picked by hand.
-                if (sys.extensions.isEmpty() || exts.any { it in sys.extensions }) {
+                if (sys.extensions.isEmpty() || exts.any { it in sys.extensions } || (exts.isEmpty() && all.any { it in sys.extensions })) {
                     option(ref, false)?.let { out += it }
                 }
             }
@@ -401,21 +407,27 @@ class EmulatorManager(
      */
     fun choose(sys: SystemDef, game: Game?, gameOverride: Boolean = true, systemOverride: Boolean = true): EmuOption? {
         val opts = optionsFor(sys)
-        val chosen = (game?.takeIf { gameOverride }?.let { library.coreForGame(it.key) }
-            ?: library.coreForSystem(sys.id)?.takeIf { systemOverride })
-        chosen?.let { ref -> (opts.firstOrNull { it.ref == ref } ?: option(ref, false))?.let { return it } }
+        // A choice whose emulator no longer exists (a recipe removed since) falls through to the
+        // next one: the game's to the system's, the system's to the automatic choice.
+        fun resolve(ref: String?) = ref?.let { r -> opts.firstOrNull { it.ref == r } ?: option(r, false) }
+        if (gameOverride) game?.let { resolve(library.coreForGame(it.key)) }?.let { return it }
+        if (systemOverride) resolve(library.coreForSystem(sys.id))?.let { return it }
         // Automatic choice: recommended emulators, or other cores whose .info lists this
         // game's extension (a Game Boy core claims .gb, which the GBA folder also accepts,
         // but it can't run a .gba file).
         val ext = game?.file?.let { if (it.isDirectory) null else it.extension.lowercase() }
+        // A container (.zip) only counts for a core made for this system (one of its own
+        // extensions), not one that merely opens zips.
         val fits = opts.filter { o ->
             o.recommended || ext == null || !o.isRetroArch ||
-                (synchronized(coreInfo) { coreInfo[o.core]?.second }?.contains(ext) ?: false)
+                (synchronized(coreInfo) { coreInfo[o.core]?.second }?.let { info ->
+                    ext in info && (ext !in GENERIC_EXTENSIONS || sys.extensions.isEmpty() || (info - GENERIC_EXTENSIONS).any { it in sys.extensions })
+                } ?: false)
         }
+        // Nothing that fits: none (MainUI says so), never whichever core sorts first.
         return fits.firstOrNull { it.installed == true }
             ?: fits.firstOrNull { it.installed == null }
             ?: fits.firstOrNull()
-            ?: opts.firstOrNull()
     }
 
     fun raConfigPath(pkg: String) = "/storage/emulated/0/Android/data/$pkg/files/retroarch.cfg"
@@ -439,7 +451,7 @@ class EmulatorManager(
     private fun fill(def: EmuDef, pkg: String, rom: File, core: String?,
                      activity: String? = def.components.firstOrNull { it.first == pkg }?.second): Intent {
         val fileContent by lazy {
-            runCatching { if (rom.isFile && rom.length() < 4096) rom.readText().lineSequence().firstOrNull()?.trim() else null }
+            runCatching { if (rom.isFile && rom.length() < 4096) rom.readText().removePrefix("\uFEFF").lineSequence().firstOrNull()?.trim() else null }
                 .getOrNull()?.takeIf { it.isNotEmpty() } ?: rom.nameWithoutExtension
         }
         val rpcsxGame by lazy { Ps3Games.rpcsxPath(rom) }
@@ -511,9 +523,13 @@ class EmulatorManager(
      * Only while RetroArch isn't running: configuring stops it. Call off the main thread.
      */
     fun ensureRetroArchConfigured() {
-        if (settings.prefs.getString(RA_CONFIG_STAMP, null) == raConfigStamp()) return
         val pkg = raPackage ?: return
         if (!Root.knownAvailable() && !Root.available()) return
+        // Per RetroArch package, and only while its config still has MainUI's settings: a
+        // reinstalled or reset RetroArch (or another build) gets them again.
+        if (settings.prefs.getString("$RA_CONFIG_STAMP:$pkg", null) == raConfigStamp() &&
+            runCatching { Root.Shell.run("grep -q '^input_android_physical_keyboard *= *\"MainUI Keyboard\"' ${Root.q(raConfigPath(pkg))} && echo yes", 5000) }
+                .getOrNull()?.out?.contains("yes") == true) return
         if (Root.exec("pidof $pkg").out.isNotBlank()) return
         val (ok, msg) = configureRetroArch()
         io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch configured by itself: $ok $msg")
@@ -576,7 +592,7 @@ class EmulatorManager(
         val merged = RetroArchCores.mergeConfig(cfg, wanted)
             ?: return false to "retroarch.cfg looks incomplete, so nothing was changed.\n\n$path"
         val w = Root.writeFile(path, merged, backup = true)
-        if (w.ok) settings.prefs.edit().putString(RA_CONFIG_STAMP, raConfigStamp()).apply()
+        if (w.ok) settings.prefs.edit().putString("$RA_CONFIG_STAMP:$pkg", raConfigStamp()).apply()
         return if (w.ok) true to "RetroArch configured for MainUI"
         else false to "Could not save retroarch.cfg:\n${w.error}\n\n$path"
     }

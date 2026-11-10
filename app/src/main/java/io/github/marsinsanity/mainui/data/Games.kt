@@ -29,10 +29,17 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
 
     private val dirCache = ConcurrentHashMap<String, DirCache>()
     private val gamelists = ConcurrentHashMap<String, GameListXml>()
-    @Volatile private var systemsCache: List<GameSystem>? = null
+    /** What [systems] found, for which "unknown folders" setting and rom roots. */
+    private class SystemsCache(val includeUnknown: Boolean, val roots: List<String>, val systems: List<GameSystem>)
+    @Volatile private var systemsCache: SystemsCache? = null
 
     fun systems(includeUnknown: Boolean, refresh: Boolean = false): List<GameSystem> {
-        val found = (if (refresh) null else systemsCache) ?: registry.discover(includeUnknown).also { systemsCache = it }
+        // Found again when the rom roots change (an SD card mounted after the first look, at
+        // boot, or swapped) or when asked with the other "unknown folders" setting.
+        val roots = runCatching { storage.romRoots().map { it.absolutePath } }.getOrDefault(emptyList())
+        val c = systemsCache
+        val found = c?.takeIf { !refresh && it.includeUnknown == includeUnknown && it.roots == roots }?.systems
+            ?: registry.discover(includeUnknown).also { systemsCache = SystemsCache(includeUnknown, roots, it) }
         return withMenuSystems(found)
     }
 
@@ -74,10 +81,13 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val key = dir.absolutePath
         val cached = gamelists[key]
         val f = File(dir, "gamelist.xml")
-        if (cached != null && cached.loaded && (!f.exists() || f.lastModified() <= cachedMtime[key] ?: 0)) return cached
+        // Any change counts (deleted, or replaced by an older copy); its time is read before the
+        // load, so a save during the load is seen next time.
+        val m = if (f.isFile) f.lastModified() else 0L
+        if (cached != null && cached.loaded && cachedMtime[key] == m) return cached
         val gl = GameListXml(dir).load()
         gamelists[key] = gl
-        cachedMtime[key] = f.lastModified()
+        cachedMtime[key] = m
         return gl
     }
 
@@ -167,7 +177,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         for (f in files) {
             val n = f.name
             if (n.startsWith(".") || n == "gamelist.xml" || n.endsWith(".bak") || n.endsWith(".tmp") ||
-                n.endsWith(".dat", true)) continue
+                isMetaDat(system, f)) continue
             if (f.isDirectory) {
                 if (n.lowercase() in SystemRegistry.IGNORED_FOLDERS || n.lowercase() in MEDIA_FOLDERS) continue
                 val entry = gl.get(f)
@@ -199,12 +209,15 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             if (f.name.startsWith(".")) continue
             if (f.isDirectory) {
                 if (f.extension.isNotEmpty() && system.def.accepts(f)) return true
-            } else if (system.def.accepts(f) && !f.name.endsWith(".dat", true) && f.name != "gamelist.xml") return true
+            } else if (system.def.accepts(f) && !isMetaDat(system, f) && f.name != "gamelist.xml") return true
         }
         if (depth >= 2) return false
         return files.any { it.isDirectory && !it.name.startsWith(".") && it.name.lowercase() !in MEDIA_FOLDERS &&
             it.name.lowercase() !in SystemRegistry.IGNORED_FOLDERS && hasRoms(system, it, depth + 1) }
     }
+
+    /** A .dat is metadata (a Logiqx DAT), unless the system plays .dat files (ONScripter's nscript.dat). */
+    private fun isMetaDat(system: GameSystem, f: File) = f.name.endsWith(".dat", true) && "dat" !in system.def.extensions
 
     /** gamelist.xml lives in the system's top folder even for games in sub folders. */
     fun systemRootFor(system: GameSystem, dir: File): File =
@@ -229,10 +242,13 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             if (ext == "cue" || ext == "gdi") {
                 runCatching {
                     f.useLines { lines ->
-                        lines.take(200).forEach { line ->
-                            val m = Regex("FILE\\s+\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(line)
-                                ?: if (ext == "gdi") Regex("\\s(\\S+\\.(?:bin|raw))\\s", RegexOption.IGNORE_CASE).find(line) else null
-                            if (m != null) hide += m.groupValues[1].substringAfterLast('/').lowercase()
+                        lines.take(200).forEach { raw ->
+                            val line = raw.removePrefix("\uFEFF")
+                            // FILE "Game (Track 1).bin" BINARY, or unquoted: FILE GAME.BIN BINARY
+                            val m = CUE_FILE.find(line)
+                                ?: if (ext == "gdi") GDI_TRACK.find(line) else null
+                            if (m != null) hide += m.groupValues[1].ifEmpty { m.groupValues.getOrElse(2) { "" } }
+                                .replace('\\', '/').substringAfterLast('/').lowercase()
                         }
                     }
                 }
@@ -242,8 +258,9 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
                 if (ext == "ccd") { hide += "$base.img"; hide += "$base.sub" } else hide += "$base.mdf"
             } else if (ext == "m3u") {
                 runCatching {
-                    f.useLines { lines -> lines.take(50).map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
-                        .forEach { hide += it.substringAfterLast('/').lowercase() } }
+                    // (A Windows editor's byte order mark must not hide disc 1 from the match.)
+                    f.useLines { lines -> lines.take(50).map { it.removePrefix("\uFEFF").trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
+                        .forEach { hide += it.replace('\\', '/').substringAfterLast('/').lowercase() } }
                 }
             }
         }
@@ -253,22 +270,27 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
     fun countGames(system: GameSystem): Int {
         var n = 0
         val others = HashMap<String, Int>()
-        fun walk(d: File, depth: Int, gl: MetaLookup) {
+        // A game on both the SD card and internal storage is listed once (the lists merge), so
+        // it is counted once: by its path inside the system folder.
+        val seen = HashSet<String>()
+        fun count(rel: String) { if (seen.add(rel.lowercase())) n++ }
+        fun walk(d: File, rel: String, depth: Int, gl: MetaLookup) {
             val files = d.listFiles() ?: return
             val hidden = discFilesToHide(system, files) + unpackedZips(system, files)
             for (f in files) {
                 if (f.name.startsWith(".")) continue
                 if (f.isDirectory) {
                     if (depth < 3 && f.name.lowercase() !in MEDIA_FOLDERS && f.name.lowercase() !in SystemRegistry.IGNORED_FOLDERS) {
-                        if (f.extension.isNotEmpty() && system.def.accepts(f)) n++ else walk(f, depth + 1, gl)
+                        if (f.extension.isNotEmpty() && system.def.accepts(f)) count("$rel/${f.name}") else walk(f, "$rel/${f.name}", depth + 1, gl)
                     }
-                } else if (system.def.accepts(f) && f.name != "gamelist.xml" && !f.name.endsWith(".dat", true) && f.name.lowercase() !in hidden &&
-                    gl.get(f)?.hidden != true && !isHiddenFile(system, f)) n++
-                else if (f.extension.isNotEmpty() && f.name != "gamelist.xml" && f.extension.lowercase() !in NOT_GAMES)
+                } else if (system.def.accepts(f) && f.name != "gamelist.xml" && !isMetaDat(system, f) && f.name.lowercase() !in hidden &&
+                    gl.get(f)?.hidden != true && !isHiddenFile(system, f)) count("$rel/${f.name}")
+                // Files it could play but that are hidden (BIOS sets, disc tracks) aren't "unplayable" ones.
+                else if (!system.def.accepts(f) && f.extension.isNotEmpty() && f.name != "gamelist.xml" && f.extension.lowercase() !in NOT_GAMES)
                     others.merge(f.extension.lowercase(), 1, Int::plus)
             }
         }
-        system.dirs.forEach { walk(it, 0, meta(it)) }
+        system.dirs.forEach { walk(it, "", 0, meta(it)) }
         system.otherFiles = others
         system.gameCount = n
         return n
@@ -346,6 +368,9 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val IMAGE_SUFFIXES = listOf("", "-image", "-thumb", "-boxart")
         val IMAGE_EXTS = listOf("png", "jpg", "jpeg", "webp")
         /** Files that are never games, left out of "no playable files" hints. */
+        private val CUE_FILE = Regex("FILE\\s+(?:\"([^\"]+)\"|(\\S+))", RegexOption.IGNORE_CASE)
+        private val GDI_TRACK = Regex("\\s(\\S+\\.(?:bin|raw))\\s", RegexOption.IGNORE_CASE)
+
         val NOT_GAMES = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "txt", "nfo", "xml", "dat", "bak", "tmp", "md",
             "pdf", "htm", "html", "db", "ini", "cfg", "log", "srm", "sav", "state", "auto", "ds_store")
 
