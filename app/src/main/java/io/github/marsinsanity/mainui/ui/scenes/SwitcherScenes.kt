@@ -55,7 +55,7 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
         games = MainUI.library.recents()
         val active = MainUI.sessions.active
         index = games.indexOfFirst { it.key == active?.gameKey }.coerceAtLeast(0)
-        legendUntil = System.currentTimeMillis() + 4000
+        legendUntil = System.currentTimeMillis() + 5000 // as long as Onion shows its legend
         brightness = Brightness.get(ctx)
     }
 
@@ -122,7 +122,9 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
         val until = maxOf(legendUntil, brightnessUntil)
         if (g.now < until) g.redrawAfter(until - g.now + 10)
         if (g.now < legendUntil && view != 2) {
-            g.skin("extra/gs-legend")?.let { g.bmp(it, g.W - it.width, headerH) }
+            // The theme's legend image, else Onion's own: Y view, X remove, SELECT time, START.
+            val legend = g.skin("extra/gs-legend")
+            if (legend != null) g.bmp(legend, g.W - legend.width, headerH) else drawLegend(g, headerH)
         }
         if (g.now < brightnessUntil) {
             val lum = g.skin("extra/lum$brightness")
@@ -133,6 +135,66 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
                 val w = 300f; val x = (g.W - w) / 2; val y = headerH + 20f
                 g.fillRect(x, y, w, 24f, Color.argb(160, 0, 0, 0), 12f)
                 g.fillRect(x + 4, y + 4, (w - 8) * brightness / 10f, 16f, withAlpha(g.theme.accent, 255), 8f)
+            }
+        }
+    }
+
+    private val legendPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        style = android.graphics.Paint.Style.STROKE; strokeWidth = 2.2f; color = Color.WHITE
+        strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
+    }
+
+    /**
+     * Onion's Game Switcher legend (its res/gs-legend.png, for themes without one), drawn:
+     * a dark pill at the top right with each button and an icon for what it does.
+     */
+    private fun drawLegend(g: Gfx, top: Float) {
+        val items = listOf("Y" to "view", "X" to "trash", "SELECT" to "time", "START" to "full")
+        val icon = 20f; val gap = 8f; val pad = 12f; val h = 38f
+        val widths = items.map { (b, _) -> g.buttonIcon(b, 0f, 0f, scale = 0.6f, draw = false) }
+        val w = pad * 2 + widths.sum() + items.size * (gap + icon) + (items.size - 1) * 14f
+        val x0 = g.W - w - 6f
+        val y0 = top + 6f
+        g.fillRect(x0, y0, w, h, Color.argb(170, 0, 0, 0), h / 2)
+        val cy = y0 + h / 2
+        var x = x0 + pad
+        for ((i, item) in items.withIndex()) {
+            x += g.buttonIcon(item.first, x, cy, scale = 0.6f) + gap
+            legendIcon(g, item.second, x, cy, icon)
+            x += icon + 14f
+            if (i == items.size - 1) break
+        }
+    }
+
+    /** Small line icons like Onion's: view frame, trash can, stopwatch, full screen. */
+    private fun legendIcon(g: Gfx, kind: String, x: Float, cy: Float, s: Float) {
+        val c = g.c; val p = legendPaint
+        val l = x; val t = cy - s / 2; val r = x + s; val b = cy + s / 2; val k = s * 0.3f
+        when (kind) {
+            "view" -> { // corner brackets
+                c.drawLine(l, t + k, l, t, p); c.drawLine(l, t, l + k, t, p)
+                c.drawLine(r - k, t, r, t, p); c.drawLine(r, t, r, t + k, p)
+                c.drawLine(l, b - k, l, b, p); c.drawLine(l, b, l + k, b, p)
+                c.drawLine(r - k, b, r, b, p); c.drawLine(r, b, r, b - k, p)
+            }
+            "trash" -> {
+                c.drawLine(l + 1, t + 4, r - 1, t + 4, p)
+                c.drawLine(l + s * 0.38f, t + 4, l + s * 0.38f, t + 1, p); c.drawLine(l + s * 0.38f, t + 1, r - s * 0.38f, t + 1, p)
+                c.drawLine(r - s * 0.38f, t + 1, r - s * 0.38f, t + 4, p)
+                c.drawLine(l + 3, t + 4, l + 4.5f, b, p); c.drawLine(l + 4.5f, b, r - 4.5f, b, p); c.drawLine(r - 4.5f, b, r - 3, t + 4, p)
+                c.drawLine(x + s / 2, t + 8, x + s / 2, b - 3, p)
+            }
+            "time" -> { // stopwatch
+                val rr = s * 0.42f; val ccy = cy + 1.5f
+                c.drawCircle(x + s / 2, ccy, rr, p)
+                c.drawLine(x + s / 2, ccy, x + s / 2, ccy - rr * 0.6f, p)
+                c.drawLine(x + s / 2 - 2.5f, t - 1, x + s / 2 + 2.5f, t - 1, p)
+                c.drawLine(x + s / 2 + rr * 0.75f, ccy - rr * 0.75f, x + s / 2 + rr, ccy - rr, p)
+            }
+            "full" -> { // a screen with its picture filling it
+                val rect = android.graphics.RectF(l, t + 2, r, b - 2)
+                c.drawRoundRect(rect, 3f, 3f, p)
+                c.drawLine(l + 4, t + 7, r - 4, t + 7, p); c.drawLine(l + 4, cy, r - 4, cy, p); c.drawLine(l + 4, b - 7, r - 4, b - 7, p)
             }
         }
     }
@@ -166,7 +228,7 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
             Btn.SELECT -> if (!repeat) {
                 timeMode = (timeMode + 1) % 3
                 MainUI.settings.prefs.edit().putInt("gs_time", timeMode).apply()
-                legendUntil = System.currentTimeMillis() + 2000
+                legendUntil = System.currentTimeMillis() + 5000
             }
             Btn.UP, Btn.DOWN -> {
                 // 10%..100%, as Settings > Device. Below 10% already (dimmed in Android): DOWN

@@ -475,11 +475,13 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
 object SearchFlow {
     private var lastQuery = ""
 
-    fun start(host: SceneHost) {
-        host.push(io.github.marsinsanity.mainui.ui.KeyboardScene(host, "Search games", lastQuery) { q ->
+    /** Asks for a name and lists the games having it: in every system, or only in [system]. */
+    fun start(host: SceneHost, system: io.github.marsinsanity.mainui.data.GameSystem? = null) {
+        val title = if (system == null) "Search games" else "Search ${system.def.short}"
+        host.push(io.github.marsinsanity.mainui.ui.KeyboardScene(host, title, lastQuery) { q ->
             if (q.isBlank()) return@KeyboardScene
             lastQuery = q
-            host.push(SearchResultsScene(host, q))
+            host.push(SearchResultsScene(host, q, system))
         })
     }
 }

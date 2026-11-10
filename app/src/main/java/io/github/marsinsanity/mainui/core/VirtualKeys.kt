@@ -39,6 +39,21 @@ object VirtualKeys {
         return false
     }
 
+    /**
+     * Tells the app in front a controller's current trigger / stick positions ([values] in the
+     * helper's CONTROLLER_AXES order: X, Y, Z, RZ, RX, RY, HAT_X, HAT_Y, LTRIGGER, RTRIGGER,
+     * BRAKE, GAS). Used after MainUI's menu had focus while they moved. Root only.
+     */
+    @Synchronized
+    fun axes(deviceId: Int, values: FloatArray): Boolean {
+        if (!ensure()) return false
+        return try {
+            replies.clear()
+            out!!.write("axes $deviceId ${values.joinToString(" ")}\n"); out!!.flush()
+            replies.poll(3000, TimeUnit.MILLISECONDS) == "ok"
+        } catch (e: Exception) { Log.w(TAG, "axes failed", e); false }
+    }
+
     /** Bumped for every new virtual keyboard (helper start). */
     @Volatile private var deviceGen = 0
     /** "<pkg>:<pid>:<deviceGen>" that has seen a key from the current keyboard. */

@@ -173,11 +173,12 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
             }
             Btn.SELECT -> { if (!repeat && game != null && !game.isFolder) GameItems.options(host, game) { reload() }; return true }
             Btn.MENU -> { if (!repeat) host.push(GameSwitcherScene(host)); return true }
+            Btn.X -> { if (!repeat) SearchFlow.start(host, sys); return true } // search this system's games
             else -> return super.onKey(b, repeat)
         }
     }
 
-    override val extraHints get() = listOf("Y" to "FAV")
+    override val extraHints get() = listOf("X" to "SEARCH", "Y" to "FAV")
 }
 
 /** The "Android" system: Android native games, added by hand or auto-sorted on install. */
@@ -270,24 +271,28 @@ class FavoritesScene(host: SceneHost) : EntryListScene(host, "Favorites") {
     }
 }
 
-class SearchResultsScene(host: SceneHost, private val query: String) : ListScene(host, "Search: $query") {
+class SearchResultsScene(host: SceneHost, private val query: String, private val system: GameSystem? = null) :
+    ListScene(host, if (system == null) "Search: $query" else "${system.def.short}: $query") {
     private var done = false
     override var aLabel: String? = "PLAY"
 
     override fun onEnter() {
         host.io({
-            val systems = MainUI.games.systems(MainUI.settings.showUnknownFolders)
-            val roms = MainUI.games.search(query, systems)
-            val q = query.lowercase()
-            val android = MainUI.apps.androidGames().filter { it.label.lowercase().contains(q) }
-                .map { Game(SystemDef.ANDROID.id, null, it.label, pkg = it.pkg) }
-            roms + android
+            if (system != null) MainUI.games.search(query, listOf(system)) // one system's games only
+            else {
+                val systems = MainUI.games.systems(MainUI.settings.showUnknownFolders)
+                val roms = MainUI.games.search(query, systems)
+                val q = query.lowercase()
+                val android = MainUI.apps.androidGames().filter { it.label.lowercase().contains(q) }
+                    .map { Game(SystemDef.ANDROID.id, null, it.label, pkg = it.pkg) }
+                roms + android
+            }
         }) { results ->
             done = true
             list.set(results.map { g ->
                 GameItems.item(host, null, g, Launch.systemDef(g.systemId)?.short ?: g.systemId)
             }, false)
-            title = "Search: $query (${results.size})"
+            title = (if (system == null) "Search: $query" else "${system.def.short}: $query") + " (${results.size})"
         }
     }
 
@@ -310,7 +315,7 @@ class SearchResultsScene(host: SceneHost, private val query: String) : ListScene
             }
             return true
         }
-        if (b == Btn.Y && !repeat) { close(); SearchFlow.start(host); return true }
+        if (b == Btn.Y && !repeat) { close(); SearchFlow.start(host, system); return true }
         return super.onKey(b, repeat)
     }
 

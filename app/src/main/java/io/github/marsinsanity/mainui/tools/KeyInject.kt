@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.view.InputDevice
 import android.view.InputEvent
 import android.view.KeyEvent
+import android.view.MotionEvent
 
 /**
  * Presses a key as if a real keyboard did, for apps that ignore keys from Android's virtual
@@ -28,22 +29,51 @@ external fun nativeOpen(name: String, keys: IntArray): Int
 external fun nativePress(fd: Int, keys: IntArray, holdMs: Int): Boolean
 external fun nativeClose(fd: Int)
 
+/** The controller axes [axes] carries, in this order (sticks, d-pad hat, triggers). */
+val CONTROLLER_AXES = intArrayOf(MotionEvent.AXIS_X, MotionEvent.AXIS_Y, MotionEvent.AXIS_Z, MotionEvent.AXIS_RZ,
+    MotionEvent.AXIS_RX, MotionEvent.AXIS_RY, MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_HAT_Y,
+    MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_RTRIGGER, MotionEvent.AXIS_BRAKE, MotionEvent.AXIS_GAS)
+
+/**
+ * One controller motion event from [deviceId] with [values] for [CONTROLLER_AXES], to the window
+ * in front. A game only learns a trigger or stick moved from such events: one released while
+ * MainUI's menu had focus went to MainUI, and the game still thinks it is held.
+ */
+private fun axes(inject: (InputEvent) -> Boolean, deviceId: Int, values: List<Float>): Boolean {
+    val now = SystemClock.uptimeMillis()
+    val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_UNKNOWN })
+    val coords = arrayOf(MotionEvent.PointerCoords().apply {
+        CONTROLLER_AXES.forEachIndexed { i, a -> setAxisValue(a, values.getOrElse(i) { 0f }) }
+    })
+    val e = MotionEvent.obtain(now, now, MotionEvent.ACTION_MOVE, 1, props, coords, 0, 0, 1f, 1f, deviceId, 0,
+        InputDevice.SOURCE_JOYSTICK, 0)
+    return try { inject(e) } finally { e.recycle() }
+}
+
 /**
  * `daemon <path of libmainuiinput.so>`: creates one virtual keyboard ("MainUI Keyboard", F keys
  * only) and keeps it while stdin is open, pressing keys on request: lines like "F1 250"
  * (key[+key] holdMs), answered "ok" / "error ...". One lasting device matters: RetroArch
- * registers at most three keyboards per run.
+ * registers at most three keyboards per run. "axes <deviceId> <v>..." sends a controller's
+ * axis values (see [axes]).
  */
 private fun daemon(lib: String) {
     System.load(lib)
     val fd = nativeOpen("MainUI Keyboard", LINUX_KEYS.values.toIntArray())
     if (fd < 0) { println("error uinput $fd"); return }
+    val inject by lazy { injector() }
     println("ready")
     try {
         while (true) {
             val line = readLine() ?: break
             val parts = line.trim().split(Regex("\\s+"))
             if (parts.firstOrNull().isNullOrEmpty()) continue
+            if (parts[0] == "axes") {
+                val id = parts.getOrNull(1)?.toIntOrNull()
+                val ok = id != null && runCatching { axes(inject, id, parts.drop(2).map { it.toFloatOrNull() ?: 0f }) }.getOrDefault(false)
+                println(if (ok) "ok" else "error axes")
+                continue
+            }
             val codes = parts[0].split('+').map { LINUX_KEYS[it.uppercase().removePrefix("KEYCODE_")] }
             if (codes.any { it == null }) { println("error unknown key ${parts[0]}"); continue }
             nativePress(fd, codes.filterNotNull().toIntArray(), parts.getOrNull(1)?.toIntOrNull() ?: 200)
