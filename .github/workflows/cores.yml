@@ -4,6 +4,11 @@
 #
 #   yabadabadoo  Sega Saturn, github.com/ProRapSuperstarOriginalMaster/Yabadabadoo
 #                (its own releases are Miyoo / Linux builds Android can't load)
+#   armgba       Game Boy Advance / Game Boy / Color, github.com/MagnominusGit/armGBA
+#   armnes       NES (and armnes_arcade for VS. System / PlayChoice-10 sets), github.com/MagnominusGit/armNES
+#   armn64       Nintendo 64, github.com/MagnominusGit/armN64
+#                (their releases are Linux cores and standalone apps; the libretro cores
+#                build for Android with the NDK through their own CMake files)
 #
 # Runs when this file or cores/ changes, weekly to pick up new upstream commits,
 # and by hand (Actions > Extra cores > Run workflow).
@@ -65,3 +70,62 @@ jobs:
           fi
           gh release upload cores yabadabadoo_libretro_android-*.zip --clobber
           gh release edit cores --notes-file notes.md --latest=false
+
+  magnominus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: armGBA
+            cores: armgba
+          - repo: armNES
+            cores: armnes armnes_arcade
+          - repo: armN64
+            cores: armn64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: MagnominusGit/${{ matrix.repo }}
+          path: upstream
+
+      - name: Build with the Android NDK
+        working-directory: upstream
+        run: |
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cmake -S . -B "build-$abi" -G Ninja \
+              -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$abi" -DANDROID_PLATFORM=android-24 -DCMAKE_BUILD_TYPE=Release
+            for core in ${{ matrix.cores }}; do
+              ninja -C "build-$abi" "${core}_libretro"
+            done
+          done
+
+      - name: Package
+        run: |
+          commit=$(git -C upstream rev-parse --short HEAD)
+          for core in ${{ matrix.cores }}; do
+            for abi in arm64-v8a armeabi-v7a x86_64; do
+              rm -rf pkg && mkdir pkg
+              # RetroArch for Android lists cores by the _android ending (armN64's CMake doesn't add it).
+              so=$(find "upstream/build-$abi" -maxdepth 2 \( -name "${core}_libretro_android.so" -o -name "${core}_libretro.so" \) | head -1)
+              test -n "$so"
+              cp "$so" "pkg/${core}_libretro_android.so"
+              "$ANDROID_NDK_LATEST_HOME"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip "pkg/${core}_libretro_android.so"
+              cp "upstream/libretro/${core}_libretro.info" pkg/
+              (cd pkg && zip -q -9 "../${core}_libretro_android-$abi.zip" *)
+            done
+          done
+          ls -la *.zip
+          echo "- ${{ matrix.cores }}: MagnominusGit/${{ matrix.repo }} at $commit, built $(date -u +%F)" > notes-${{ matrix.repo }}.md
+
+      - name: Publish to the "cores" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view cores >/dev/null 2>&1 || gh release create cores --title "Extra RetroArch cores" --latest=false \
+            --target "$GITHUB_SHA" --notes "RetroArch cores MainUI downloads that the libretro buildbot doesn't build for Android." || true
+          for core in ${{ matrix.cores }}; do
+            gh release upload cores "${core}"_libretro_android-*.zip --clobber
+          done
