@@ -315,36 +315,65 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     }
 
     /**
-     * Save (F2), checked: the game's state file in RetroArch's savestate folder must change.
-     * Pressed again once if it didn't within 3 s (a key can be missed while RetroArch settles).
-     * Without the game's path the press alone counts. The Game Switcher and Exit rely on this
-     * file: RetroArch loads it by itself the next time the game starts (savestate_auto_load).
+     * Save (F2), checked: one of the game's state files in RetroArch's savestate folders must
+     * change. Pressed again once if none did within 3 s (a key can be missed while RetroArch
+     * settles). Without the game's path the press alone counts.
+     *
+     * F2 saves into RetroArch's current slot, and RetroArch sets that to 0 whenever it loads a
+     * game (or to the playlist entry's / the game's last slot), whatever retroarch.cfg says. Its
+     * auto load only reads the auto slot ("<game>.state.auto"), which it only writes itself when
+     * a game is closed properly, never when MainUI switches games or force stops it. So with
+     * auto save on, the state just saved is copied into the auto slot: the Game Switcher, Exit and
+     * a later launch then continue from it, straight away when RetroArch starts the game.
      */
     private fun saveByKey(): Boolean {
         saveProblem = null
         val p = pkg
         val r = rom
         if (p == null || r == null) return hotkey("F2").also { if (!it) saveProblem = "Couldn't press RetroArch's save key (needs root)" }
+        val log = io.github.marsinsanity.mainui.core.SessionLog::log
         val cfg = Root.readFile(MainUI.emulators.raConfigPath(p))
-        val name = RetroArchCores.stateFileName(r, RetroArchCores.cfgValue(cfg, "state_slot")?.toIntOrNull() ?: 0)
+        val base = java.io.File(r).nameWithoutExtension
         val dirs = RetroArchCores.stateDirs(cfg, p, java.io.File(r).parent)
-        val find = "find ${dirs.joinToString(" ") { Root.q(it) }} -maxdepth 3 -type f -name ${Root.q(RetroArchCores.globEscape(name))} " +
-            "-exec stat -c '%Y %n' {} + 2>/dev/null"
-        fun files() = Root.Shell.run(find, 5000).out.lines().map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-        val before = files()
+        val find = "find ${dirs.joinToString(" ") { Root.q(it) }} -maxdepth 3 -type f " +
+            "-name ${Root.q(RetroArchCores.globEscape(base) + ".state*")} -exec stat -c '%Y %s %n' {} + 2>/dev/null"
+        // "<mtime> <size> <path>" of the game's state files (not their thumbnails).
+        fun states(): Map<String, String> = Root.Shell.run(find, 5000).out.lines().map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .associate { l -> l.split(' ', limit = 3).let { it.getOrElse(2) { "" } to "${it[0]} ${it.getOrElse(1) { "" }}" } }
+            .filterKeys { path -> RetroArchCores.stateSlotOf(path.substringAfterLast('/'), base) != null }
+        val before = states()
         repeat(2) { attempt ->
             if (!hotkey("F2")) { saveProblem = "Couldn't press RetroArch's save key (needs root)"; return false }
             val t0 = android.os.SystemClock.uptimeMillis()
             while (android.os.SystemClock.uptimeMillis() - t0 < 3000) {
                 Thread.sleep(300)
-                val changed = files() - before
-                if (changed.isNotEmpty()) {
-                    io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch saved ${changed.first().substringAfter(' ')}")
-                    Thread.sleep(400) // let it finish writing
-                    return true
+                val now = states()
+                val saved = now.keys.firstOrNull { path -> now[path]?.substringBefore(' ') != before[path]?.substringBefore(' ') }
+                    ?: continue
+                // Until RetroArch has finished writing it (its size stays the same).
+                var last = now[saved]
+                for (i in 0 until 10) {
+                    Thread.sleep(250)
+                    val cur = states()[saved]
+                    if (cur == last) break
+                    last = cur
                 }
+                log("RetroArch saved $saved")
+                val slot = RetroArchCores.stateSlotOf(saved.substringAfterLast('/'), base)
+                if (slot != -1 && MainUI.settings.autoSaveOnExit) {
+                    val auto = saved.substringBeforeLast('/') + "/$base.state.auto"
+                    val cp = Root.Shell.run("cp -f ${Root.q(saved)} ${Root.q(auto)} && " +
+                        "[ \"\$(stat -c %s ${Root.q(saved)})\" = \"\$(stat -c %s ${Root.q(auto)})\" ] && echo copied", 10000)
+                    if (cp.out.contains("copied")) log("copied slot $slot into the auto slot: $auto")
+                    else {
+                        log("could not copy $saved into the auto slot $auto: ${cp.err.trim()}")
+                        saveProblem = "Saved in slot $slot, but MainUI couldn't copy it into RetroArch's auto slot"
+                    }
+                }
+                return true
             }
-            io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch wrote no $name within 3 s (try ${attempt + 1}; looked in ${dirs.joinToString()}; before: ${before.ifEmpty { setOf("none") }.joinToString()})")
+            log("RetroArch changed no $base.state* file within 3 s (try ${attempt + 1}; looked in ${dirs.joinToString()}; before: ${before.keys.ifEmpty { setOf("none") }.joinToString()})")
         }
         saveProblem = "RetroArch didn't save (it ignored MainUI's F2 key). Send MainUI/logs/session.txt"
         return false

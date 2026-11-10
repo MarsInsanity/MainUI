@@ -564,8 +564,9 @@ class EmulatorManager(
         if (settings.autoSaveOnExit) {
             wanted["savestate_auto_save"] = "\"true\""
             wanted["savestate_auto_load"] = "\"true\""
-            // Save / Load (F2 / F4) use the auto slot: what MainUI saves when you leave a game for
-            // the Game Switcher or exit it is what RetroArch loads by itself the next time.
+            // Only a starting point: RetroArch sets the slot to 0 (or the game's last slot) whenever
+            // it loads a game. MainUI copies each Save into the auto slot instead, which RetroArch
+            // loads by itself the next time (see RetroArchController.saveByKey).
             wanted["state_slot"] = "\"-1\""
         } else {
             wanted["savestate_auto_save"] = "\"false\""

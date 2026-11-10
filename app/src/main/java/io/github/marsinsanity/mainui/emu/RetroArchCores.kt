@@ -74,6 +74,22 @@ object RetroArchCores {
     }
 
     /**
+     * The state slot [fileName] holds for content [base] (its name without extension): -1 for
+     * "<base>.state.auto", 0 for "<base>.state", n for "<base>.state<n>"; null for anything else
+     * (thumbnails "<...>.png", another game's states).
+     */
+    fun stateSlotOf(fileName: String, base: String): Int? {
+        if (!fileName.startsWith("$base.state")) return null
+        val rest = fileName.removePrefix("$base.state")
+        return when {
+            rest.isEmpty() -> 0
+            rest == ".auto" -> -1
+            rest.all { it.isDigit() } && rest.length <= 4 -> rest.toInt()
+            else -> null
+        }
+    }
+
+    /**
      * Folders RetroArch may keep savestates in (searched a few levels deep: it can sort them by
      * core and by content folder): its savestate_directory, else its defaults (shared storage,
      * or its own folder when that isn't writable), and the game's own folder.
