@@ -386,18 +386,28 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
                     ?: continue
                 // Until RetroArch has finished writing it (its size stays the same).
                 var last = now[saved]
-                for (i in 0 until 10) {
+                var settled = false
+                for (i in 0 until 80) { // up to ~20 s: big compressed states on a slow card take a while
                     Thread.sleep(250)
                     val cur = states()[saved]
-                    if (cur == last) break
+                    if (cur == last) { settled = true; break }
                     last = cur
+                }
+                if (!settled) {
+                    log("RetroArch was still writing $saved after 20 s")
+                    saveProblem = "RetroArch was still writing the save"
+                    return false
                 }
                 log("RetroArch saved $saved")
                 val slot = RetroArchCores.stateSlotOf(saved.substringAfterLast('/'), base)
                 if (slot != -1 && MainUI.settings.autoSaveOnExit) {
                     val auto = saved.substringBeforeLast('/') + "/$base.state.auto"
-                    val cp = Root.Shell.run("cp -f ${Root.q(saved)} ${Root.q(auto)} && " +
-                        "[ \"\$(stat -c %s ${Root.q(saved)})\" = \"\$(stat -c %s ${Root.q(auto)})\" ] && echo copied", 10000)
+                    // Owner, mode and SELinux label copied from RetroArch's own file: in its private
+                    // folder a root-owned copy would be one RetroArch can't overwrite later.
+                    val src = Root.q(saved); val dst = Root.q(auto)
+                    val cp = Root.Shell.run("cp -f $src $dst && { chown \$(stat -c %u:%g $src) $dst; chmod \$(stat -c %a $src) $dst; " +
+                        "chcon \$(stat -c %C $src) $dst; true; } 2>/dev/null && " +
+                        "[ \"\$(stat -c %s $src)\" = \"\$(stat -c %s $dst)\" ] && echo copied", 10000)
                     if (cp.out.contains("copied")) log("copied slot $slot into the auto slot: $auto")
                     else {
                         log("could not copy $saved into the auto slot $auto: ${cp.err.trim()}")
@@ -452,14 +462,19 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
      * must be in front and running (see InGameMenuScene.exitGame).
      */
     override fun quit(autoSave: Boolean): Boolean {
-        // Checked: the force stop below must not cut the save short.
-        if (!api && autoSave && keys) saveByKey()
+        // Checked: the force stop below must not cut the save short. When the save didn't happen
+        // (or didn't reach the auto slot RetroArch loads next time) RetroArch is left running:
+        // false with saveProblem set, so the caller says so and the user can save another way.
+        if (!api && autoSave && keys && (!saveByKey() || saveProblem != null)) return false
         if (api) {
             // savestate_auto_save (set by "Configure RetroArch") writes the auto slot on QUIT.
             send("QUIT")
             Thread.sleep(150)
             send("QUIT") // RetroArch asks for confirmation on the first QUIT by default
-            Thread.sleep(1500)
+            // Until it has written that and gone (a big state takes a while), at most 15 s.
+            val t0 = android.os.SystemClock.uptimeMillis()
+            do { Thread.sleep(250) } while (pkg != null && Root.knownAvailable() &&
+                android.os.SystemClock.uptimeMillis() - t0 < 15_000 && Root.exec("pidof $pkg").out.isNotBlank())
         }
         // Make sure it is really gone (also the only way without the command interface).
         return if (pkg != null && Root.knownAvailable()) {
@@ -541,11 +556,37 @@ class StandaloneController(
     }
 
     /** [autoSave]: the save key first; the game must be in front and running (see InGameMenuScene.exitGame). */
+    @Volatile override var saveProblem: String? = null
+        private set
+
     override fun quit(autoSave: Boolean): Boolean {
+        saveProblem = null
         if (autoSave && states == StateSupport.HOTKEY && saveSpec != null) {
-            unpause(); if (keys(saveSpec)) onSaved(); Thread.sleep(1200)
+            unpause()
+            // Not stopped without its save: false with saveProblem set, the game keeps running.
+            if (!keys(saveSpec)) { saveProblem = "MainUI couldn't press the save key"; return false }
+            onSaved()
+            waitForWrites()
         }
         return Root.forceStop(pkg)
+    }
+
+    /**
+     * After a save key: waits (at most 15 s) until the emulator stops writing (its processes'
+     * write_bytes stay the same twice), so stopping it can't cut a big state (PS2, Wii, 3DS) short.
+     */
+    private fun waitForWrites() {
+        val cmd = "for p in \$(pidof ${Root.q(pkg)}); do grep write_bytes /proc/\$p/io; done | awk '{s+=\$2} END {print s+0}'"
+        Thread.sleep(800)
+        val t0 = android.os.SystemClock.uptimeMillis()
+        var last = -1L
+        var same = 0
+        while (same < 2 && android.os.SystemClock.uptimeMillis() - t0 < 15_000) {
+            val w = Root.Shell.run(cmd, 3000).out.trim().toLongOrNull() ?: return
+            same = if (w == last) same + 1 else 0
+            last = w
+            Thread.sleep(400)
+        }
     }
 
     /**

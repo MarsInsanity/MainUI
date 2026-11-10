@@ -92,7 +92,11 @@ class Storage(private val ctx: Context, private val settings: Settings) {
     fun dataRoot(): File {
         val loc = settings.dataLocation
         dataRootCache?.let { (at, l, f) -> if (l == loc && now() - at < CACHE_MS) return f }
-        return findDataRoot(loc).also { dataRootCache = Triple(now(), loc, it) }
+        val f = findDataRoot(loc)
+        // "SD card" without a card (not mounted yet at boot): a stand-in, never cached, so the
+        // card is used as soon as it is there.
+        if (loc != "sd" || volumes().any { it.removable }) dataRootCache = Triple(now(), loc, f)
+        return f
     }
 
     private fun findDataRoot(location: String): File {
@@ -154,7 +158,8 @@ class Storage(private val ctx: Context, private val settings: Settings) {
 
     /** The SAF document id of a file: "primary:roms/psx/Game.chd", "1234-ABCD:Roms/psx/Game.chd". */
     fun documentId(file: File): String {
-        val vol = volumes().firstOrNull { file.absolutePath.startsWith(it.dir.absolutePath + "/") }
+        // (A whole volume as a rom folder, "/storage/1234-ABCD", is that volume's root: "1234-ABCD:".)
+        val vol = volumes().firstOrNull { file.absolutePath == it.dir.absolutePath || file.absolutePath.startsWith(it.dir.absolutePath + "/") }
         val volId = if (vol == null || !vol.removable) "primary" else (vol.uuid ?: vol.dir.name)
         val rel = if (vol != null) file.relativeTo(vol.dir).path else file.absolutePath.trimStart('/')
         return "$volId:$rel"

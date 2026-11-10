@@ -77,7 +77,7 @@ object HomeScenes {
             SearchFlow.start(host)
         }
         if (s.showAndroidSystem) {
-            val n = MainUI.library.androidGames().size
+            val n = MainUI.apps.androidGames().size // installed ones (uninstalled games stay in the library)
             out += Tile("android", "Android", "android", icons = SystemDef.ANDROID.icons, short = "APK",
                 sub = plural(n, "game"), open = { host.push(AndroidGamesScene(host)) })
         }

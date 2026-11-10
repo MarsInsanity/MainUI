@@ -315,13 +315,18 @@ class OverlayService : AccessibilityService() {
             runCatching {
                 val c = MainUI.sessions.controllerFor(s)
                 c.prepare()
-                if (c.states == io.github.marsinsanity.mainui.emu.StateSupport.HOTKEY) {
+                if (MainUI.sessions.autoLoadPending(s)) {
+                    // Its last save isn't loaded yet: saving the fresh start would overwrite it.
+                    io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: ${s.name} not saved, its last save wasn't loaded yet")
+                } else if (c.states == io.github.marsinsanity.mainui.emu.StateSupport.HOTKEY) {
                     if (settleMs > 0) Thread.sleep(settleMs)
                     val ok = c.save(0)
                     io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save for ${s.name}: ${if (ok) "done" else "FAILED ${c.saveProblem ?: ""}"}")
                     // RetroArch's save is checked (written and copied by now); others get time to write.
                     if (ok && c !is io.github.marsinsanity.mainui.emu.RetroArchController) Thread.sleep(800)
                     else if (!ok) MainUI.sessions.toast("${s.name} wasn't saved: ${c.saveProblem ?: "the save key failed"}")
+                    // Saved, but not all the way (RetroArch: not into the auto slot): said too.
+                    if (ok) c.saveProblem?.let { MainUI.sessions.toast("${s.name}: $it") }
                 } else io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: no save for ${s.name} (states ${c.states})")
             }.onFailure { Log.w(TAG, "save before Game Switcher failed", it); io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save failed: $it") }
             main.post { startGameSwitcher() }

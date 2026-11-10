@@ -151,7 +151,7 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
             action("Hidden apps", "${MainUI.library.hiddenApps().size}") { host.push(HiddenAppsScene(host)) },
             toggle("Auto-sort Android games", { s.autoSortAndroidGames }) { s.autoSortAndroidGames = it },
             action("Sort installed games now") {
-                host.io({ s.lastPackageReconcile = 0; MainUI.apps.reconcileNewInstalls(MainUI.emulators); MainUI.library.androidGames().size }) {
+                host.io({ s.lastPackageReconcile = 0; MainUI.apps.reconcileNewInstalls(MainUI.emulators, force = true); MainUI.apps.androidGames().size }) {
                     host.toast("$it Android games")
                 }
             },

@@ -26,17 +26,24 @@ data class Session(
     val startedAt: Long,
     /** The intent that started the game (Intent.toUri), to bring the same task back. */
     val launchUri: String? = null,
+    /**
+     * [android.os.SystemClock.uptimeMillis] at the start: play time counts uptime, which stops
+     * while the handheld sleeps (sessions are only restored within the same boot).
+     */
+    val startedUptime: Long = android.os.SystemClock.uptimeMillis(),
 ) {
     val isRetroArch get() = emuRef?.startsWith("ra:") == true
     val isAndroidApp get() = emuRef == null
 
     fun json() = JSONObject().put("gameKey", gameKey).put("system", systemId).put("path", path).put("name", name)
         .put("emu", emuRef).put("pkg", pkg).put("activity", activity).put("startedAt", startedAt).put("launch", launchUri)
+        .put("startedUptime", startedUptime)
 
     companion object {
         fun from(o: JSONObject) = Session(o.getString("gameKey"), o.getString("system"), o.optString("path").ifEmpty { null },
             o.getString("name"), o.optString("emu").ifEmpty { null }, o.getString("pkg"),
-            o.optString("activity").ifEmpty { null }, o.getLong("startedAt"), o.optString("launch").ifEmpty { null })
+            o.optString("activity").ifEmpty { null }, o.getLong("startedAt"), o.optString("launch").ifEmpty { null },
+            o.optLong("startedUptime", android.os.SystemClock.uptimeMillis()))
     }
 }
 
@@ -112,23 +119,47 @@ class SessionManager(
         if (option.installed == false) return "${option.name} is not installed"
         if (option.isRetroArch) runCatching { emulators.ensureRetroArchConfigured() }
         val intent = try { emulators.buildIntent(game, option) } catch (e: IllegalStateException) { return e.message }
-        endActive() // (thaws a paused emulator first: the new game may start in the same one)
-        return try {
-            if (emulators.defFor(option.ref)?.rootLaunch == true) {
-                if (!Root.available()) return "${option.name} can only be started by MainUI with root"
-                Root.startActivity(intent)?.let { return "Could not start ${option.name}: $it" }
-            } else ctx.startActivity(intent)
-            val pkg = intent.component?.packageName ?: intent.`package` ?: option.pkg ?: ""
-            val s = Session(game.key, game.systemId, game.file?.absolutePath, game.name, option.ref, pkg,
-                intent.component?.className, System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME))
-            io.github.marsinsanity.mainui.core.SessionLog.log("launch ${game.name} with ${option.ref} ($pkg)")
-            begin(s)
-            library.addRecent(game, option.ref)
-            if (option.isRetroArch) introduceKeyboard(s) else autoLoad(s)
-            null
+        val rootLaunch = emulators.defFor(option.ref)?.rootLaunch == true
+        if (rootLaunch && !Root.available()) return "${option.name} can only be started by MainUI with root"
+        val pkg = intent.component?.packageName ?: intent.`package` ?: option.pkg ?: ""
+        val s = Session(game.key, game.systemId, game.file?.absolutePath, game.name, option.ref, pkg,
+            intent.component?.className, System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME))
+        // The new session is in place before the game appears (MainActivity.onPause reads it while
+        // the start is still under way); the previous one comes back if the start fails.
+        val prev = swapIn(s)
+        val err = try {
+            if (rootLaunch) Root.startActivity(intent)?.let { "Could not start ${option.name}: $it" }
+            else { ctx.startActivity(intent); null }
         } catch (e: Exception) {
             "Could not start ${option.name}: ${e.message}"
         }
+        if (err != null) { swapBack(s, prev); return err }
+        prev?.let { account(it) }
+        io.github.marsinsanity.mainui.core.SessionLog.log("launch ${game.name} with ${option.ref} ($pkg)")
+        library.addRecent(game, option.ref)
+        if (option.isRetroArch) introduceKeyboard(s) else autoLoad(s)
+        return null
+    }
+
+    /**
+     * Makes [s] the active session for a start that is about to happen, the paused game (the
+     * new one may start in the same emulator) running again first. Returns the previous one.
+     */
+    private fun swapIn(s: Session): Session? {
+        unpark()
+        val prev = synchronized(this) { active.also { active = s } }
+        loadPending = null
+        shownAt = android.os.SystemClock.uptimeMillis()
+        launchedPackages += s.pkg
+        persist()
+        return prev
+    }
+
+    /** The start of [s] failed: [prev] (still running) is the session again, paused again behind MainUI. */
+    private fun swapBack(s: Session, prev: Session?) {
+        synchronized(this) { if (active === s) active = prev }
+        persist()
+        park()
     }
 
     /** Launches an Android app / Android game. */
@@ -137,27 +168,22 @@ class SessionManager(
         val apps = io.github.marsinsanity.mainui.MainUI.apps
         val intent = apps.launchIntent(pkg) ?: return "$label cannot be launched"
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        val g = Game(SystemDef.ANDROID.id, null, label, pkg = pkg)
+        val s = if (asGame) Session(g.key, g.systemId, null, label, null, pkg, intent.component?.className,
+            System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME)) else null
+        val prev = s?.let { swapIn(it) }
         return try {
             ctx.startActivity(intent)
             launchedPackages += pkg
-            if (asGame) {
-                val g = Game(SystemDef.ANDROID.id, null, label, pkg = pkg)
-                endActive()
-                begin(Session(g.key, g.systemId, null, label, null, pkg, intent.component?.className, System.currentTimeMillis(),
-                    intent.toUri(Intent.URI_INTENT_SCHEME)))
+            if (s != null) {
+                prev?.let { account(it) }
                 library.addRecent(g, null)
             }
             null
         } catch (e: Exception) {
+            if (s != null) swapBack(s, prev)
             "Could not start $label: ${e.message}"
         }
-    }
-
-    private fun begin(s: Session) {
-        synchronized(this) { active = s }
-        shownAt = android.os.SystemClock.uptimeMillis()
-        launchedPackages += s.pkg
-        persist()
     }
 
     // ---- the game paused while MainUI is in front --------------------------------------
@@ -213,12 +239,21 @@ class SessionManager(
         unpark()
         // Taken under the lock, so two callers at once (exit thread, onResume) count it once.
         val s = synchronized(this) { active.also { active = null } } ?: return
-        val secs = (System.currentTimeMillis() - s.startedAt) / 1000
-        if (secs in 1..(24 * 3600)) {
+        loadPending = null
+        account(s)
+        persist()
+    }
+
+    /**
+     * Adds [s]'s play time: uptime since it started (sleep doesn't count), at most a day for one
+     * session (a game left running for days still gets its day, not nothing).
+     */
+    private fun account(s: Session) {
+        val secs = ((android.os.SystemClock.uptimeMillis() - s.startedUptime) / 1000).coerceAtMost(24 * 3600L)
+        if (secs > 0) {
             library.addPlayTime(s.gameKey, secs)
             library.updateRecent(s.gameKey) { it.playSeconds += secs }
         }
-        persist()
     }
 
     /** Re-opens the running emulator exactly where it was. */
@@ -352,6 +387,16 @@ class SessionManager(
      * the game to start running. Skipped if another game started meanwhile, the user left it, or
      * MainUI's menu is open.
      */
+    /**
+     * The game whose last save MainUI is about to load (auto load waiting for the game to be up).
+     * Until it is loaded the running game is a fresh start: an automatic save now (leaving for
+     * the Game Switcher, Exit) would overwrite the real save with it, so those skip the save.
+     */
+    @Volatile private var loadPending: Session? = null
+
+    /** True while [s]'s auto load hasn't happened yet (see [loadPending]). */
+    fun autoLoadPending(s: Session?) = s != null && loadPending === s
+
     private fun autoLoad(s: Session) {
         val log = io.github.marsinsanity.mainui.core.SessionLog::log
         if (!settings.autoSaveOnExit) return
@@ -364,6 +409,7 @@ class SessionManager(
         val settle = c.loadDelayMs
         if (settle <= 0) { log("auto load ${s.name}: turned off for this emulator"); return }
         log("auto load ${s.name}: waiting for ${s.pkg}, then ${settle} ms, then ${c.loadSpec}")
+        loadPending = s
         Thread({
             val overlay = { io.github.marsinsanity.mainui.service.OverlayService.instance }
             val now = { android.os.SystemClock.uptimeMillis() }
@@ -393,6 +439,7 @@ class SessionManager(
                 log("auto load ${s.name}: cancelled (in front: ${o?.foregroundPackage}, menu open: ${o?.overlayShowing})"); return@Thread
             }
             val ok = runCatching { c.load(0) }.getOrDefault(false)
+            if (ok && loadPending === s) loadPending = null
             io.github.marsinsanity.mainui.core.SessionLog.log("auto load ${s.name}: load key ${if (ok) "sent" else "FAILED"} after ${settle} ms")
             if (ok) toast("Loaded your last save")
         }, "auto-load").apply { isDaemon = true }.start()
