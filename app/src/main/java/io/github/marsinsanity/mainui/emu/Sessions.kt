@@ -302,7 +302,7 @@ class SessionManager(
 
     fun saveScreenshot(gameKey: String, bmp: Bitmap): File? = runCatching {
         val f = screenshotFile(gameKey)
-        FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
+        writeImage(f, bmp)
         library.updateRecent(gameKey) { it.screenshot = f.absolutePath }
         f
     }.getOrNull()
@@ -312,6 +312,22 @@ class SessionManager(
         File(File(storage.stateThumbDir, sha1(gameKey)), "slot$slot.png")
 
     companion object {
+        /**
+         * Writes [bmp] to [f] as PNG without ever leaving a half-written [f]: into a temporary file
+         * first, then swapped in. A big screenshot takes about a second to write, and the Game
+         * Switcher (opening at the same time) read it half done: the top of the picture, black below.
+         */
+        fun writeImage(f: File, bmp: Bitmap) {
+            f.parentFile?.mkdirs()
+            val tmp = File(f.parentFile, ".${f.name}.${Thread.currentThread().id}.tmp")
+            try {
+                FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.PNG, 90, it) }
+                if (!tmp.renameTo(f)) { f.delete(); if (!tmp.renameTo(f)) throw java.io.IOException("could not replace ${f.name}") }
+            } finally {
+                tmp.delete()
+            }
+        }
+
         fun sha1(s: String): String = MessageDigest.getInstance("SHA-1").digest(s.toByteArray())
             .joinToString("") { "%02x".format(it) }
     }
