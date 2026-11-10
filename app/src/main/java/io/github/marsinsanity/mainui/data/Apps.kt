@@ -90,7 +90,10 @@ class Apps(private val ctx: Context, private val library: Library, private val s
         if (!io.github.marsinsanity.mainui.MainUI.storage.hasAllFilesAccess()) return
         // (Settings' "Sort installed games now" sorts even with auto sort off.)
         if (!force && !settings.autoSortAndroidGames) { settings.lastPackageReconcile = System.currentTimeMillis(); return }
-        val since = settings.lastPackageReconcile
+        // A data folder whose library has no Android games list yet (the first run with All files
+        // access, another data folder): every installed game is sorted in, not just new installs.
+        val since = if (!java.io.File(io.github.marsinsanity.mainui.MainUI.storage.configDir, "android_games.json").exists()) 0L
+            else settings.lastPackageReconcile
         invalidate()
         val hidden = library.hiddenApps() // hidden stays hidden, never sorted back in
         // Emulators sorted in as games before MainUI knew them (another build's id): take them out.

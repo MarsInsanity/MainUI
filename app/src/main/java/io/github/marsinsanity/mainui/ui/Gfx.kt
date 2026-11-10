@@ -106,6 +106,9 @@ class Gfx {
         redrawIn = 0L
         hintsEndX = 0f
         pendingHints.clear()
+        // Scrolling labels not drawn last frame start from their beginning when they come back.
+        marqueeStart.keys.retainAll(marqueeSeen)
+        marqueeSeen.clear()
         bmpPaint.isFilterBitmap = smooth
         c.save()
         c.scale(scale, scale)
@@ -227,7 +230,10 @@ class Gfx {
                 val pause = 1200L
                 val travel = (overflow / speed * 1000).toLong()
                 val cycle = pause * 2 + travel
-                val t = now % cycle
+                // From when this label started scrolling (it became selected), not the wall clock:
+                // a newly selected name always starts at its beginning.
+                marqueeSeen += s
+                val t = (now - marqueeStart.getOrPut(s) { now }) % cycle
                 val off = when {
                     t < pause -> 0f
                     t < pause + travel -> (t - pause) / 1000f * speed
@@ -249,25 +255,28 @@ class Gfx {
         return w
     }
 
+    /** When each scrolling (marquee) label started, and those drawn this frame. */
+    private val marqueeStart = HashMap<String, Long>()
+    private val marqueeSeen = HashSet<String>()
+
     /** Multi-line wrapped text, top aligned at [top]. Returns the bottom y. */
     fun paragraph(s: String, style: FontStyle, x: Float, top: Float, maxW: Float, size: Float = style.size,
                   color: Int = style.color, align: Align = Align.LEFT, maxLines: Int = 20): Float {
         setText(style, size, color)
         val lineH = size * 1.25f
         var y = top + lineH / 2
-        var lines = 0
+        val wrapped = ArrayList<String>()
         for (para in s.split('\n')) {
             var line = ""
             for (word in para.split(' ')) {
                 val tryLine = if (line.isEmpty()) word else "$line $word"
-                if (tp.measureText(tryLine) > maxW && line.isNotEmpty()) {
-                    text(line, style, x, y, align, maxW, color, size); y += lineH; line = word
-                    if (++lines >= maxLines) return y
-                } else line = tryLine
+                if (tp.measureText(tryLine) > maxW && line.isNotEmpty()) { wrapped += line; line = word } else line = tryLine
             }
-            text(line, style, x, y, align, maxW, color, size); y += lineH
-            if (++lines >= maxLines) return y
+            wrapped += line
         }
+        // More than fits: the last line holds the rest, cut with "...", so it's clear text is missing.
+        val shown = if (wrapped.size > maxLines) wrapped.take(maxLines - 1) + wrapped.drop(maxLines - 1).joinToString(" ") else wrapped
+        for (line in shown) { text(line, style, x, y, align, maxW, color, size); y += lineH }
         return y - lineH / 2
     }
 
@@ -622,7 +631,8 @@ class Gfx {
             val item = list.items[i]
             var y = startY + (i - list.scroll) * effectiveItemH
             if (stretch) y += (effectiveItemH - bgH) / 2
-            if (div != null) bmp(div, left, y, width, 4f)
+            // (Not across the box art beside the list.)
+            if (div != null) bmp(div, left, y, if (preview != null) labelEnd - left + 4 else width, 4f)
             y += padding
             val selected = i == list.active
             if (selected) selection(large, left, y, (if (preview != null) labelEnd - left + 4 else width), bgH)

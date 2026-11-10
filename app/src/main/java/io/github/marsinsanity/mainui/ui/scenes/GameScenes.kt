@@ -45,13 +45,15 @@ internal object GameItems {
     /** OnionOS style game options (SELECT on a game). */
     fun options(host: SceneHost, g: Game, extra: List<UiItem> = emptyList(), onChanged: () -> Unit = {}) {
         val def = Launch.systemDef(g.systemId)
+        // A system menu entry (PICO-8's Splore, from Recents / Favorites): no core, file or rom of its own.
+        val isMenu = g.file != null && def?.menuItemFor(g.file) != null
         val items = mutableListOf<UiItem>()
         val fav = MainUI.library.isFavorite(g.key)
         items += UiItem(if (fav) "Remove from favorites" else "Add to favorites", onSelect = {
             val now = MainUI.library.toggleFavorite(g)
             host.toast(if (now) "Added to favorites" else "Removed from favorites"); onChanged()
         })
-        if (def != null && !g.isAndroid) {
+        if (def != null && !g.isAndroid && !isMenu) {
             val cur = MainUI.emulators.choose(def, g)
             val own = MainUI.library.coreForGame(g.key) != null
             items += UiItem("Core: ${if (own) cur?.name ?: "none" else "Default (${cur?.shortName ?: "none"})"}",
@@ -66,7 +68,7 @@ internal object GameItems {
             items += UiItem("Game info", onSelect = { host.push(DialogScene(host, g.name, d.take(400), "OK", null)) })
         }
         items += extra
-        if (!g.isAndroid && !g.isFolder && g.file != null) {
+        if (!g.isAndroid && !g.isFolder && g.file != null && !isMenu) {
             // Files that must stay but aren't games (BIOS sets like neogeo.zip, which are hidden by themselves).
             val hidden = MainUI.games.isHidden(g)
             items += UiItem(if (hidden) "Unhide ROM" else "Hide ROM", onSelect = {
@@ -76,7 +78,7 @@ internal object GameItems {
             })
         }
         // Last, away from the everyday entries.
-        if (!g.isAndroid && !g.isFolder && g.file != null) items += UiItem("Delete ROM", onSelect = { confirmDelete(host, g, onChanged) })
+        if (!g.isAndroid && !g.isFolder && g.file != null && !isMenu) items += UiItem("Delete ROM", onSelect = { confirmDelete(host, g, onChanged) })
         host.push(PopMenuScene(host, g.name, items))
     }
 
@@ -90,6 +92,11 @@ internal object GameItems {
         if (MainUI.sessions.active?.gameKey == g.key) { host.toast("${g.name} is running: exit it first", 2500); return }
         val sys = Launch.gameSystem(g.systemId)
         host.io({ RomFiles.related(file, sys?.def?.unzip.orEmpty()) }) { files ->
+            // Also when the running game is one of its files (the image a zip was unpacked to, a disc of an .m3u).
+            val running = MainUI.sessions.active?.path
+            if (running != null && files.any { it.absolutePath == running || running.startsWith(it.absolutePath + "/") }) {
+                host.toast("${g.name} is running: exit it first", 2500); return@io
+            }
             val others = files.size - 1
             val what = when {
                 file.isDirectory -> "the folder \"${file.name}\" and everything in it"
@@ -116,16 +123,24 @@ internal object GameItems {
             ?.takeIf { it.isFile && it.nameWithoutExtension.startsWith(file.nameWithoutExtension, ignoreCase = true) }
         val failed = RomFiles.delete(files)
         if (file.exists()) return failed
-        art?.delete()
+        // Kept while another rom of the same name still uses it (Game.chd beside the deleted Game.cue).
+        val stillUsed = file.parentFile?.listFiles()?.any { it.isFile && it.nameWithoutExtension.equals(file.nameWithoutExtension, true) &&
+            sys?.def?.accepts(it) == true } == true
+        if (!stillUsed) art?.delete()
         if (sys != null) runCatching {
             val gl = GameListXml(MainUI.games.systemRootFor(sys, file.parentFile ?: file)).load()
             if (gl.parseError == null && gl.remove(file)) gl.save()
         }
-        MainUI.library.removeRecent(g.key)
-        if (MainUI.library.isFavorite(g.key)) MainUI.library.toggleFavorite(g)
-        MainUI.library.setCoreForGame(g.key, null)
+        // Every deleted file that is a game of its own (a zip and the image unpacked from it, an .m3u's
+        // discs played directly): its recents, favorite, core choice and art go too.
+        for (f in listOf(file) + files) if (f !in failed) {
+            val k = "${g.systemId}:${f.absolutePath}"
+            MainUI.library.removeRecent(k)
+            if (MainUI.library.isFavorite(k)) MainUI.library.toggleFavorite(if (k == g.key) g else Game(g.systemId, f, g.name))
+            MainUI.library.setCoreForGame(k, null)
+            Images.invalidate("art:$k")
+        }
         MainUI.games.invalidate()
-        Images.invalidate("art:${g.key}")
         return failed
     }
 }
