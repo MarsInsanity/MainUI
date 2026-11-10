@@ -223,7 +223,9 @@ class TileStrip {
             val img = t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
             if (img != null) g.bmp(img, x, y, w, h)
             else {
-                g.menuTileBox(x, y, w, h, sel)
+                // The theme's blank main menu tile (MainUI's own theme has one), else the same box drawn.
+                val blank = g.skin(if (sel) "bg-home-tile-f" else "bg-home-tile-n")
+                if (blank != null) g.bmp(blank, x, y, w, h) else g.menuTileBox(x, y, w, h, sel)
                 val cx = x + w / 2; val cy = y + h * 0.36f
                 val box = w * 0.66f
                 val icon = HomeScenes.tileIcon(g, t, sel)
@@ -235,13 +237,45 @@ class TileStrip {
             }
             if (g.theme.hideIconLabels) return
             val gs = g.theme.grid
-            g.text(t.label, io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size1x4, gs.color),
-                x + w / 2, y + 195f, Align.CENTER, maxW = w - 12f, color = if (sel) gs.selectedColor else gs.color, marquee = sel)
+            val color = if (sel) gs.selectedColor else gs.color
+            val maxW = w - 14f
+            // The main menu's label size when it fits; system names are longer ("Nintendo Switch"):
+            // a little smaller, then on two lines, and only then scrolling.
+            val (lines, size) = fitLabel(t.label, gs.size1x4, kotlin.math.min(gs.size3x4, gs.size1x4 * 0.8f)) { str, sz ->
+                g.textWidth(str, io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, sz, gs.color), sz) <= maxW
+            }
+            val style = io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, size, gs.color)
+            if (lines.size == 1) g.text(lines[0], style, x + w / 2, y + 195f, Align.CENTER, maxW = maxW, color = color, marquee = sel)
+            else lines.forEachIndexed { i, l ->
+                g.text(l, style, x + w / 2, y + 195f + (i - 0.5f) * size * 1.05f - 8f, Align.CENTER, maxW = maxW, color = color, marquee = sel)
+            }
             t.sub?.let { sub ->
                 g.text(sub, io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size3x4 * 0.8f, gs.color),
-                    x + w / 2, y + 226f, Align.CENTER, maxW = w - 12f,
+                    x + w / 2, y + 222f, Align.CENTER, maxW = maxW,
                     color = if (sel) gs.selectedColor else Color.argb(170, Color.red(gs.color), Color.green(gs.color), Color.blue(gs.color)))
             }
+        }
+
+        /**
+         * [label] as one line at the largest size from [max] down to [min] that [fits], else on two
+         * lines split where they balance best, at a space or after a "/" or "-" ("Genesis/" over
+         * "Megadrive"), at the largest size both fit (at least 85% of [min]), else one line at
+         * [min] (scrolled when selected).
+         */
+        fun fitLabel(label: String, max: Float, min: Float, fits: (String, Float) -> Boolean): Pair<List<String>, Float> {
+            var size = max
+            while (size >= min) { if (fits(label, size)) return listOf(label) to size; size -= 1f }
+            // Where the second line starts: after a space (dropped) or after "/" / "-" (kept above).
+            val breaks = (1 until label.length).filter { i -> label[i - 1] == ' ' || label[i - 1] == '/' || label[i - 1] == '-' }
+                .filter { label.substring(0, it).isNotBlank() && label.substring(it).isNotBlank() }
+            if (breaks.isNotEmpty()) {
+                val at = breaks.minByOrNull { kotlin.math.abs(label.length - 2 * it) }!!
+                val two = listOf(label.substring(0, at).trim(), label.substring(at).trim())
+                size = kotlin.math.min(max, min * 1.15f)
+                while (size >= min * 0.85f) { if (two.all { fits(it, size) }) return two to size; size -= 1f }
+                return two to min * 0.85f
+            }
+            return listOf(label) to min
         }
     }
 }
