@@ -296,6 +296,7 @@ class InGameMenuScene(
         val ctx = host.hostContext
         leaveThen(450) {
             val ok = work()
+            io.github.marsinsanity.mainui.core.SessionLog.log("menu $what for ${session.name}: hotkey ${if (ok) "sent" else "FAILED"}")
             main.post {
                 Toast.makeText(ctx, if (ok) "$what state: hotkey sent" else "$what state failed (needs root)", Toast.LENGTH_SHORT).show()
             }

@@ -65,8 +65,12 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
    - **Root**: grant MainUI superuser in Magisk (core detection, process manager, key injection, force stop).
 3. In **Settings > Emulators & cores**, run **Configure RetroArch for MainUI** once. It makes RetroArch
    pause itself while MainUI's menu is open, flush in-game saves every 10 s, auto save / load states,
-   and turns on the network command port (used by RetroArch builds that include it; the official
+   treat MainUI's virtual keyboard as a keyboard (`input_android_physical_keyboard`; otherwise RetroArch
+   can give it a controller port, even port 1), and turns on the network command port (used by RetroArch builds that include it; the official
    Android builds don't, see below).
+   MainUI applies newer settings by itself the next time a RetroArch game starts while RetroArch is closed.
+   What MainUI did around games (launches, the in-game menu, save / load keys, auto load) is written to
+   `MainUI/logs/session.txt`, to send along with a problem report.
 4. **Settings > Emulators & cores > RetroArch cores > Get cores for my games** downloads a core for
    every system you have roms for (root).
 
@@ -242,8 +246,10 @@ the ROMs folder (`roms`), so give the emulator that one.
 
 1. An accessibility service watches which app is in front. Only while a game MainUI launched is
    in front does it consume the Home key. Everywhere else Home behaves normally.
-2. **The game is paused first**: by freezing its process with `SIGSTOP` (root; RetroArch builds with
-   network commands get `PAUSE_TOGGLE` instead). Then the paused frame is captured and the menu is
+2. **The game is paused first**: standalone emulators by freezing their process with `SIGSTOP`
+   (root). RetroArch is never frozen (a frozen RetroArch could be left without sound): it pauses itself
+   when MainUI's menu takes focus (`pause_nonactive`), and builds with network commands get
+   `PAUSE_TOGGLE`. Then the paused frame is captured and the menu is
    drawn over it. Android sends the game a "focus lost" event when the menu appears; a frozen app
    can't acknowledge it and would be reported as *not responding* after 5 s, so MainUI lets the
    game's main thread run just long enough to handle it (until it is back in its event loop, usually

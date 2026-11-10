@@ -144,8 +144,10 @@ class MainActivity : Activity() {
         super.onPause()
         resumed = false
         leftForSession = MainUI.sessions.active != null
-        // Back to the game (Game Switcher, fallback menu): hand it the triggers / sticks that moved here.
-        if (leftForSession) OverlayService.handBackControllerAxes(view.takeControllerAxes(), afterMs = 700)
+        // Back to a game that was running (Game Switcher, fallback menu): hand it the triggers /
+        // sticks that moved here. Not for a game starting now: it reads the controller fresh.
+        val moved = view.takeControllerAxes()
+        if (leftForSession && MainUI.sessions.resumedAt >= resumedAt) OverlayService.handBackControllerAxes(moved, afterMs = 700)
         // Paused because MainUI just started / resumed the game (since it came to the front)?
         val shown = MainUI.sessions.shownAt
         leftForGame = leftForSession && shown >= resumedAt && android.os.SystemClock.uptimeMillis() - shown < 15_000

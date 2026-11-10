@@ -503,7 +503,7 @@ class EmulatorManager(
         if (!Root.knownAvailable() && !Root.available()) return
         if (Root.exec("pidof $pkg").out.isNotBlank()) return
         val (ok, msg) = configureRetroArch()
-        android.util.Log.i("MainUI.Emu", "RetroArch auto configure: $ok $msg")
+        io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch configured by itself: $ok $msg")
     }
 
     /**
@@ -537,6 +537,10 @@ class EmulatorManager(
             "input_load_state" to "\"f4\"",
             "input_enable_hotkey" to "\"nul\"",
             "input_hotkey_device_merge" to "\"false\"",
+            // MainUI's virtual keyboard (F keys only, no letters) is a keyboard, not a gamepad:
+            // otherwise RetroArch can give it a controller port, port 1 when it shows up before
+            // the real controller, and then reads its F keys as buttons rather than hotkeys.
+            "input_android_physical_keyboard" to "\"MainUI Keyboard\"",
         )
         if (settings.autoSaveOnExit) {
             wanted["savestate_auto_save"] = "\"true\""
@@ -576,7 +580,7 @@ class EmulatorManager(
         }
 
         /** Bump when [configureRetroArch] writes something new. */
-        const val RA_CONFIG_VERSION = 2
+        const val RA_CONFIG_VERSION = 3
         private const val RA_CONFIG_STAMP = "ra_config_stamp"
 
         /** Archive / disc image extensions that many unrelated cores accept. */

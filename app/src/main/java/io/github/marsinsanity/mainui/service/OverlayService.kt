@@ -317,9 +317,11 @@ class OverlayService : AccessibilityService() {
                 c.prepare()
                 if (c.states == io.github.marsinsanity.mainui.emu.StateSupport.HOTKEY) {
                     if (settleMs > 0) Thread.sleep(settleMs)
-                    if (c.save(0)) Thread.sleep(800)
-                }
-            }.onFailure { Log.w(TAG, "save before Game Switcher failed", it) }
+                    val ok = c.save(0)
+                    io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save key for ${s.name}: ${if (ok) "sent" else "FAILED"}")
+                    if (ok) Thread.sleep(800)
+                } else io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: no save for ${s.name} (states ${c.states})")
+            }.onFailure { Log.w(TAG, "save before Game Switcher failed", it); io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save failed: $it") }
             main.post { startGameSwitcher() }
         }
     }
@@ -350,6 +352,7 @@ class OverlayService : AccessibilityService() {
             runCatching { controller.prepare() }
             val paused = MainUI.settings.pauseOnMenu && runCatching { controller.pause() }.getOrDefault(false)
             Log.d(TAG, "paused=$paused (${controller.javaClass.simpleName})")
+            io.github.marsinsanity.mainui.core.SessionLog.log("menu opened for ${s.name} (${s.pkg}): ${controller.javaClass.simpleName}, states ${controller.states}, frozen $paused")
             capture { bmp ->
                 main.post {
                     if (id != openId) {
@@ -463,6 +466,7 @@ class OverlayService : AccessibilityService() {
         val v = overlay ?: return
         overlay = null
         val moved = v.takeControllerAxes()
+        io.github.marsinsanity.mainui.core.SessionLog.log("overlay closed" + if (moved.isEmpty()) "" else ", controller axes moved on ${moved.keys}")
         runCatching { getSystemService(WindowManager::class.java).removeView(v) }
         v.destroy()
         handBackControllerAxes(moved)
@@ -527,7 +531,10 @@ class OverlayService : AccessibilityService() {
             if (moved.isEmpty() || !Root.knownAvailable()) return
             Thread({
                 Thread.sleep(afterMs)
-                for ((id, values) in moved) runCatching { io.github.marsinsanity.mainui.core.VirtualKeys.axes(id, values) }
+                for ((id, values) in moved) {
+                    val ok = runCatching { io.github.marsinsanity.mainui.core.VirtualKeys.axes(id, values) }.getOrDefault(false)
+                    io.github.marsinsanity.mainui.core.SessionLog.log("handed controller $id's axes back to ${instance?.foregroundPackage}: ${if (ok) "ok" else "FAILED"} ${values.joinToString(",") { "%.2f".format(it) }}")
+                }
             }, "axes-handback").apply { isDaemon = true }.start()
         }
 
