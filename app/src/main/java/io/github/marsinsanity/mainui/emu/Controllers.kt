@@ -341,6 +341,16 @@ class StandaloneController(
     val defaultSave: String? get() = def?.save
     val defaultLoad: String? get() = def?.load
 
+    /**
+     * How long the game needs, once its emulator's screen has settled, before the load key works
+     * (auto load on start): the user's choice (in-game menu > Save / load keys), else the
+     * emulator's "loadDelay" in emulators.json, else [DEFAULT_LOAD_DELAY_MS]. 0 = no auto load.
+     */
+    val loadDelayMs: Long get() = def?.let { d ->
+        Hotkeys.loadDelay(d.id)?.let { it * 1000L } ?: d.loadDelayMs.takeIf { it > 0 }
+    } ?: DEFAULT_LOAD_DELAY_MS
+    val defaultLoadDelayMs: Long get() = def?.loadDelayMs?.takeIf { it > 0 } ?: DEFAULT_LOAD_DELAY_MS
+
     override val states: StateSupport get() = when {
         def == null -> StateSupport.MENU // Android games: their own UI
         // Keys set for it (by emulators.json or the user): MainUI presses them, which needs root.
@@ -404,5 +414,6 @@ class StandaloneController(
 
     companion object {
         fun keyLabel(spec: String) = Hotkeys.label(spec)
+        const val DEFAULT_LOAD_DELAY_MS = 6000L
     }
 }

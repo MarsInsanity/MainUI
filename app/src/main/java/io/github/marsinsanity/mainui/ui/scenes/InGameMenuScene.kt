@@ -67,7 +67,7 @@ class InGameMenuScene(
     }
 
     private enum class Action { CONTINUE, SAVE, LOAD, STATES_MENU, NATIVE, SWITCHER, EXIT, BIND, BIND_SAVE, BIND_LOAD, BIND_BACK,
-        KEY_SAVE, KEY_LOAD, KEY_RESET }
+        KEY_SAVE, KEY_LOAD, KEY_RESET, KEY_DELAY }
 
     /** Standalone emulator (not an Android game): its save / load keys can be set here. */
     private val standalone get() = (controller as? StandaloneController)?.takeIf { it.emuId != null }
@@ -94,6 +94,7 @@ class InGameMenuScene(
             items += UiItem("Load key: ${Hotkeys.label(sa.loadSpec)}", data = Action.KEY_LOAD)
             if (sa.saveSpec != null) items += UiItem("Send save key", data = Action.BIND_SAVE)
             if (sa.loadSpec != null) items += UiItem("Send load key", data = Action.BIND_LOAD)
+            if (sa.loadSpec != null) items += UiItem("Auto load wait: ${delayLabel(sa.loadDelayMs)}", data = Action.KEY_DELAY)
             if (Hotkeys.get(sa.emuId!!) != (null to null)) items += UiItem(
                 if (sa.defaultSave != null) "Use defaults (${Hotkeys.label(sa.defaultSave)} / ${Hotkeys.label(sa.defaultLoad)})" else "Clear keys",
                 data = Action.KEY_RESET)
@@ -136,13 +137,17 @@ class InGameMenuScene(
             if (sel && controller.hasSlots && (it.data == Action.SAVE || it.data == Action.LOAD)) {
                 g.arrow(false, panelW, y + rowH / 2)
             }
-            if (sel && (it.data == Action.KEY_SAVE || it.data == Action.KEY_LOAD)) g.arrow(false, panelW, y + rowH / 2)
+            if (sel && (it.data == Action.KEY_SAVE || it.data == Action.KEY_LOAD || it.data == Action.KEY_DELAY)) g.arrow(false, panelW, y + rowH / 2)
         }
         val cur = list.current?.data
         if (bindMode) {
             val bx = panelW + 40f
             g.fillRect(bx - 12f, top + 14f, g.W - bx - 6f, 270f, g.theme.panel, 10f)
-            g.paragraph("Left / right picks the keys MainUI presses for Save and Load in $emuName. " +
+            g.paragraph(if (cur == Action.KEY_DELAY)
+                "When a game you left with a save starts again, MainUI presses the load key once $emuName's " +
+                "screen has stayed the same this long. Raise it if the save doesn't load (the game wasn't " +
+                "running yet); \"off\" never loads by itself."
+            else "Left / right picks the keys MainUI presses for Save and Load in $emuName. " +
                 "They must be the same in $emuName: open its hotkey settings, start binding \"Save state\" " +
                 "(or \"Load state\"), press HOME and choose Send save / load key.", g.theme.list, bx, top + 26f,
                 g.W - bx - 24f, size = 20f, maxLines = 11)
@@ -174,6 +179,7 @@ class InGameMenuScene(
             Btn.LEFT, Btn.RIGHT -> {
                 val cur = list.current?.data
                 if (cur == Action.KEY_SAVE || cur == Action.KEY_LOAD) changeKey(cur == Action.KEY_SAVE, b == Btn.RIGHT)
+                else if (cur == Action.KEY_DELAY) changeDelay(b == Btn.RIGHT)
                 else if (controller.hasSlots && (cur == Action.SAVE || cur == Action.LOAD)) {
                     slot = (slot + if (b == Btn.RIGHT) 1 else -1).coerceIn(0, 9)
                     MainUI.settings.prefs.edit().putInt("slot:${session.gameKey}", slot).apply()
@@ -235,10 +241,25 @@ class InGameMenuScene(
             Action.BIND -> { bindMode = true; buildItems() }
             Action.BIND_BACK -> { bindMode = false; buildItems() }
             Action.KEY_SAVE, Action.KEY_LOAD -> changeKey(a == Action.KEY_SAVE, true)
-            Action.KEY_RESET -> { standalone?.emuId?.let { Hotkeys.set(it, null, null) }; buildItems() }
+            Action.KEY_RESET -> { standalone?.emuId?.let { Hotkeys.set(it, null, null); Hotkeys.setLoadDelay(it, null) }; buildItems() }
+            Action.KEY_DELAY -> changeDelay(true)
             Action.BIND_SAVE -> leaveThen(700) { (controller as? StandaloneController)?.save(0) }
             Action.BIND_LOAD -> leaveThen(700) { (controller as? StandaloneController)?.load(0) }
         }
+    }
+
+    private fun delayLabel(ms: Long) = if (ms <= 0) "off" else "${ms / 1000} s"
+
+    /** Steps this emulator's auto load wait. */
+    private fun changeDelay(forward: Boolean) {
+        val sa = standalone ?: return
+        val id = sa.emuId ?: return
+        val next = Hotkeys.stepDelay((sa.loadDelayMs / 1000).toInt(), forward)
+        Hotkeys.setLoadDelay(id, if (next * 1000L == sa.defaultLoadDelayMs) null else next)
+        val keep = list.active
+        buildItems()
+        list.active = keep.coerceIn(0, list.size - 1)
+        invalidate()
     }
 
     /** Steps the save or load key to the next / previous choice and keeps it for this emulator. */

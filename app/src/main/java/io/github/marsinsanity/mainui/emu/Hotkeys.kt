@@ -31,6 +31,26 @@ object Hotkeys {
         MainUI.settings.prefs.edit().putString(KEY, a.toString()).apply()
     }
 
+    // ---- auto load wait ------------------------------------------------------------------
+
+    /** Seconds to wait before the auto load key, offered in the in-game menu (0 = no auto load). */
+    val DELAYS = listOf(0, 3, 5, 8, 10, 15, 20, 30, 45, 60)
+
+    /** The user's wait for [emuId] in seconds, null = the emulator's default. */
+    fun loadDelay(emuId: String): Int? = MainUI.settings.prefs.getInt("autoload_delay:$emuId", -1).takeIf { it >= 0 }
+
+    fun setLoadDelay(emuId: String, seconds: Int?) {
+        val e = MainUI.settings.prefs.edit()
+        if (seconds == null) e.remove("autoload_delay:$emuId") else e.putInt("autoload_delay:$emuId", seconds)
+        e.apply()
+    }
+
+    /** The next / previous wait after [seconds]. */
+    fun stepDelay(seconds: Int, forward: Boolean): Int {
+        val i = DELAYS.indexOfFirst { it >= seconds }.let { if (it < 0) DELAYS.size - 1 else it }
+        return DELAYS[(if (forward) i + 1 else i - 1).coerceIn(0, DELAYS.size - 1)]
+    }
+
     /** The next / previous choice after [spec] (from "not set", the first one). */
     fun step(spec: String?, forward: Boolean): String {
         val i = CHOICES.indexOf(spec)

@@ -256,25 +256,38 @@ class SessionManager(
         if (!settings.autoSaveOnExit || !hasSavedState(s.gameKey)) return
         val c = controllerFor(s) as? StandaloneController ?: return
         if (c.states != StateSupport.HOTKEY || c.loadSpec == null) return
-        val settle = s.emuRef?.let { emulators.defFor(it) }?.loadDelayMs?.takeIf { it > 0 } ?: AUTO_LOAD_SETTLE_MS
+        val settle = c.loadDelayMs
+        if (settle <= 0) return // turned off for this emulator
         Thread({
             val overlay = { io.github.marsinsanity.mainui.service.OverlayService.instance }
-            val t0 = android.os.SystemClock.uptimeMillis()
+            val now = { android.os.SystemClock.uptimeMillis() }
+            val t0 = now()
             if (overlay() != null) {
                 while (overlay()?.foregroundPackage != s.pkg) {
-                    if (active !== s || android.os.SystemClock.uptimeMillis() - t0 > 30_000) return@Thread
+                    if (active !== s || now() - t0 > 30_000) return@Thread
                     Thread.sleep(250)
                 }
-                Thread.sleep(settle)
+                toast("Loading your last save in about ${(settle + 999) / 1000} s...")
+                // Count from the emulator's last screen change (its loading screen giving way to the
+                // game, a dialog), not its first window: the game only takes the key once it runs.
+                val inFront = now()
+                while (true) {
+                    val o = overlay() ?: break
+                    if (active !== s || o.foregroundPackage != s.pkg) return@Thread
+                    if (now() - maxOf(inFront, o.lastWindowChangeAt) >= settle || now() - inFront > settle + 60_000) break
+                    Thread.sleep(250)
+                }
             } else Thread.sleep(settle + 4000)
             val o = overlay()
             if (active !== s || (o != null && (o.foregroundPackage != s.pkg || o.overlayShowing))) return@Thread
             val ok = runCatching { c.load(0) }.getOrDefault(false)
             android.util.Log.i("MainUI.Sessions", "auto load ${s.name}: $ok")
-            if (ok) android.os.Handler(android.os.Looper.getMainLooper()).post {
-                android.widget.Toast.makeText(ctx, "Loaded your last save", android.widget.Toast.LENGTH_SHORT).show()
-            }
+            if (ok) toast("Loaded your last save")
         }, "auto-load").apply { isDaemon = true }.start()
+    }
+
+    private fun toast(msg: String) = android.os.Handler(android.os.Looper.getMainLooper()).post {
+        android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     // ---- screenshots -----------------------------------------------------------------
@@ -292,9 +305,6 @@ class SessionManager(
         File(File(storage.stateThumbDir, sha1(gameKey)), "slot$slot.png")
 
     companion object {
-        /** Time for a game to be running after its emulator's window appears (the load key is ignored before). */
-        const val AUTO_LOAD_SETTLE_MS = 4000L
-
         fun sha1(s: String): String = MessageDigest.getInstance("SHA-1").digest(s.toByteArray())
             .joinToString("") { "%02x".format(it) }
     }
