@@ -99,7 +99,8 @@ object Launch {
      * earlier launch unpacked beside the zip, or offer to unpack it now (once).
      */
     private fun startZipped(host: SceneHost, def: SystemDef, game: Game, zip: java.io.File) {
-        ZipImages.unpacked(zip, def.unzip)?.let { start(host, def, game.copy(file = it)); return }
+        // Through the running-game check: the image may be the game running right now (resumed, not restarted).
+        ZipImages.unpacked(zip, def.unzip)?.let { Launch.game(host, imageGame(game, it)); return }
         host.io({ runCatching { ZipImages.entry(zip, def.unzip) } }) { r ->
             val e = r.getOrNull()
             if (e == null) {
@@ -134,7 +135,7 @@ object Launch {
                 host.push(DialogScene(host, "Can't unpack ${game.name}", err.message ?: err.toString(), "OK", null))
                 return@io
             }
-            val play = { start(host, def, game.copy(file = img)) }
+            val play = { Launch.game(host, imageGame(game, img)) }
             // More than one disc in the zip: only one was unpacked, so the zip (the other discs) stays.
             if (runCatching { ZipImages.imageCount(zip, def.unzip) }.getOrDefault(2) > 1) {
                 host.toast("${zip.name} holds more than one disc: it is kept", 3000)
@@ -143,8 +144,21 @@ object Launch {
             }
             host.push(DialogScene(host, "Unpacked",
                 "Delete ${zip.name} to free ${ZipImages.gb(zip.length())}? MainUI launches the unpacked image from now on.",
-                "DELETE", "KEEP", onConfirm = { zip.delete(); MainUI.games.invalidate(); play() }, onCancel = play))
+                "DELETE", "KEEP", onConfirm = {
+                    zip.delete(); MainUI.games.invalidate()
+                    // The zip's favorite goes to the image that replaces it.
+                    val g = imageGame(game, img)
+                    if (MainUI.library.isFavorite(game.key)) { MainUI.library.toggleFavorite(game); if (!MainUI.library.isFavorite(g.key)) MainUI.library.toggleFavorite(g) }
+                    play()
+                }, onCancel = play))
         }
+    }
+
+    /** The image unpacked from [zipGame]'s zip, as a game; the zip's own core choice goes with it. */
+    private fun imageGame(zipGame: Game, img: java.io.File): Game {
+        val g = zipGame.copy(file = img)
+        MainUI.library.coreForGame(zipGame.key)?.let { if (MainUI.library.coreForGame(g.key) == null) MainUI.library.setCoreForGame(g.key, it) }
+        return g
     }
 
     fun formatTime(seconds: Long): String {

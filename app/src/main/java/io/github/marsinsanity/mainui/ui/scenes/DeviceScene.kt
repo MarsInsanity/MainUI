@@ -37,10 +37,12 @@ class DeviceScene(host: SceneHost) : ListScene(host, "Device") {
 
         // Brightness, 10-100% in tens (Onion's steps; no 0%: a black screen can't be undone by looking).
         val levels = (1..10).map { it.toString() to "${it * 10}%" }
-        items += multi("Brightness", levels, { Brightness.get(ctx).coerceAtLeast(1).toString() }) { Brightness.set(ctx, it.toInt()) }
-            .apply { wrap = false } // scales stop at their ends: never 10% -> 100% (or Muted -> full) in one press
         val auto = runCatching { AndroidSettings.System.getInt(cr, AndroidSettings.System.SCREEN_BRIGHTNESS_MODE) == 1 }.getOrDefault(false)
-        items += toggle("Auto brightness", { auto }) { on -> putSystem(AndroidSettings.System.SCREEN_BRIGHTNESS_MODE, if (on) 1 else 0) }
+        val autoItem = toggle("Auto brightness", { auto }) { on -> putSystem(AndroidSettings.System.SCREEN_BRIGHTNESS_MODE, if (on) 1 else 0) }
+        // (Setting a level turns auto brightness off: the toggle says so at once.)
+        items += multi("Brightness", levels, { Brightness.get(ctx).coerceAtLeast(1).toString() }) { Brightness.set(ctx, it.toInt()); autoItem.value = 0 }
+            .apply { wrap = false } // scales stop at their ends: never 10% -> 100% (or Muted -> full) in one press
+        items += autoItem
 
         // Media volume, in the device's own steps.
         val am = ctx.getSystemService(AudioManager::class.java)
@@ -61,7 +63,9 @@ class DeviceScene(host: SceneHost) : ListScene(host, "Device") {
         }.apply { wrap = false }
 
         // Radios and battery saver: switched with root, else Android's panel.
-        val wifi = runCatching { ctx.applicationContext.getSystemService(WifiManager::class.java)?.isWifiEnabled == true }.getOrDefault(false)
+        // (Switching on takes a few seconds: "enabling" already shows as on.)
+        val wifi = runCatching { ctx.applicationContext.getSystemService(WifiManager::class.java)?.wifiState.let {
+            it == WifiManager.WIFI_STATE_ENABLED || it == WifiManager.WIFI_STATE_ENABLING } }.getOrDefault(false)
         items += radio("Wi-Fi", wifi, { on -> "svc wifi ${if (on) "enable" else "disable"}" },
             if (Build.VERSION.SDK_INT >= 29) AndroidSettings.Panel.ACTION_WIFI else AndroidSettings.ACTION_WIFI_SETTINGS)
         val bt = runCatching { AndroidSettings.Global.getInt(cr, AndroidSettings.Global.BLUETOOTH_ON) == 1 }.getOrDefault(false)
@@ -92,7 +96,7 @@ class DeviceScene(host: SceneHost) : ListScene(host, "Device") {
     /** An Android system setting: directly with the permission, else with root. */
     private fun putSystem(key: String, value: Int) {
         if (canWrite()) runCatching { AndroidSettings.System.putInt(ctx.contentResolver, key, value) }
-        else if (root()) Thread { Root.exec("settings put system $key $value") }.start()
+        else if (root()) Brightness.rootPut(key, "settings put system $key $value") // in order, the newest per setting
         else host.toast("Allow MainUI to change system settings first (last row)")
     }
 

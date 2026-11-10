@@ -11,7 +11,8 @@ import java.io.File
  * still points to (two .cue sheets sharing a track).
  */
 object RomFiles {
-    private val CUE_FILE = Regex("FILE\\s+\"([^\"]+)\"", RegexOption.IGNORE_CASE)
+    /** FILE "Game (Track 1).bin" BINARY, or unquoted: FILE GAME.BIN BINARY. */
+    private val CUE_FILE = Regex("FILE\\s+(?:\"([^\"]+)\"|(\\S+))", RegexOption.IGNORE_CASE)
     private val GDI_TRACK = Regex("^\\s*\\d+\\s+\\d+\\s+\\d+\\s+\\d+\\s+(\"[^\"]+\"|\\S+)")
     private val DESCRIPTORS = setOf("cue", "gdi", "m3u", "ccd", "mds")
 
@@ -26,27 +27,41 @@ object RomFiles {
         while (queue.isNotEmpty()) {
             for (r in refs(queue.removeFirst())) if (r.isFile && inside(r, dir) && out.add(r)) queue += r
         }
-        // Files that only go with it by name.
+        // Files that only go with it by name (next to their descriptor, which may be in a sub folder).
         val names = dir.listFiles()?.associateBy { it.name.lowercase() }.orEmpty()
         fun sibling(name: String) = names[name.lowercase()]?.takeIf { it.isFile }
         val base = rom.nameWithoutExtension
-        for (f in out.toList()) {
-            val b = f.nameWithoutExtension
-            when (f.extension.lowercase()) {
-                "ccd" -> listOf("img", "sub").mapNotNullTo(out) { sibling("$b.$it") }
-                "mds" -> sibling("$b.mdf")?.let { out += it }
-            }
-        }
+        for (f in out.toList()) companions(f, dir, names).filterTo(out) { inside(it, dir) }
         val types = unzipTypes.map { it.lowercase() }
         if (types.isNotEmpty()) {
             val ext = rom.extension.lowercase()
             if (ext == "zip") types.mapNotNullTo(out) { sibling("$base.$it") }
             else if (ext in types) sibling("$base.zip")?.let { out += it }
         }
-        // Keep what other games in the folder still use.
+        // Keep what other games in the folder still use: what their descriptors name, and what those
+        // name or come with (a Game.ccd kept beside the deleted Game.cue still needs Game.img).
         val others = dir.listFiles().orEmpty().filter { it.isFile && it !in out && it.extension.lowercase() in DESCRIPTORS }
-        val shared = others.flatMap { refs(it) }.map { canon(it) }.toSet()
+        val shared = HashSet<String>()
+        val seen = HashSet<String>()
+        val q = ArrayDeque(others)
+        while (q.isNotEmpty()) {
+            val o = q.removeFirst()
+            if (!seen.add(canon(o))) continue
+            for (r in refs(o) + companions(o, dir, names)) if (shared.add(canon(r))) q += r
+        }
         return out.filter { it == rom || canon(it) !in shared }
+    }
+
+    /** CloneCD's .img / .sub beside a .ccd, Alcohol's .mdf beside an .mds ([names]: [dir]'s files). */
+    private fun companions(f: File, dir: File, names: Map<String, File>): List<File> {
+        val b = f.nameWithoutExtension
+        val wanted = when (f.extension.lowercase()) {
+            "ccd" -> listOf("$b.img", "$b.sub")
+            "mds" -> listOf("$b.mdf")
+            else -> return emptyList()
+        }
+        val here = if (f.parentFile == dir) names else f.parentFile?.listFiles()?.associateBy { it.name.lowercase() }.orEmpty()
+        return wanted.mapNotNull { n -> here[n.lowercase()]?.takeIf { it.isFile } }
     }
 
     /** Files a descriptor (.cue, .gdi, .m3u) names, resolved next to it. */
@@ -56,9 +71,9 @@ object RomFiles {
         if (!f.isFile || f.length() > 1_000_000) return emptyList()
         val lines = runCatching { f.readLines() }.getOrDefault(emptyList())
         val names = when (ext) {
-            "cue" -> lines.mapNotNull { CUE_FILE.find(it)?.groupValues?.get(1) }
+            "cue" -> lines.mapNotNull { l -> CUE_FILE.find(l.removePrefix("\uFEFF"))?.groupValues?.let { it[1].ifEmpty { it[2] } } }
             "gdi" -> lines.drop(1).mapNotNull { GDI_TRACK.find(it)?.groupValues?.get(1)?.trim('"') }
-            else -> lines.map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
+            else -> lines.map { it.removePrefix("\uFEFF").trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
         }
         return names.map { File(f.parentFile, it.replace('\\', '/')) }
     }

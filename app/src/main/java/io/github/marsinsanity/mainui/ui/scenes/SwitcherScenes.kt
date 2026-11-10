@@ -30,8 +30,19 @@ object Brightness {
             AndroidSettings.System.putInt(ctx.contentResolver, AndroidSettings.System.SCREEN_BRIGHTNESS_MODE, 0)
             AndroidSettings.System.putInt(ctx.contentResolver, AndroidSettings.System.SCREEN_BRIGHTNESS, v)
         } else if (Root.knownAvailable()) {
-            Thread { Root.exec("settings put system screen_brightness_mode 0; settings put system screen_brightness $v") }.start()
+            rootPut("screen_brightness", "settings put system screen_brightness_mode 0; settings put system screen_brightness $v")
         }
+    }
+
+    private val rootExec = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val pending = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * A root `settings put` ([cmd]) for [key]: one at a time and only the newest per key, so a
+     * held key (brightness 3 -> 10) never ends on an older value that finished last.
+     */
+    fun rootPut(key: String, cmd: String) {
+        if (pending.put(key, cmd) == null) rootExec.execute { pending.remove(key)?.let { Root.exec(it) } }
     }
 }
 
@@ -60,9 +71,13 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
     }
 
 
+    /** Whether the last [screenshot] is a screenshot file (drawn full screen), not box art. */
+    private var shotIsFile = false
+
     private fun screenshot(e: Library.Entry): Bitmap? {
         val f = e.screenshot?.let { File(it) }?.takeIf { it.isFile }
             ?: MainUI.sessions.screenshotFile(e.key).takeIf { it.isFile }
+        shotIsFile = f != null
         if (f != null) return Images.get("shot:${f.absolutePath}:${f.lastModified()}", host, 1600) { f }
         // No screenshot yet: fall back to box art like Onion's rom screen fallback
         return GameItems.preview(host, null, e.toGame())()
@@ -80,7 +95,7 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
         val e = games[index]
         val shot = screenshot(e)
         if (shot != null) {
-            val isScreenshot = shot.width >= 320 && e.screenshot != null
+            val isScreenshot = shotIsFile && shot.width >= 320
             if (isScreenshot) g.bmpCover(shot, 0f, 0f, g.W, g.H) else { g.background(); g.bmpFit(shot, 40f, 70f, g.W - 80f, g.H - 200f) }
         } else {
             g.background()
@@ -93,9 +108,13 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
         val footerH = if (view == 0) (bottomBar?.height?.toFloat() ?: Gfx.FOOTER) else 0f
 
         if (view == 0) {
+            // The game still running behind the switcher counts too (its time is only added when it ends).
+            val a = MainUI.sessions.active
+            val live = if (a == null) 0L else ((android.os.SystemClock.uptimeMillis() - a.startedUptime) / 1000).coerceIn(0L, 24 * 3600L)
             val title = when (timeMode) {
-                1 -> Launch.formatTime(MainUI.library.playTime(e.key))
-                2 -> "${Launch.formatTime(MainUI.library.playTime(e.key))} / ${Launch.formatTime(MainUI.library.totalPlayTime())}"
+                1 -> Launch.formatTime(MainUI.library.playTime(e.key) + if (a?.gameKey == e.key) live else 0L)
+                2 -> "${Launch.formatTime(MainUI.library.playTime(e.key) + if (a?.gameKey == e.key) live else 0L)} / " +
+                    Launch.formatTime(MainUI.library.totalPlayTime() + live)
                 else -> "GameSwitcher"
             }
             if (topBar != null) {

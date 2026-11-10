@@ -160,7 +160,17 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
             toggle("Show unknown rom folders", { s.showUnknownFolders }) { s.showUnknownFolders = it; MainUI.games.invalidate() },
             toggle("Show hidden games", { s.showHiddenGames }) { s.showHiddenGames = it; MainUI.games.invalidate() },
             multi("MainUI data folder", listOf("auto" to "Auto", "sd" to "SD card", "internal" to "Internal"), { s.dataLocation }) {
-                s.dataLocation = it; MainUI.reloadStorage()
+                // The library (favorites, recents, play time...) comes along to a data folder that has
+                // none yet; otherwise it would look emptied, and stay behind in the old folder.
+                val choice = it
+                host.io({
+                    val old = MainUI.storage.configDir
+                    s.dataLocation = choice
+                    MainUI.storage.invalidate()
+                    val new = MainUI.storage.configDir
+                    if (new.canonicalPath != old.canonicalPath && new.list().isNullOrEmpty())
+                        runCatching { old.copyRecursively(new, overwrite = false) }
+                }) { MainUI.reloadStorage() }
             },
             action("Rom folders", if (roots.isEmpty()) "none found" else "${roots.size}") { host.push(RomFoldersScene(host)) },
             action("Create dArkOS folders") {

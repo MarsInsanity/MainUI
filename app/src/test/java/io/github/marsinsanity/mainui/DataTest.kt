@@ -1580,6 +1580,21 @@ class BugHuntFixesTest {
         assertFalse(t, t.contains("<!DOCTYPE"))
     }
 
+    @Test fun deletingCueKeepsImageOfKeptCcd() = withDir { dir ->
+        val img = File(dir, "Game.img").apply { writeText("x") }
+        File(dir, "Game.sub").writeText("x")
+        File(dir, "Game.ccd").writeText("[CloneCD]")
+        val cue = File(dir, "Game.cue").apply { writeText("FILE \"Game.img\" BINARY\n") }
+        val files = io.github.marsinsanity.mainui.data.RomFiles.related(cue)
+        assertEquals(listOf(cue), files)
+        // Discs of an .m3u in a sub folder: their CloneCD companions go with them.
+        val sub = File(dir, "Multi").apply { mkdirs() }
+        File(sub, "D1.ccd").writeText("[CloneCD]"); File(sub, "D1.img").writeText("x"); File(sub, "D1.sub").writeText("x")
+        val m3u = File(dir, "Multi.m3u").apply { writeText("\uFEFFMulti/D1.ccd\n") }
+        assertEquals(setOf("Multi.m3u", "D1.ccd", "D1.img", "D1.sub"), io.github.marsinsanity.mainui.data.RomFiles.related(m3u).map { it.name }.toSet())
+        assertTrue(img.isFile)
+    }
+
     @Test fun megaCdSerialKeepsLeadingZero() {
         fun sector(header: String) = ("SEGADISCSYSTEM  " + " ".repeat(100) + header + " ".repeat(64)).toByteArray(Charsets.ISO_8859_1)
         assertEquals("T-06204", id.megaCdSerial(sector("GM T-06204 -00")))
