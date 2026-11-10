@@ -119,9 +119,11 @@ class SessionManager(
                 Root.startActivity(intent)?.let { return "Could not start ${option.name}: $it" }
             } else ctx.startActivity(intent)
             val pkg = intent.component?.packageName ?: intent.`package` ?: option.pkg ?: ""
-            begin(Session(game.key, game.systemId, game.file?.absolutePath, game.name, option.ref, pkg,
-                intent.component?.className, System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME)))
+            val s = Session(game.key, game.systemId, game.file?.absolutePath, game.name, option.ref, pkg,
+                intent.component?.className, System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME))
+            begin(s)
             library.addRecent(game, option.ref)
+            if (!option.isRetroArch) autoLoad(s)
             null
         } catch (e: Exception) {
             "Could not start ${option.name}: ${e.message}"
@@ -229,7 +231,51 @@ class SessionManager(
 
     fun controllerFor(s: Session): GameController =
         if (s.isRetroArch) RetroArchController(emulators.raCommandPort, s.pkg)
-        else StandaloneController(s.pkg, s.emuRef?.let { emulators.defFor(it) })
+        else StandaloneController(s.pkg, s.emuRef?.let { emulators.defFor(it) }) { markSaved(s.gameKey) }
+
+    // ---- auto load (standalone emulators) ----------------------------------------------
+    // RetroArch loads its auto slot by itself when a game starts. Standalone emulators don't, so
+    // with auto save & load on, a game MainUI saved with the emulator's save key (leaving it for
+    // the Game Switcher, exiting it, the menu's Save) gets the emulator's load key once it has
+    // started again: picking it in the Game Switcher continues it where it was left.
+
+    private fun savedKey(gameKey: String) = "saved_state:" + sha1(gameKey)
+
+    /** MainUI saved [gameKey]'s state with its emulator's save key. */
+    fun markSaved(gameKey: String) { settings.prefs.edit().putLong(savedKey(gameKey), System.currentTimeMillis()).apply() }
+
+    fun hasSavedState(gameKey: String) = settings.prefs.contains(savedKey(gameKey))
+
+    /**
+     * Presses the emulator's load key once [s]'s game is up: when the emulator's window is in
+     * front (seen by the accessibility service; without it, after a fixed wait), plus time for
+     * the game to start running. Skipped if another game started meanwhile, the user left it, or
+     * MainUI's menu is open.
+     */
+    private fun autoLoad(s: Session) {
+        if (!settings.autoSaveOnExit || !hasSavedState(s.gameKey)) return
+        val c = controllerFor(s) as? StandaloneController ?: return
+        if (c.states != StateSupport.HOTKEY || c.loadSpec == null) return
+        val settle = s.emuRef?.let { emulators.defFor(it) }?.loadDelayMs?.takeIf { it > 0 } ?: AUTO_LOAD_SETTLE_MS
+        Thread({
+            val overlay = { io.github.marsinsanity.mainui.service.OverlayService.instance }
+            val t0 = android.os.SystemClock.uptimeMillis()
+            if (overlay() != null) {
+                while (overlay()?.foregroundPackage != s.pkg) {
+                    if (active !== s || android.os.SystemClock.uptimeMillis() - t0 > 30_000) return@Thread
+                    Thread.sleep(250)
+                }
+                Thread.sleep(settle)
+            } else Thread.sleep(settle + 4000)
+            val o = overlay()
+            if (active !== s || (o != null && (o.foregroundPackage != s.pkg || o.overlayShowing))) return@Thread
+            val ok = runCatching { c.load(0) }.getOrDefault(false)
+            android.util.Log.i("MainUI.Sessions", "auto load ${s.name}: $ok")
+            if (ok) android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(ctx, "Loaded your last save", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }, "auto-load").apply { isDaemon = true }.start()
+    }
 
     // ---- screenshots -----------------------------------------------------------------
     fun screenshotFile(gameKey: String): File = File(storage.screenshotDir, sha1(gameKey) + ".png")
@@ -246,6 +292,9 @@ class SessionManager(
         File(File(storage.stateThumbDir, sha1(gameKey)), "slot$slot.png")
 
     companion object {
+        /** Time for a game to be running after its emulator's window appears (the load key is ignored before). */
+        const val AUTO_LOAD_SETTLE_MS = 4000L
+
         fun sha1(s: String): String = MessageDigest.getInstance("SHA-1").digest(s.toByteArray())
             .joinToString("") { "%02x".format(it) }
     }

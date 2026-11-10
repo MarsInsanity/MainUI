@@ -55,6 +55,11 @@ data class EmuDef(
     val get: Map<String, String> = emptyMap(),
     /** "root": true in emulators.json: the game activity isn't exported, so it is started with root. */
     val rootLaunch: Boolean = false,
+    /**
+     * "loadDelay" in "ingame" (ms): how long after its window appears a game is running, so the
+     * load key works (auto load on start). 0 = MainUI's default.
+     */
+    val loadDelayMs: Long = 0,
 ) {
     val packages: List<String> get() = components.map { it.first }.distinct()
 }
@@ -175,6 +180,7 @@ class EmulatorManager(
             load = load,
             get = o.optJSONObject("get")?.let { g -> g.keys().asSequence().associateWith { k -> g.optString(k) } } ?: emptyMap(),
             rootLaunch = o.optBoolean("root", false),
+            loadDelayMs = ingame?.optLong("loadDelay", 0L) ?: 0L,
         )
     }
 

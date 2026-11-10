@@ -261,7 +261,11 @@ saves into its **auto slot** (MainUI sets `state_slot = -1` with `savestate_auto
 game in the Game Switcher continues it where you left. The menu's Save / Load use the same slot.
 MainUI applies these RetroArch settings by itself before a RetroArch game starts (while RetroArch isn't
 running) whenever it needs new ones, so *Configure RetroArch* doesn't have to be run again. Standalone
-emulators save with their save key; loading on start is up to each emulator's own resume option.
+emulators with save / load keys (DuckStation, PPSSPP, ... with root) save with their save key, and when
+a game MainUI saved that way starts again, MainUI presses the emulator's load key once the game is up
+(a few seconds after its window appears, longer for PS2 / GameCube / 3DS: `"loadDelay"` in the
+emulator's `ingame` entry of `emulators.json`; skipped if you open the menu or leave first), so picking
+it in the Game Switcher continues it too. A game the emulator still has running is just brought back.
 
 **Resuming from the Game Switcher** brings the game's own task back to the front (with root:
 Android's task switch, `moveTaskToFront`), so nothing new is started in the emulator. Before, MainUI

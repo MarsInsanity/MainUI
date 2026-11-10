@@ -44,7 +44,7 @@
         "come.nanodata.armsx2.debug/kr.co.iefriends.pcsx2.MainActivity"
       ],
       "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
-      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F3" }
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F3", "loadDelay": 8000 }
     },
     {
       "id": "nethersx2", "name": "NetherSX2 / AetherSX2",
@@ -56,7 +56,7 @@
       ],
       "action": "android.intent.action.MAIN", "extras": { "bootPath": "%ROMSAF%" },
       "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
-      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F3" }
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F3", "loadDelay": 8000 }
     },
     {
       "id": "armsx3", "name": "ARMSX3",
@@ -133,7 +133,7 @@
       "components": ["org.dolphinemu.dolphinemu/.ui.main.TvMainActivity"],
       "action": "android.intent.action.MAIN", "category": "android.intent.category.LEANBACK_LAUNCHER",
       "extras": { "AutoStartFile": "%ROMSAF%" }, "flags": ["NEW_TASK"],
-      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2", "loadDelay": 6000 }
     },
     {
       "id": "dolphin_mmjr", "name": "Dolphin MMJR / MMJR2",
@@ -153,21 +153,21 @@
         "io.github.azaharplus.android/org.citra.citra_emu.activities.EmulationActivity"
       ],
       "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
-      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2", "loadDelay": 6000 }
     },
     {
       "id": "lime3ds", "name": "Lime3DS",
       "get": { "note": "Discontinued: use Azahar" },
       "components": ["io.github.lime3ds.android/.activities.EmulationActivity"],
       "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
-      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2", "loadDelay": 6000 }
     },
     {
       "id": "citra", "name": "Citra",
       "get": { "note": "Discontinued: use Azahar" },
       "components": ["org.citra.citra_emu/.activities.EmulationActivity", "org.citra.citra_emu.canary/org.citra.citra_emu.activities.EmulationActivity"],
       "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
-      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2", "loadDelay": 6000 }
     },
     {
       "id": "citra_mmj", "name": "Citra MMJ",
@@ -188,7 +188,7 @@
       "get": { "github": "flyinghead/flycast", "play": "com.flycast.emulator" },
       "components": ["com.flycast.emulator/com.flycast.emulator.MainActivity", "com.flycast.emulator/com.reicast.emulator.MainActivity"],
       "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
-      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2", "loadDelay": 5000 }
     },
     {
       "id": "yabasanshiro2", "name": "Yaba Sanshiro 2",
