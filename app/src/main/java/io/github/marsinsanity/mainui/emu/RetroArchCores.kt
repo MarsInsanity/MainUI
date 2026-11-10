@@ -59,6 +59,36 @@ object RetroArchCores {
         return if (split == "core_mesen_s") "mesen-s" else split.removePrefix("core_")
     }
 
+    /**
+     * The file RetroArch saves [rom]'s state slot [slot] to: "<name>.state" (slot 0),
+     * "<name>.state3", or "<name>.state.auto" for slot -1, the auto slot it also loads by itself
+     * when the game starts. <name> is the content file's name without its extension.
+     */
+    fun stateFileName(rom: String, slot: Int): String {
+        val base = File(rom).nameWithoutExtension
+        return when {
+            slot < 0 -> "$base.state.auto"
+            slot == 0 -> "$base.state"
+            else -> "$base.state$slot"
+        }
+    }
+
+    /**
+     * Folders RetroArch may keep savestates in (searched a few levels deep: it can sort them by
+     * core and by content folder): its savestate_directory, else its defaults (shared storage,
+     * or its own folder when that isn't writable), and the game's own folder.
+     */
+    fun stateDirs(cfg: String?, pkg: String, romDir: String?): List<String> = listOfNotNull(
+        cfgValue(cfg, "savestate_directory")?.takeIf { it.startsWith("/") }?.trimEnd('/'),
+        "/storage/emulated/0/RetroArch/states",
+        "/storage/emulated/0/Android/data/$pkg/files/states",
+        "/data/user/0/$pkg/states",
+        romDir,
+    ).distinct()
+
+    /** [name] as a `find -name` pattern matching only itself ("Game [USA]" has glob brackets). */
+    fun globEscape(name: String): String = name.replace(Regex("""([\\*?\[\]])"""), """\\$1""")
+
     /** `key = "value"` from retroarch.cfg; null for missing, empty or "default". */
     fun cfgValue(cfg: String?, key: String): String? = cfg?.lineSequence()
         ?.map { it.trim() }

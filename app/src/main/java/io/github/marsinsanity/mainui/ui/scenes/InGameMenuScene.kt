@@ -220,7 +220,10 @@ class InGameMenuScene(
                     // slot, loaded by itself when the game starts again).
                     val ctx = host.hostContext
                     leaveThen(500) {
-                        if (controller.save(0)) Thread.sleep(800)
+                        val ok = controller.save(0)
+                        io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher (menu): save for ${session.name}: ${if (ok) "done" else "FAILED ${controller.saveProblem ?: ""}"}")
+                        if (ok) Thread.sleep(800)
+                        else MainUI.sessions.toast("${session.name} wasn't saved: ${controller.saveProblem ?: "the save key failed"}")
                         main.post {
                             ctx.startActivity(Intent(ctx, MainActivity::class.java)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
@@ -296,9 +299,12 @@ class InGameMenuScene(
         val ctx = host.hostContext
         leaveThen(450) {
             val ok = work()
-            io.github.marsinsanity.mainui.core.SessionLog.log("menu $what for ${session.name}: hotkey ${if (ok) "sent" else "FAILED"}")
+            val problem = if (what == "Save") controller.saveProblem else null
+            io.github.marsinsanity.mainui.core.SessionLog.log("menu $what for ${session.name}: ${if (ok) "ok" else "FAILED ${problem ?: ""}"}")
             main.post {
-                Toast.makeText(ctx, if (ok) "$what state: hotkey sent" else "$what state failed (needs root)", Toast.LENGTH_SHORT).show()
+                // RetroArch saves are checked (its state file changed); other presses can't be.
+                val done = if (what == "Save" && controller is io.github.marsinsanity.mainui.emu.RetroArchController) "State saved" else "$what state: hotkey sent"
+                Toast.makeText(ctx, if (ok) done else problem ?: "$what state failed (needs root)", if (ok) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
             }
         }
     }

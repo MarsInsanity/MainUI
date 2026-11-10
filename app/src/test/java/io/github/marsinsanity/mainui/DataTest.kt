@@ -179,6 +179,38 @@ class RetroArchConfigTest {
         assertNull(c.mergeConfig("", mapOf("a" to "b")))
         assertNull(c.mergeConfig(cfg(20), mapOf("a" to "b")))
     }
+
+    @Test
+    fun stateFilesAreNamedLikeRetroArchNamesThem() {
+        assertEquals("Crash (USA).state.auto", c.stateFileName("/roms/psx/Crash (USA).cue", -1))
+        assertEquals("Crash (USA).state", c.stateFileName("/roms/psx/Crash (USA).cue", 0))
+        assertEquals("Mario.state3", c.stateFileName("/roms/snes/Mario.zip", 3))
+        assertEquals("celeste.p8.state.auto", c.stateFileName("/roms/pico8/celeste.p8.png", -1))
+    }
+
+    @Test
+    fun stateFoldersPutTheConfiguredOneFirst() {
+        val cfg = "savestate_directory = \"/storage/emulated/0/RetroArch/states/\"\nstate_slot = \"-1\"\n"
+        assertEquals(listOf("/storage/emulated/0/RetroArch/states", "/storage/emulated/0/Android/data/com.retroarch/files/states",
+            "/data/user/0/com.retroarch/states", "/roms/psx"), c.stateDirs(cfg, "com.retroarch", "/roms/psx"))
+        // "default" or a relative path: only RetroArch's own defaults and the game's folder.
+        assertEquals("/storage/emulated/0/RetroArch/states", c.stateDirs("savestate_directory = \"default\"\n", "com.retroarch", null).first())
+        assertEquals(3, c.stateDirs("savestate_directory = \":/states\"\n", "com.retroarch", null).size)
+    }
+
+    @Test
+    fun findPatternsMatchOnlyTheirOwnName() {
+        assertEquals("Zelda \\[USA\\] \\*1\\?.state.auto", c.globEscape("Zelda [USA] *1?.state.auto"))
+        val find = listOf("/usr/bin/find", "/bin/find").firstOrNull { File(it).canExecute() } ?: return
+        val dir = kotlin.io.path.createTempDirectory("states").toFile()
+        try {
+            File(dir, "Zelda [USA].state.auto").writeText("x")
+            File(dir, "Zelda U.state.auto").writeText("x") // what an unescaped [USA] would match
+            val out = ProcessBuilder(find, dir.path, "-maxdepth", "3", "-type", "f", "-name", c.globEscape("Zelda [USA].state.auto"))
+                .start().inputStream.bufferedReader().readLines()
+            assertEquals(listOf("Zelda [USA].state.auto"), out.map { File(it).name })
+        } finally { dir.deleteRecursively() }
+    }
 }
 
 class BuildbotListTest {
