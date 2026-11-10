@@ -45,6 +45,9 @@ class Library(private val storage: Storage) {
     private val favorites = mutableListOf<Entry>()
     private val androidGames = linkedSetOf<String>()
     private val hiddenApps = linkedSetOf<String>()
+    /** Games hidden with Hide ROM, and known BIOS sets shown again with Unhide ROM (game keys). */
+    private val hiddenGames = linkedSetOf<String>()
+    private val shownBios = linkedSetOf<String>()
     private val coreChoices = HashMap<String, String>()
     private val playTime = HashMap<String, Long>()
 
@@ -52,6 +55,11 @@ class Library(private val storage: Storage) {
 
     fun load() = synchronized(lock) {
         recents.clear(); favorites.clear(); androidGames.clear(); hiddenApps.clear(); coreChoices.clear(); playTime.clear()
+        hiddenGames.clear(); shownBios.clear()
+        readObject("hidden_games.json")?.let { o ->
+            o.optJSONArray("hidden")?.let { a -> for (i in 0 until a.length()) hiddenGames += a.getString(i) }
+            o.optJSONArray("shown_bios")?.let { a -> for (i in 0 until a.length()) shownBios += a.getString(i) }
+        }
         readArray("recents.json")?.forEachObj { recents += Entry.from(it) }
         readArray("favorites.json")?.forEachObj { favorites += Entry.from(it) }
         readArray("android_games.json")?.let { a -> for (i in 0 until a.length()) androidGames += a.getString(i) }
@@ -74,6 +82,8 @@ class Library(private val storage: Storage) {
     private fun saveFavorites() = write("favorites.json", JSONArray(favorites.map { it.json() }).toString(1))
     private fun saveAndroid() = write("android_games.json", JSONArray(androidGames.toList()).toString(1))
     private fun saveHidden() = write("hidden_apps.json", JSONArray(hiddenApps.toList()).toString(1))
+    private fun saveHiddenGames() = write("hidden_games.json",
+        JSONObject().put("hidden", JSONArray(hiddenGames.toList())).put("shown_bios", JSONArray(shownBios.toList())).toString(1))
     private fun saveCores() = write("cores.json", JSONObject(coreChoices as Map<*, *>).toString(1))
     private fun savePlayTime() = write("playtime.json", JSONObject(playTime as Map<*, *>).toString(1))
 
@@ -139,6 +149,18 @@ class Library(private val storage: Storage) {
     fun setHidden(pkg: String, value: Boolean) = synchronized(lock) {
         if (value) hiddenApps += pkg else hiddenApps -= pkg
         saveHidden()
+    }
+
+    // ---- hidden games -----------------------------------------------------------------
+    /** Hidden with Hide ROM, or [bios] (a known BIOS set) and not shown again. */
+    fun isGameHidden(key: String, bios: Boolean): Boolean = synchronized(lock) {
+        key in hiddenGames || (bios && key !in shownBios)
+    }
+
+    fun setGameHidden(key: String, hide: Boolean, bios: Boolean) = synchronized(lock) {
+        if (hide) { hiddenGames += key; shownBios -= key }
+        else { hiddenGames -= key; if (bios) shownBios += key }
+        saveHiddenGames()
     }
 
     // ---- emulator / core choice --------------------------------------------------

@@ -158,6 +158,7 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
             multi("Game metadata", listOf("both" to "gamelist + DAT", "gamelist" to "gamelist.xml", "logiqx" to "Logiqx DAT"),
                 { s.metadataSource }) { s.metadataSource = it; MainUI.games.invalidate() },
             toggle("Show unknown rom folders", { s.showUnknownFolders }) { s.showUnknownFolders = it; MainUI.games.invalidate() },
+            toggle("Show hidden games", { s.showHiddenGames }) { s.showHiddenGames = it; MainUI.games.invalidate() },
             multi("MainUI data folder", listOf("auto" to "Auto", "sd" to "SD card", "internal" to "Internal"), { s.dataLocation }) {
                 s.dataLocation = it; MainUI.reloadStorage()
             },

@@ -31,7 +31,7 @@ internal object GameItems {
     fun item(host: SceneHost, sys: GameSystem?, g: Game, sub: String? = null): UiItem {
         val fav = !g.isFolder && MainUI.library.isFavorite(g.key)
         return UiItem(
-            g.name, sub = sub, data = g,
+            g.name, sub = sub ?: if (!g.isFolder && MainUI.games.isHidden(g)) "hidden" else null, data = g,
             icon = when {
                 g.isFolder -> ({ MainUI.themes.current.skin("icon-folder") ?: Glyphs.get("folder", 40) })
                 g.isAndroid -> ({ MainUI.apps.icon(g.pkg!!, 64) })
@@ -66,6 +66,15 @@ internal object GameItems {
             items += UiItem("Game info", onSelect = { host.push(DialogScene(host, g.name, d.take(400), "OK", null)) })
         }
         items += extra
+        if (!g.isAndroid && !g.isFolder && g.file != null) {
+            // Files that must stay but aren't games (BIOS sets like neogeo.zip, which are hidden by themselves).
+            val hidden = MainUI.games.isHidden(g)
+            items += UiItem(if (hidden) "Unhide ROM" else "Hide ROM", onSelect = {
+                MainUI.library.setGameHidden(g.key, !hidden, io.github.marsinsanity.mainui.data.GameRepository.isBios(g.file))
+                host.toast(if (hidden) "${g.name} is listed again" else "${g.name} hidden (Settings > Library > Show hidden games)", 2500)
+                onChanged()
+            })
+        }
         // Last, away from the everyday entries.
         if (!g.isAndroid && !g.isFolder && g.file != null) items += UiItem("Delete ROM", onSelect = { confirmDelete(host, g, onChanged) })
         host.push(PopMenuScene(host, g.name, items))

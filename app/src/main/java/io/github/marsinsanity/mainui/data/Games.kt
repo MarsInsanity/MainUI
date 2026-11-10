@@ -97,8 +97,15 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         // never by display name, which region versions, revisions and discs share.
         val merged = LinkedHashMap<String, Game>()
         for (d in dirs) for (g in listDir(system, d)) merged.putIfAbsent((g.file?.name ?: g.name).lowercase() + "|" + g.isFolder, g)
-        return distinctNames(merged.values.toList()).sortedWith(compareBy<Game>({ !it.isFolder }, { sortKey(it.name) }))
+        // Hidden games (Hide ROM, known BIOS sets) unless Settings > Library > Show hidden games.
+        val shown = if (MainUIRef.showHidden()) merged.values.toList() else merged.values.filter { !isHidden(it) }
+        return distinctNames(shown).sortedWith(compareBy<Game>({ !it.isFolder }, { sortKey(it.name) }))
     }
+
+    /** Hidden with Hide ROM, or a known BIOS set (neogeo.zip...) nobody unhid. */
+    fun isHidden(g: Game): Boolean = !g.isFolder && !g.isAndroid && MainUIRef.hidden(g.key, isBios(g.file))
+
+    private fun isHiddenFile(system: GameSystem, f: File) = MainUIRef.hidden("${system.id}:${f.absolutePath}", isBios(f))
 
     /** A sub folder and the folders at the same place in the system's other rom roots (SD + internal). */
     private fun mirrorsOf(system: GameSystem, dir: File): List<File> {
@@ -229,7 +236,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
                         if (f.extension.isNotEmpty() && system.def.accepts(f)) n++ else walk(f, depth + 1, gl)
                     }
                 } else if (system.def.accepts(f) && f.name != "gamelist.xml" && !f.name.endsWith(".dat", true) && f.name.lowercase() !in hidden &&
-                    gl.get(f)?.hidden != true) n++
+                    gl.get(f)?.hidden != true && !isHiddenFile(system, f)) n++
                 else if (f.extension.isNotEmpty() && f.name != "gamelist.xml" && f.extension.lowercase() !in NOT_GAMES)
                     others.merge(f.extension.lowercase(), 1, Int::plus)
             }
@@ -318,6 +325,21 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         private val TAGS = Regex("\\s*[\\(\\[][^\\)\\]]*[\\)\\]]")
 
         /** "Super Game (USA) [!]" -> "Super Game" like MainUI's short names. */
+        /**
+         * Arcade BIOS / device sets: they must sit next to the games that need them, but can't be
+         * played themselves, so they are hidden from the lists (unhide one with Unhide ROM).
+         */
+        val BIOS_SETS = setOf("neogeo", "pgm", "skns", "decocass", "isgsm", "naomi", "naomi2", "naomigd", "awbios",
+            "hod2bios", "f355bios", "f355dlx", "airlbios", "cpzn1", "cpzn2", "qsound", "qsound_hle", "stvbios", "nss",
+            "playch10", "megatech", "megaplay", "cvs", "coh1000a", "coh1000c", "coh1000t", "coh1000w", "coh1001l", "coh1002e",
+            "coh1002m", "coh1002v", "coh3002c", "coh3002t", "taitofx1", "taitogn", "tps", "sys246", "sys256", "konamigx",
+            "crysbios", "ym2608", "ym2413", "segasp", "triforce", "chihiro", "hng64", "aleck64", "ar_bios", "bubsys",
+            "neocdz", "atarisy1", "galgbios", "gp_110", "sammymdl", "zn1", "zn2", "pgm2", "allied", "acpsx", "bios")
+
+        /** A known BIOS set's archive (neogeo.zip, pgm.7z...). */
+        fun isBios(f: File?): Boolean = f != null && f.extension.lowercase() in setOf("zip", "7z") &&
+            f.nameWithoutExtension.lowercase() in BIOS_SETS
+
         fun cleanName(s: String): String {
             val c = TAGS.replace(s, "").trim()
             return if (c.isEmpty()) s else c
@@ -335,4 +357,8 @@ object EmptyLookup : MetaLookup {
 /** Indirection so this file stays free of Android singletons in unit tests. */
 object MainUIRef {
     @Volatile var metadataSource: () -> String = { "both" }
+    /** Whether the game with this key is hidden (bios: a known BIOS set, hidden unless shown). */
+    @Volatile var hidden: (key: String, bios: Boolean) -> Boolean = { _, bios -> bios }
+    /** Settings > Library > Show hidden games. */
+    @Volatile var showHidden: () -> Boolean = { false }
 }

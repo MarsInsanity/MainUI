@@ -56,6 +56,8 @@ class Settings(ctx: Context) {
     var showExpert by bool("show_expert", true)
     var showEmptySystems by bool("show_empty_systems", false)
     var showUnknownFolders by bool("show_unknown_folders", false)
+    /** List games hidden with Hide ROM (and known BIOS sets) anyway, marked "hidden". */
+    var showHiddenGames by bool("show_hidden_games", false)
     var showAndroidSystem by bool("show_android_system", true)
     var showSearchTile by bool("show_search_tile", true)
     var showGameArt by bool("show_game_art", true)
