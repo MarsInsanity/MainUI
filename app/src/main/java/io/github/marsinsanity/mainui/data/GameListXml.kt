@@ -110,6 +110,9 @@ class GameListXml(val dir: File) : MetaLookup {
 
     fun all(): Collection<Entry> = entries.values
 
+    /** Drops [romFile]'s entry (the rom was deleted). True when there was one. */
+    fun remove(romFile: File): Boolean = entries.remove(normalize(relPath(romFile))) != null
+
     fun put(romFile: File, update: (Entry) -> Unit) {
         val key = normalize(relPath(romFile))
         val e = entries.getOrPut(key) { Entry("./" + relPath(romFile)) }
