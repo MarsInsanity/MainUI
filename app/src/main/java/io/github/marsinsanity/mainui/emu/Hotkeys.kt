@@ -45,11 +45,10 @@ object Hotkeys {
         e.apply()
     }
 
-    /** The next / previous wait after [seconds]. */
-    fun stepDelay(seconds: Int, forward: Boolean): Int {
-        val i = DELAYS.indexOfFirst { it >= seconds }.let { if (it < 0) DELAYS.size - 1 else it }
-        return DELAYS[(if (forward) i + 1 else i - 1).coerceIn(0, DELAYS.size - 1)]
-    }
+    /** The next longer / shorter wait than [seconds] (which may lie between choices); stops at the ends. */
+    fun stepDelay(seconds: Int, forward: Boolean): Int =
+        if (forward) DELAYS.firstOrNull { it > seconds } ?: DELAYS.last()
+        else DELAYS.lastOrNull { it < seconds } ?: DELAYS.first()
 
     /** The next / previous choice after [spec] (from "not set", the first one). */
     fun step(spec: String?, forward: Boolean): String {
