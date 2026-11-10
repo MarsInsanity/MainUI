@@ -72,6 +72,12 @@ class Gfx {
     val cx0 get() = (W - 640f) / 2f
 
     companion object {
+        /**
+         * Width of each end slice of a selection bar image [imageW] px wide: 24 of its 640 design
+         * pixels (enough for rounded corners and an edge marker), at most a quarter of it.
+         */
+        fun selectionCap(imageW: Int): Int = (imageW * 24 / 640).coerceIn(1, kotlin.math.max(1, imageW / 4))
+
         /** How many items one page dot stands for so [count] dots of [step] px fit in [room] px. */
         fun dotsPerGroup(count: Int, step: Float, room: Float): Int {
             if (count <= 0 || step <= 0f) return 1
@@ -542,17 +548,33 @@ class Gfx {
         return w
     }
 
-    /** Highlight bar for the selected list row (bg-list-s / bg-list-l). */
+    private val sliceSrc = android.graphics.Rect()
+    private val sliceDst = RectF()
+
+    /**
+     * Highlight bar for the selected list row (bg-list-s / bg-list-l), [w] wide. Onion blits the
+     * 640 wide image cropped to the list width, which cut its right end off when a game's picture
+     * takes the right side. Instead the image is drawn in three slices: its two ends (rounded
+     * corners, edge, the marker on the left) as they are, and the middle squeezed or stretched to
+     * fit, so a narrower list gets a shorter version of the same bar.
+     */
     fun selection(large: Boolean, x: Float, y: Float, w: Float, h: Float) {
         val b = skin(if (large) "bg-list-l" else "bg-list-s")
-        if (b != null) {
-            // Onion blits the 640 wide image cropped to the list width
-            val src = android.graphics.Rect(0, 0, min(b.width, (w).toInt()).coerceAtLeast(1), b.height)
-            rect.set(x, y, x + w, y + h)
-            if (w > b.width) c.drawBitmap(b, null, rect, bmpPaint) else c.drawBitmap(b, src, RectF(x, y, x + src.width(), y + h), bmpPaint)
-            return
+        if (b == null) { fillRect(x, y, w, h, theme.accent); return }
+        val unit = 640f / b.width // theme images are drawn for a 640 wide screen
+        if (kotlin.math.abs(w - b.width * unit) < 1f) {
+            rect.set(x, y, x + w, y + h); c.drawBitmap(b, null, rect, bmpPaint); return
         }
-        fillRect(x, y, w, h, theme.accent)
+        val cap = selectionCap(b.width)
+        val capW = min(cap * unit, w / 2)
+        fun slice(sx0: Int, sx1: Int, dx0: Float, dx1: Float) {
+            if (sx1 <= sx0 || dx1 <= dx0) return
+            sliceSrc.set(sx0, 0, sx1, b.height); sliceDst.set(dx0, y, dx1, y + h)
+            c.drawBitmap(b, sliceSrc, sliceDst, bmpPaint)
+        }
+        slice(0, cap, x, x + capW)
+        slice(cap, b.width - cap, x + capW, x + w - capW)
+        slice(b.width - cap, b.width, x + w - capW, x + w)
     }
 
     // ---- composite widgets -----------------------------------------------------------------
