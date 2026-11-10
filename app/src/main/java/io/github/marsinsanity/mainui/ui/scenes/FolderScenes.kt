@@ -104,14 +104,17 @@ class FolderPickerScene(
                 items += UiItem(label, icon = { Glyphs.get("folder", 40) }, data = v.dir)
             }
         } else {
-            val count = d.listFiles()?.count { it.isFile && !it.name.startsWith(".") } ?: 0
+            // (Listed once; a sub folder's files are only looked at by name, never each one stat'ed:
+            // a big rom folder on an SD card would hold the screen up for seconds.)
+            val all = d.listFiles().orEmpty()
+            val count = all.count { it.isFile && !it.name.startsWith(".") }
             items += UiItem("Use this folder", sub = if (count > 0) "$count files" else null, data = USE)
-            val subs = d.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }
-                ?.sortedBy { it.name.lowercase() } ?: emptyList()
+            val subs = all.filter { it.isDirectory && !it.name.startsWith(".") }.sortedBy { it.name.lowercase() }
             if (subs.isEmpty()) items += UiItem("(no sub folders)", disabled = true)
+            val sysNames = MainUI.systems.defs.flatMapTo(HashSet()) { def -> def.folders.map { it.lowercase() } }
             for (s in subs) {
                 // Hint when a folder looks like a dArkOS rom root (contains system folders)
-                val systems = s.listFiles()?.count { c -> c.isDirectory && MainUI.systems.defs.any { def -> def.folders.any { it.equals(c.name, true) } } } ?: 0
+                val systems = s.list()?.count { n -> n.lowercase() in sysNames && File(s, n).isDirectory } ?: 0
                 items += UiItem(s.name, icon = { Glyphs.get("folder", 40) }, data = s,
                     sub = if (systems >= 2) "$systems systems" else null)
             }

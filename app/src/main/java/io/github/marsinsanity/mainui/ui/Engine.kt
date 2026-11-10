@@ -47,6 +47,8 @@ abstract class Scene(val host: SceneHost) {
     open fun onKeyUp(b: Btn) {}
     /** Tap in logical coordinates. */
     open fun onTap(x: Float, y: Float): Boolean = false
+    /** A touch held at [x], [y]; false: it is SELECT (options). */
+    open fun onLongPress(x: Float, y: Float): Boolean = false
     /** Finger drag in logical px (positive dy = finger moving down). Return true if it scrolled something. */
     open fun onDrag(dx: Float, dy: Float): Boolean = false
     open fun onDragEnd() {}

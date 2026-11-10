@@ -104,8 +104,11 @@ object UnzipFlow {
             }, { stop.get() }, fallback = { zip, dir ->
                 // A folder MainUI can't write to (some SD cards): Android's unzip as root, never overwriting (.zip only).
                 // Time for a big zip on a slow card (at least 1 MB/s), not Root.exec's 20 s.
-                Root.knownAvailable() && Root.exec("unzip -n -q -d ${Root.q(dir.path)} ${Root.q(zip.path)}",
-                    timeoutSec = 600 + zip.length() / (1L shl 20)).ok
+                // Killed by toybox's timeout itself when too slow: stopping only the su client would
+                // leave unzip writing as root in the background while the next archive starts.
+                val limit = 600 + zip.length() / (1L shl 20)
+                Root.knownAvailable() && Root.exec("timeout -s KILL $limit unzip -n -q -d ${Root.q(dir.path)} ${Root.q(zip.path)}",
+                    timeoutSec = limit + 15).ok
             })
             MainUI.games.invalidate()
             runCatching { MainUI.games.countGames(sys) }

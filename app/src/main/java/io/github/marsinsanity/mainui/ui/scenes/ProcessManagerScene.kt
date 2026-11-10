@@ -64,8 +64,15 @@ class ProcessManagerScene(host: SceneHost, private val overlayMode: Boolean = fa
             Btn.START -> {
                 if (!repeat) host.push(DialogScene(host, "Kill all", "Force stop every app MainUI launched?") {
                     host.io({
-                        MainUI.sessions.launchedPackages.toList().forEach { Root.forceStop(it) }
-                        MainUI.sessions.endActive()
+                        // Only what the list would offer (never Play Store, the keyboard, an
+                        // accessibility service...), plus the running game; nothing without root.
+                        if (Root.available()) {
+                            val launched = MainUI.sessions.launchedPackages.toSet()
+                            val keep = io.github.marsinsanity.mainui.data.RunningApps.killable(host.hostContext, launched)
+                            val game = MainUI.sessions.active?.pkg
+                            launched.filter { keep(it) || it == game }.forEach { Root.forceStop(it) }
+                            MainUI.sessions.endActive()
+                        }
                     }) { reload() }
                 })
                 return true

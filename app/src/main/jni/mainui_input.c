@@ -127,6 +127,9 @@ static int nudge_fd(int fd) {
         emit(fd, EV_ABS, code, v);
         emit(fd, EV_SYN, SYN_REPORT, 0);
         usleep(30000);
+        /* The controller reported a real change meanwhile (the player let go): that value stays. */
+        struct input_absinfo now;
+        if (ioctl(fd, EVIOCGABS(code), &now) == 0 && now.value != v) return code + 1;
         emit(fd, EV_ABS, code, ai.value);
         emit(fd, EV_SYN, SYN_REPORT, 0);
         return code + 1;

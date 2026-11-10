@@ -230,6 +230,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     /** Lets go of everything held (focus lost, detached, input cancelled). */
     private fun releaseAll() {
         for (b in held.toList()) release(b)
+        downBtn.clear()
         axisState.clear()
         repeatBtn = null
         handler.removeCallbacks(repeatRunnable)
@@ -272,8 +273,13 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         }
     }
 
+    /** The button each key's DOWN was, so its UP releases the same one (Swap A/B toggled meanwhile). */
+    private val downBtn = HashMap<Int, Btn>()
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val b = mapKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
+        val b = (if (event.action == KeyEvent.ACTION_UP) downBtn.remove(event.keyCode) else null)
+            ?: mapKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) downBtn[event.keyCode] = b
         when (event.action) {
             KeyEvent.ACTION_DOWN -> when {
                 event.repeatCount == 0 -> press(b, timerRepeat = false)
@@ -342,8 +348,12 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
 
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        /** This touch was a long press (it already did its thing: no tap when it lifts). */
+        private var longPressed = false
+
         override fun onDown(e: MotionEvent): Boolean {
             dragging = false; dragHandled = false; flung = false; dragX = 0f; dragY = 0f
+            longPressed = false
             return true
         }
 
@@ -361,7 +371,8 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
                 MotionEvent.ACTION_DOWN -> { secondX = e.x; secondY = e.y }
                 MotionEvent.ACTION_UP -> {
                     // Moved away (a quick swipe after a tap): not a tap.
-                    if (abs(e.x - secondX) <= touchSlop && abs(e.y - secondY) <= touchSlop) tap(e)
+                    // Held (a long press opened options under the finger): not a tap on them.
+                    if (!longPressed && abs(e.x - secondX) <= touchSlop && abs(e.y - secondY) <= touchSlop) tap(e)
                 }
             }
             return true
@@ -379,7 +390,11 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         }
 
         override fun onLongPress(e: MotionEvent) {
-            if (!dragging) dispatch(Btn.SELECT, false)
+            if (dragging) return
+            longPressed = true
+            // The scene first (a held key on the touch keyboard types it), else SELECT (options).
+            val top = stack.lastOrNull()
+            if (top?.onLongPress(toLogical(e.x), toLogical(e.y)) == true) invalidate() else dispatch(Btn.SELECT, false)
         }
 
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
