@@ -260,8 +260,10 @@ class Gfx {
             if (l != null) bmp(l, 20f, 30f - l.height / 2f)
             else text("MainUI", theme.title, 20f, 30f, color = Color.WHITE)
         }
-        if (title != null) text(title, theme.title, W / 2, 29f, Align.CENTER, maxW = W - 220f)
-        if (showBattery) battery(W - 44f, 30f)
+        // Right side first: the battery (its width depends on the theme and the percentage),
+        // then the clock just left of it, so neither covers the other ("6:52 PM" is wide).
+        val batteryLeft = if (showBattery) battery(W - 44f, 30f) else W - BATTERY_MARGIN
+        var rightEdge = batteryLeft
         if (MainUI.settings.showClock) {
             val h24 = when (MainUI.settings.clockFormat) {
                 "12" -> false
@@ -273,17 +275,26 @@ class Gfx {
                 ?: SimpleDateFormat(pattern, Locale.getDefault()).also { clockFormat = Triple(pattern, Locale.getDefault(), it) }
             // The zone can change while MainUI runs (travel, Settings): follow it every time.
             fmt.timeZone = java.util.TimeZone.getDefault()
-            text(fmt.format(Date(now)), theme.battery.let { FontStyle(it.typeface, 22f, it.color) }, W - 84f, 30f, Align.RIGHT)
+            val clock = fmt.format(Date(now))
+            val style = theme.battery.let { FontStyle(it.typeface, 22f, it.color) }
+            val clockRight = batteryLeft - if (showBattery) 14f else 0f
+            text(clock, style, clockRight, 30f, Align.RIGHT)
+            rightEdge = clockRight - textWidth(clock, style)
             // Draw again when the minute changes, even on a screen nobody touches.
             redrawAfter(60_000L - now % 60_000L + 50L)
+        }
+        // The centred title stays clear of the clock / battery on the right (and as far from the left).
+        if (title != null) {
+            val room = minOf(W - 220f, 2f * (rightEdge - 14f - W / 2)).coerceAtLeast(120f)
+            text(title, theme.title, W / 2, 29f, Align.CENTER, maxW = room)
         }
     }
 
     /** The clock's formatter, made again only when its pattern or the language changes. */
     private var clockFormat: Triple<String, Locale, SimpleDateFormat>? = null
 
-    /** Battery icon + percentage following Onion's batteryPercentage rules. */
-    fun battery(cx: Float, cy: Float) {
+    /** Battery icon + percentage following Onion's batteryPercentage rules. Returns its left edge. */
+    fun battery(cx: Float, cy: Float): Float {
         val lvl = BatteryState.level
         val charging = BatteryState.charging
         val name = when {
@@ -330,6 +341,7 @@ class Gfx {
         if (overflow > 0f) { iconX -= overflow; textX -= overflow }
         if (icon != null) bmp(icon, iconX, cy - ih / 2) else drawBatteryIcon(iconX, cy, lvl, charging)
         if (visible) text(label, style, textX, cy + st.offsetY)
+        return if (visible) minOf(iconX, textX) else iconX
     }
 
     private fun drawBatteryIcon(x: Float, cy: Float, lvl: Int, charging: Boolean) {
