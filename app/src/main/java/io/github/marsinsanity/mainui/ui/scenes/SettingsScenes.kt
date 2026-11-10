@@ -242,6 +242,7 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
                 }
             })
         }
+        items += UiItem("Auto load waits", sub = "standalone emulators", onSelect = { host.push(AutoLoadScene(host)) })
         for (d in em.standaloneDefs()) {
             val pkg = em.installedPackage(d.id)
             val states = when (d.states) {
@@ -264,6 +265,37 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
             return true
         }
         return super.onKey(b, repeat)
+    }
+}
+
+/**
+ * How long MainUI waits before pressing each standalone emulator's load key when a game it saved
+ * starts again (auto load, see SessionManager.autoLoad), counted from when the emulator's screen
+ * stops changing. The same setting as the in-game menu's Save / load keys > Auto load wait.
+ */
+class AutoLoadScene(host: SceneHost) : ListScene(host, "Auto load waits") {
+    override val showPreview = false
+
+    override fun onEnter() = build()
+
+    private fun build() {
+        val delays = io.github.marsinsanity.mainui.emu.Hotkeys.DELAYS
+        val items = mutableListOf<UiItem>()
+        for (d in MainUI.emulators.standaloneDefs()) {
+            val c = io.github.marsinsanity.mainui.emu.StandaloneController("", d)
+            if (c.loadSpec == null || c.saveSpec == null) continue // no keys: nothing to load with
+            val def = (c.defaultLoadDelayMs / 1000).toInt()
+            val cur = (c.loadDelayMs / 1000).toInt()
+            fun label(s: Int) = (if (s == 0) "Off" else "$s s") + if (s == def) " (default)" else ""
+            items += UiItem(d.name, ItemType.MULTI, values = delays.map(::label),
+                value = delays.indexOfFirst { it >= cur }.let { if (it < 0) delays.size - 1 else it }, wrap = false,
+                onChange = { item ->
+                    val s = delays[item.value]
+                    io.github.marsinsanity.mainui.emu.Hotkeys.setLoadDelay(d.id, if (s == def) null else s)
+                })
+        }
+        if (items.isEmpty()) items += UiItem("No standalone emulator with save / load keys", disabled = true)
+        list.set(items, keepIndex = true)
     }
 }
 
