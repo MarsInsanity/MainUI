@@ -46,21 +46,28 @@ object AndroidPorts {
     fun dirs(roots: List<File>): List<File> =
         roots.mapNotNull { r -> r.listFiles()?.firstOrNull { it.isDirectory && it.name.equals(FOLDER, ignoreCase = true) } }
 
-    /** Every port file in [dirs] and their sub folders (a level deep), each with its package. */
-    fun files(dirs: List<File>): List<Pair<File, String>> {
+    /**
+     * Every port file in [dirs], their sub folders as deep as the game lists go (two levels), each
+     * with its package. Folders [skipDir] names (artwork, BIOS...) and hidden ones are left out, like
+     * the lists do. Names are checked before anything else is read: a ports folder full of
+     * PortMaster data stays cheap.
+     */
+    fun files(dirs: List<File>, skipDir: (String) -> Boolean = { false }): List<Pair<File, String>> {
         val out = ArrayList<Pair<File, String>>()
-        for (d in dirs) {
-            for (f in d.listFiles().orEmpty()) {
-                if (f.name.startsWith(".")) continue
-                val inside = if (f.isDirectory) f.listFiles().orEmpty().filter { it.isFile } else listOf(f)
-                for (p in inside) if (isPort(p)) packageOf(p)?.let { out += p to it }
+        fun walk(d: File, depth: Int) {
+            for (name in d.list().orEmpty()) {
+                if (name.startsWith(".")) continue
+                val f = File(d, name)
+                if (name.endsWith(".$EXT", ignoreCase = true)) { if (f.isFile) packageOf(f)?.let { out += f to it } }
+                else if (depth < 2 && !skipDir(name.lowercase()) && f.isDirectory) walk(f, depth + 1)
             }
         }
+        dirs.forEach { walk(it, 0) }
         return out
     }
 
     /** Package names that are ports (so they aren't Android games or plain apps as well). */
-    fun packages(dirs: List<File>): Set<String> = files(dirs).mapTo(HashSet()) { it.second }
+    fun packages(dirs: List<File>, skipDir: (String) -> Boolean = { false }): Set<String> = files(dirs, skipDir).mapTo(HashSet()) { it.second }
 
     /** "Doom 64: Remastered!" -> "Doom 64 - Remastered!" (a name every file system takes). */
     fun fileName(label: String): String {
@@ -74,9 +81,10 @@ object AndroidPorts {
      * [roots], created in the first root when there is none. Already a port: that file. [write]
      * writes a file's text (with a root fallback in the app). Returns the port file.
      */
-    fun add(roots: List<File>, label: String, pkg: String, write: (File, String) -> Unit = { f, t -> f.writeText(t) }): File {
+    fun add(roots: List<File>, label: String, pkg: String, write: (File, String) -> Unit = { f, t -> f.writeText(t) },
+            skipDir: (String) -> Boolean = { false }): File {
         require(isPackageName(pkg)) { "not a package name: $pkg" }
-        files(dirs(roots)).firstOrNull { it.second == pkg }?.let { return it.first }
+        files(dirs(roots), skipDir).firstOrNull { it.second == pkg }?.let { return it.first }
         val dir = dirs(roots).firstOrNull() ?: File(roots.firstOrNull() ?: throw java.io.IOException("No Roms folder found"), FOLDER)
         if (!dir.isDirectory) dir.mkdirs() // (else [write] makes it: with root where MainUI can't)
         val base = fileName(label)
@@ -88,7 +96,18 @@ object AndroidPorts {
         return f
     }
 
-    /** Takes [pkg] out of the Ports system (deletes its port files). Returns the files that couldn't be deleted. */
-    fun remove(roots: List<File>, pkg: String): List<File> =
-        files(dirs(roots)).filter { it.second == pkg }.map { it.first }.filter { !it.delete() && it.exists() }
+    /** What [remove] did: the port files deleted, and those that couldn't be. */
+    class Removed(val deleted: List<File>, val failed: List<File>)
+
+    /**
+     * Takes [pkg] out of the Ports system: deletes its port files with [delete] (a root fallback in
+     * the app, for a card MainUI can't write to). Nothing deleted and nothing failed: it wasn't a port.
+     */
+    fun remove(roots: List<File>, pkg: String, delete: (File) -> Boolean = { it.delete() },
+               skipDir: (String) -> Boolean = { false }): Removed {
+        val found = files(dirs(roots), skipDir).filter { it.second == pkg }.map { it.first }
+        val (gone, left) = found.partition { delete(it) || !it.exists() }
+        gone.forEach { known.remove(it.absolutePath) }
+        return Removed(gone, left)
+    }
 }

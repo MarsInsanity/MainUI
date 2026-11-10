@@ -88,8 +88,10 @@ object HomeScenes {
             // and a system with an installed emulator's menu (PICO-8: Splore) always is.
             val unplayable = sys.unplayableSummary
             val menu = sys.menu
-            // (Ports is listed even empty: it is where Android apps can be put, Settings > User interface.)
+            // (Ports is listed even empty: it is where Android apps can be put. Settings > User
+            // interface > Show Ports system off: only while it has ports.)
             val ports = sys.id == io.github.marsinsanity.mainui.data.AndroidPorts.SYSTEM
+            if (ports && !s.showPortsSystem && sys.gameCount <= 0) continue
             if (!ports && !s.showEmptySystems && sys.gameCount == 0 && unplayable == null && menu.isEmpty()) continue
             out += Tile(sys.id, sys.name, "game", icons = sys.def.icons, short = sys.def.short,
                 sub = when {
@@ -114,7 +116,10 @@ object HomeScenes {
                 UiItem("Add an Android app...", onSelect = { host.push(PortAppPickerScene(host, onRescan)) }),
                 UiItem("Rescan folder", onSelect = {
                     MainUI.games.invalidate()
-                    host.io({ MainUI.games.countGames(sys) }) { host.toast("${sys.name}: ${plural(it, "port")}"); onRescan() }
+                    // (The system as it is now: its folder may have appeared since the tile was made.)
+                    host.io({ MainUI.games.countGames(MainUI.games.systems(MainUI.settings.showUnknownFolders).firstOrNull { it.id == sys.id } ?: sys) }) {
+                        host.toast("${sys.name}: ${plural(it, "port")}"); onRescan()
+                    }
                 }),
             )))
             return
