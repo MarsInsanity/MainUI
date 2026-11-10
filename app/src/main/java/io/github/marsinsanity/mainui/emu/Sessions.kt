@@ -175,10 +175,11 @@ class SessionManager(
      * (its port file): the session, recents and Game Switcher go by that entry.
      */
     fun launchApp(pkg: String, label: String, asGame: Boolean, port: Game? = null): String? {
-        unpark() // never leave a paused game frozen behind another app
         val apps = io.github.marsinsanity.mainui.MainUI.apps
+        // (Before anything is thawed: an app that can't start leaves the paused game paused.)
         val intent = apps.launchIntent(pkg) ?: return if (runCatching { ctx.packageManager.getPackageInfo(pkg, 0) }.isSuccess)
             "$label cannot be launched" else "$label is not installed ($pkg)"
+        unpark() // never leave a paused game frozen behind another app
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         val g = port ?: Game(SystemDef.ANDROID.id, null, label, pkg = pkg)
         val s = if (asGame) Session(g.key, g.systemId, g.file?.absolutePath, label, null, pkg, intent.component?.className,

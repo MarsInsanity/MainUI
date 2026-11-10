@@ -217,8 +217,11 @@ class AppDetailScene(host: SceneHost, private val app: AppStore.App) : ListScene
         }
         if (installed != null) {
             items += UiItem("Open", preview = preview, onSelect = {
-                val err = MainUI.sessions.launchApp(app.pkg, app.name, asGame = MainUI.library.isAndroidGame(app.pkg))
-                if (err != null) host.toast(err)
+                // A port starts as its Ports entry (session, recents, in-game menu); a game as a game.
+                host.io({ Ports.gameFor(app.pkg) }) { port ->
+                    if (port != null) Launch.game(host, port)
+                    else MainUI.sessions.launchApp(app.pkg, app.name, asGame = MainUI.library.isAndroidGame(app.pkg))?.let { host.toast(it) }
+                }
             })
             items += UiItem("Uninstall", preview = preview, onSelect = {
                 host.hostContext.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${app.pkg}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

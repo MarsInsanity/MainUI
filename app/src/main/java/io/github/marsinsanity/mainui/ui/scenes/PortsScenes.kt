@@ -4,6 +4,8 @@ import io.github.marsinsanity.mainui.MainUI
 import io.github.marsinsanity.mainui.core.Root
 import io.github.marsinsanity.mainui.data.AndroidPorts
 import io.github.marsinsanity.mainui.data.Apps
+import io.github.marsinsanity.mainui.data.Game
+import io.github.marsinsanity.mainui.data.SystemDef
 import io.github.marsinsanity.mainui.ui.ListScene
 import io.github.marsinsanity.mainui.ui.SceneHost
 import io.github.marsinsanity.mainui.ui.UiItem
@@ -29,11 +31,39 @@ object Ports {
         }
     }
 
-    /** Puts [label] ([pkg]) into Games > Ports (out of Apps and Games > Android). */
+    /** Deletes a port file, with root where MainUI can't (the card it was written to with root). */
+    private fun delete(f: File): Boolean {
+        if (f.delete() || !f.exists()) return true
+        if (Root.knownAvailable()) Root.exec("rm -f ${Root.q(f.path)}")
+        return !f.exists()
+    }
+
+    /** [pkg] is the game running now: it isn't moved meanwhile (its session goes by its entry). */
+    private fun running(host: SceneHost, label: String, pkg: String): Boolean =
+        (MainUI.sessions.active?.pkg == pkg).also { if (it) host.toast("$label is running: exit it first", 2500) }
+
+    /** The library's entries for [from] (recents, favorite) become [to]'s (null: just go). */
+    private fun moveEntries(from: Game, to: Game?) {
+        val lib = MainUI.library
+        lib.removeRecent(from.key)
+        if (lib.isFavorite(from.key)) {
+            lib.toggleFavorite(from)
+            if (to != null && !lib.isFavorite(to.key)) lib.toggleFavorite(to)
+        }
+        io.github.marsinsanity.mainui.ui.Images.invalidate("art:${from.key}")
+    }
+
+    /** Puts [label] ([pkg]) into Games > Ports (out of Apps, Hidden apps and Games > Android). */
     fun add(host: SceneHost, label: String, pkg: String, done: () -> Unit = {}) {
+        if (running(host, label, pkg)) return
         host.io({
             runCatching {
-                MainUI.games.addPort(label, pkg, ::write).also { MainUI.library.setAndroidGame(pkg, false) }
+                MainUI.games.addPort(label, pkg, ::write).also { f ->
+                    MainUI.library.setAndroidGame(pkg, false)
+                    MainUI.library.setHidden(pkg, false)
+                    // Its favorite (as an Android game) is the port's now.
+                    moveEntries(Game(SystemDef.ANDROID.id, null, label, pkg = pkg), Game(AndroidPorts.SYSTEM, f, f.nameWithoutExtension))
+                }
             }
         }) { r ->
             r.onSuccess { host.toast("$label moved to Games > Ports") }
@@ -44,13 +74,21 @@ object Ports {
 
     /** Takes [pkg] out of Ports: back to Apps, or into Games > Android with [toAndroid]. */
     fun remove(host: SceneHost, label: String, pkg: String, toAndroid: Boolean, done: () -> Unit = {}) {
+        if (running(host, label, pkg)) return
         host.io({
-            val failed = MainUI.games.removePort(pkg)
-            if (failed.isEmpty() && toAndroid) MainUI.library.setAndroidGame(pkg, true)
-            failed
-        }) { failed ->
+            val r = MainUI.games.removePort(pkg, ::delete)
+            if (r.failed.isEmpty() && r.deleted.isNotEmpty()) {
+                // Where it goes, said outright (an app can be an Android game or hidden as well).
+                MainUI.library.setAndroidGame(pkg, toAndroid)
+                MainUI.library.setHidden(pkg, false)
+                val android = Game(SystemDef.ANDROID.id, null, label, pkg = pkg)
+                for (f in r.deleted) moveEntries(Game(AndroidPorts.SYSTEM, f, label), if (toAndroid) android else null)
+            }
+            r
+        }) { r ->
             host.toast(when {
-                failed.isNotEmpty() -> "Couldn't delete ${failed.joinToString { it.name }}"
+                r.failed.isNotEmpty() -> "Couldn't delete ${r.failed.joinToString { it.name }}"
+                r.deleted.isEmpty() -> "$label's port file wasn't found (in a folder the Ports list skips?)"
                 toAndroid -> "$label moved to Games > Android"
                 else -> "$label moved back to Apps"
             }, 2500)
@@ -58,12 +96,16 @@ object Ports {
         }
     }
 
-    /** The empty Ports list (or the end of it): what can go there. */
-    fun hints(sys: io.github.marsinsanity.mainui.data.GameSystem, host: SceneHost, empty: Boolean, added: () -> Unit): List<UiItem> = listOfNotNull(
-        if (empty) UiItem("No ports yet", disabled = true) else null,
-        UiItem("Add an Android app...", onSelect = { host.push(PortAppPickerScene(host, added)) }),
+    /** The Ports entry of the app [pkg] (its port file), or null when it isn't a port. Off the UI thread. */
+    fun gameFor(pkg: String): Game? =
+        MainUI.games.portFiles().firstOrNull { it.second == pkg }?.first?.let { Game(AndroidPorts.SYSTEM, it, it.nameWithoutExtension) }
+
+    /** The empty Ports list: what can go there (like the Android system's list, no add row in it). */
+    fun hints(sys: io.github.marsinsanity.mainui.data.GameSystem, empty: Boolean): List<UiItem> = if (!empty) emptyList() else listOfNotNull(
+        UiItem("No ports yet", disabled = true),
+        UiItem("Apps: SELECT on an app > Move to Ports", disabled = true),
         // PortMaster's ports (a .sh script each) are kept in the same folder; they can't run on Android yet.
-        (sys.otherFiles["sh"] ?: 0).takeIf { empty && it > 0 }?.let { UiItem("$it PortMaster ports (.sh): not on Android yet", disabled = true) },
+        (sys.otherFiles["sh"] ?: 0).takeIf { it > 0 }?.let { UiItem("$it PortMaster ports (.sh): not on Android yet", disabled = true) },
     )
 }
 

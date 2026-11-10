@@ -74,15 +74,22 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
     /** The ports folders of the rom roots (see [AndroidPorts]). */
     fun portDirs(): List<File> = AndroidPorts.dirs(storage.romRoots())
 
+    /** Folders the game lists skip (artwork, BIOS...): ports in them aren't listed, so aren't ports. */
+    private val skipPortDir: (String) -> Boolean = { it in MEDIA_FOLDERS || it in SystemRegistry.IGNORED_FOLDERS }
+
+    /** The port files (with their packages) the Ports lists show. */
+    fun portFiles(): List<Pair<File, String>> = runCatching { AndroidPorts.files(portDirs(), skipPortDir) }.getOrDefault(emptyList())
+
     /** Packages of the Android apps in the Ports system. */
-    fun portPackages(): Set<String> = runCatching { AndroidPorts.packages(portDirs()) }.getOrDefault(emptySet())
+    fun portPackages(): Set<String> = portFiles().mapTo(HashSet()) { it.second }
 
     /** Puts the app [pkg] into the Ports system (see [AndroidPorts.add]); the lists are read again. */
     fun addPort(label: String, pkg: String, write: (File, String) -> Unit = { f, t -> f.writeText(t) }): File =
-        AndroidPorts.add(storage.romRoots(), label, pkg, write).also { invalidate() }
+        AndroidPorts.add(storage.romRoots(), label, pkg, write, skipPortDir).also { invalidate() }
 
-    /** Takes the app [pkg] out of the Ports system. Returns the files that couldn't be deleted. */
-    fun removePort(pkg: String): List<File> = AndroidPorts.remove(storage.romRoots(), pkg).also { invalidate() }
+    /** Takes the app [pkg] out of the Ports system (see [AndroidPorts.remove]). */
+    fun removePort(pkg: String, delete: (File) -> Boolean = { it.delete() }): AndroidPorts.Removed =
+        AndroidPorts.remove(storage.romRoots(), pkg, delete, skipPortDir).also { invalidate() }
 
     fun invalidate() {
         systemsCache = null

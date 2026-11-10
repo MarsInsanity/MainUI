@@ -54,11 +54,20 @@ internal object GameItems {
 
     /** OnionOS style game options (SELECT on a game). */
     fun options(host: SceneHost, g: Game, extra: List<UiItem> = emptyList(), onChanged: () -> Unit = {}) {
+        // A port whose app isn't known yet (from Recents after a restart): its file read off the UI thread first.
+        if (AndroidPorts.isPort(g.file) && AndroidPorts.knownPackage(g.file) == null) {
+            host.io({ runCatching { AndroidPorts.packageOf(g.file!!) } }) { optionsNow(host, g, extra, onChanged) }
+            return
+        }
+        optionsNow(host, g, extra, onChanged)
+    }
+
+    private fun optionsNow(host: SceneHost, g: Game, extra: List<UiItem>, onChanged: () -> Unit) {
         val def = Launch.systemDef(g.systemId)
         // A system menu entry (PICO-8's Splore, from Recents / Favorites): no core, file or rom of its own.
         val isMenu = g.file != null && def?.menuItemFor(g.file) != null
         // An Android app in Ports: no core or scraping; it leaves Ports instead of being deleted.
-        val port = if (AndroidPorts.isPort(g.file)) AndroidPorts.packageOf(g.file!!) else null
+        val port = if (AndroidPorts.isPort(g.file)) AndroidPorts.knownPackage(g.file) else null
         val items = mutableListOf<UiItem>()
         val fav = MainUI.library.isFavorite(g.key)
         items += UiItem(if (fav) "Remove from favorites" else "Add to favorites", onSelect = {
@@ -195,8 +204,8 @@ class GameListScene(host: SceneHost, private var sys: GameSystem, private val di
                 }
             }
             if (sys.id == AndroidPorts.SYSTEM && dir == null) {
-                // Ports: its apps, and how to add one (PortMaster's .sh ports don't run here yet).
-                list.set(top + games.map { GameItems.item(host, sys, it) } + Ports.hints(sys, host, games.isEmpty()) { reload() }, keepIndex = loaded)
+                // Ports: its apps; empty, how to add one (PortMaster's .sh ports don't run here yet).
+                list.set(top + games.map { GameItems.item(host, sys, it) } + Ports.hints(sys, games.isEmpty()), keepIndex = loaded)
                 if (!loaded || list.current?.disabled == true) {
                     (0 until list.size).firstOrNull { list.items[it].disabled.not() }?.let { list.active = it }
                 }
@@ -300,6 +309,9 @@ class AndroidGamesScene(host: SceneHost) : ListScene(host, "Android") {
     }
 }
 
+/** Reads a port's app (off the UI thread) so its list icon can be drawn. */
+internal fun warmPort(g: Game) { if (AndroidPorts.isPort(g.file)) runCatching { AndroidPorts.packageOf(g.file!!) } }
+
 /** Shared list for Recents and Favorites (both are just library entries). */
 abstract class EntryListScene(host: SceneHost, title: String) : ListScene(host, title) {
     abstract fun entries(): List<Library.Entry>
@@ -309,7 +321,7 @@ abstract class EntryListScene(host: SceneHost, title: String) : ListScene(host, 
     override fun onResume() = reload()
 
     protected fun reload() {
-        host.io({ entries() }) { es ->
+        host.io({ entries().also { es -> es.forEach { e -> warmPort(e.toGame()) } } }) { es ->
             list.set(es.map { e -> GameItems.item(host, null, e.toGame(), sub(e)).also { it.data = e } })
         }
     }
@@ -366,7 +378,7 @@ class SearchResultsScene(host: SceneHost, private val query: String, private val
                 val android = MainUI.apps.androidGames().filter { it.label.lowercase().contains(q) }
                     .map { Game(SystemDef.ANDROID.id, null, it.label, pkg = it.pkg) }
                 roms + android
-            }
+            }.also { it.forEach(::warmPort) }
         }) { results ->
             done = true
             list.set(results.map { g ->

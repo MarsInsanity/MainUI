@@ -1680,10 +1680,16 @@ class AndroidPortsTest {
         assertEquals(existing, ap.add(listOf(sd, internal), "Quake", "com.example.quake").parentFile)
         assertEquals(setOf("com.example.quake"), ap.packages(ap.dirs(listOf(sd, internal))))
         // Sub folders a level deep count too; removing takes every file of the package.
-        File(existing, "Shooters").mkdirs(); File(existing, "Shooters/Quake copy.android").writeText("com.example.quake")
-        assertEquals(2, ap.files(ap.dirs(listOf(sd, internal))).size)
-        assertTrue(ap.remove(listOf(sd, internal), "com.example.quake").isEmpty())
-        assertTrue(ap.packages(ap.dirs(listOf(sd, internal))).isEmpty())
+        File(existing, "Shooters/id").mkdirs(); File(existing, "Shooters/id/Quake copy.android").writeText("com.example.quake")
+        File(existing, "images").mkdirs(); File(existing, "images/skipped.android").writeText("com.example.skipped")
+        // Two folders deep like the lists; folders the lists skip (images...) aren't read.
+        assertEquals(2, ap.files(ap.dirs(listOf(sd, internal))) { it == "images" }.size)
+        val r = ap.remove(listOf(sd, internal), "com.example.quake")
+        assertEquals(2, r.deleted.size); assertTrue(r.failed.isEmpty())
+        assertTrue(ap.packages(ap.dirs(listOf(sd, internal))) { it == "images" }.isEmpty())
+        // Not a port: nothing deleted, nothing failed.
+        val none = ap.remove(listOf(sd, internal), "com.example.none")
+        assertTrue(none.deleted.isEmpty() && none.failed.isEmpty())
     }
 
     @Test fun portsIsASystemOfItsOwn() {
