@@ -129,6 +129,35 @@ class Gfx {
         return RectF(dx, dy, dx + dw, dy + dh)
     }
 
+    /** Blurred silhouettes of icons for [bmpFitGlow], with their offset; dropped with their icon. */
+    private val glows = java.util.WeakHashMap<Bitmap, Pair<Bitmap, IntArray>>()
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    /**
+     * [bmpFit] with a soft [color] glow behind the picture, like the selected glyph of a main menu
+     * tile in MainUI's theme (a blurred copy under it).
+     */
+    fun bmpFitGlow(b: Bitmap, x: Float, y: Float, w: Float, h: Float, color: Int): RectF {
+        val s = min(w / b.width, h / b.height)
+        val dw = b.width * s; val dh = b.height * s
+        val dx = x + (w - dw) / 2; val dy = y + (h - dh) / 2
+        val made = synchronized(glows) {
+            glows[b] ?: runCatching {
+                // About 4 px of blur where the icon is drawn, in the icon's own pixels.
+                val radius = (4f / s).coerceIn(2f, 24f)
+                val off = IntArray(2)
+                val p = Paint().apply { maskFilter = android.graphics.BlurMaskFilter(radius, android.graphics.BlurMaskFilter.Blur.NORMAL) }
+                b.extractAlpha(p, off) to off
+            }.getOrNull()?.also { glows[b] = it }
+        } ?: return bmpFit(b, x, y, w, h) // (a picture that can't be read back: no glow)
+        val (glow, off) = made
+        glowPaint.color = color
+        rect.set(dx + off[0] * s, dy + off[1] * s, dx + (off[0] + glow.width) * s, dy + (off[1] + glow.height) * s)
+        c.drawBitmap(glow, null, rect, glowPaint)
+        bmp(b, dx, dy, dw, dh)
+        return RectF(dx, dy, dx + dw, dy + dh)
+    }
+
     /** Draws [b] covering the box (cropped), like a fullscreen game screenshot. */
     fun bmpCover(b: Bitmap, x: Float, y: Float, w: Float, h: Float, alpha: Int = 255) {
         val s = max(w / b.width, h / b.height)
@@ -675,10 +704,38 @@ class Gfx {
         glyph(kind, cx, cy, w * 0.26f, if (selected) Color.WHITE else Color.argb(200, 255, 255, 255))
     }
 
-    /** The rounded box of a top-level page tile (accent when selected). */
+    private val tileFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val tileEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val tileGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        maskFilter = android.graphics.BlurMaskFilter(3f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+
+    /**
+     * A top-level page tile, drawn the way MainUI's own theme draws them (tools/theme/
+     * make_mainui_theme.py, home_tile) in the theme's accent: a rounded card with a vertical
+     * gradient; selected, the accent fading darker with a glowing light border and an underline
+     * below the label; otherwise faint, with a thin border. For themes without tile artwork.
+     */
     fun menuTileBox(x: Float, y: Float, w: Float, h: Float, selected: Boolean) {
-        val bgCol = if (selected) withAlpha(theme.accent, 235) else Color.argb(38, 255, 255, 255)
-        fillRect(x + 6, y + 6, w - 12, h - 12, bgCol, 18f)
+        val pad = 6f; val r = 20f
+        val a = theme.accent
+        val light = tileHighlight(a)
+        rect.set(x + pad, y + pad, x + w - pad, y + h - pad)
+        if (selected) {
+            tileGlow.color = withAlpha(light, 200); tileGlow.strokeWidth = 4f
+            c.drawRoundRect(rect, r, r, tileGlow)
+        }
+        tileFill.shader = if (selected) LinearGradient(0f, rect.top, 0f, rect.bottom,
+            withAlpha(tileTop(a), 235), withAlpha(tileBottom(a), 235), Shader.TileMode.CLAMP)
+        else LinearGradient(0f, rect.top, 0f, rect.bottom, Color.argb(22, 255, 255, 255), Color.argb(8, 255, 255, 255), Shader.TileMode.CLAMP)
+        c.drawRoundRect(rect, r, r, tileFill)
+        tileFill.shader = null
+        tileEdge.color = if (selected) withAlpha(light, 230) else Color.argb(40, 255, 255, 255)
+        tileEdge.strokeWidth = if (selected) 2f else 1.2f
+        c.drawRoundRect(rect, r, r, tileEdge)
+        // The accent underline below where the label sits (236 of 278 in the theme's tiles).
+        if (selected) fillRect(x + w / 2 - 18f, y + h * (236f / 278f), 36f, 4f, withAlpha(light, 255), 2f)
     }
 
     /** Simple vector glyphs for built-in tiles and app icons. */
@@ -797,6 +854,17 @@ class Gfx {
 }
 
 fun withAlpha(color: Int, a: Int) = Color.argb(a.coerceIn(0, 255), Color.red(color), Color.green(color), Color.blue(color))
+
+/** Opaque [color] with its red, green and blue multiplied (plain bit maths: testable off-device). */
+private fun scaled(color: Int, r: Float, g: Float, b: Float): Int {
+    fun ch(shift: Int, f: Float) = ((((color shr shift) and 0xFF) * f).toInt().coerceIn(0, 255)) shl shift
+    return (0xFF shl 24) or ch(16, r) or ch(8, g) or ch(0, b)
+}
+
+/** A selected tile's gradient and edge from the theme's [accent] (MainUI's #3A96FF: 40,96,FF / 14,3E,96 / 56,DC,FF). */
+fun tileTop(accent: Int) = scaled(accent, 1.1f, 1f, 1f)
+fun tileBottom(accent: Int) = scaled(accent, 0.35f, 0.42f, 0.59f)
+fun tileHighlight(accent: Int) = scaled(accent, 1.48f, 1.47f, 1f)
 fun darken(color: Int, f: Float) = Color.rgb((Color.red(color) * (1 - f)).toInt(), (Color.green(color) * (1 - f)).toInt(), (Color.blue(color) * (1 - f)).toInt())
 fun lighten(color: Int, f: Float) = Color.rgb((Color.red(color) + (255 - Color.red(color)) * f).toInt(),
     (Color.green(color) + (255 - Color.green(color)) * f).toInt(), (Color.blue(color) + (255 - Color.blue(color)) * f).toInt())
