@@ -3,7 +3,9 @@ package io.github.marsinsanity.mainui.ui.scenes
 import android.graphics.Bitmap
 import io.github.marsinsanity.mainui.MainUI
 import io.github.marsinsanity.mainui.data.Game
+import io.github.marsinsanity.mainui.data.GameListXml
 import io.github.marsinsanity.mainui.data.GameSystem
+import io.github.marsinsanity.mainui.data.RomFiles
 import io.github.marsinsanity.mainui.data.Library
 import io.github.marsinsanity.mainui.data.SystemDef
 import io.github.marsinsanity.mainui.scraper.Scraper
@@ -64,7 +66,58 @@ internal object GameItems {
             items += UiItem("Game info", onSelect = { host.push(DialogScene(host, g.name, d.take(400), "OK", null)) })
         }
         items += extra
+        // Last, away from the everyday entries.
+        if (!g.isAndroid && !g.isFolder && g.file != null) items += UiItem("Delete ROM", onSelect = { confirmDelete(host, g, onChanged) })
         host.push(PopMenuScene(host, g.name, items))
+    }
+
+    /**
+     * Deletes [g] from storage after asking: the rom and the files that belong to it (tracks,
+     * discs, companions, see RomFiles), its box art, its gamelist.xml entry, and MainUI's own
+     * records of it (recents, favorites, per-game core).
+     */
+    private fun confirmDelete(host: SceneHost, g: Game, onChanged: () -> Unit) {
+        val file = g.file ?: return
+        if (MainUI.sessions.active?.gameKey == g.key) { host.toast("${g.name} is running: exit it first", 2500); return }
+        val sys = Launch.gameSystem(g.systemId)
+        host.io({ RomFiles.related(file, sys?.def?.unzip.orEmpty()) }) { files ->
+            val others = files.size - 1
+            val what = when {
+                file.isDirectory -> "the folder \"${file.name}\" and everything in it"
+                others == 1 -> "\"${file.name}\" and 1 file that goes with it"
+                others > 1 -> "\"${file.name}\" and $others files that go with it"
+                else -> "\"${file.name}\""
+            }
+            host.push(DialogScene(host, "Delete ROM", "Delete $what from storage?\nThis can't be undone.", "DELETE", "CANCEL") {
+                host.io({ delete(sys, g, files) }) { failed ->
+                    if (failed.isEmpty()) host.toast("Deleted ${g.name}")
+                    else host.toast("Could not delete ${failed.joinToString { it.name }.take(80)}", 3000)
+                    onChanged()
+                }
+            })
+        }
+    }
+
+    /** Deletes the files and what MainUI keeps about the game. Returns the files that couldn't be deleted. */
+    private fun delete(sys: GameSystem?, g: Game, files: List<File>): List<File> {
+        val file = g.file ?: return emptyList()
+        // Found before the rom goes (the lookup uses its gamelist entry); only art named after this rom,
+        // never one several games share.
+        val art = runCatching { MainUI.games.imageFor(sys, g) }.getOrNull()
+            ?.takeIf { it.isFile && it.nameWithoutExtension.startsWith(file.nameWithoutExtension, ignoreCase = true) }
+        val failed = RomFiles.delete(files)
+        if (file.exists()) return failed
+        art?.delete()
+        if (sys != null) runCatching {
+            val gl = GameListXml(MainUI.games.systemRootFor(sys, file.parentFile ?: file)).load()
+            if (gl.parseError == null && gl.remove(file)) gl.save()
+        }
+        MainUI.library.removeRecent(g.key)
+        if (MainUI.library.isFavorite(g.key)) MainUI.library.toggleFavorite(g)
+        MainUI.library.setCoreForGame(g.key, null)
+        MainUI.games.invalidate()
+        Images.invalidate("art:${g.key}")
+        return failed
     }
 }
 
@@ -250,7 +303,13 @@ class SearchResultsScene(host: SceneHost, private val query: String) : ListScene
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
         val g = list.current?.data as? Game
-        if (b == Btn.SELECT && !repeat && g != null) { GameItems.options(host, g); return true }
+        if (b == Btn.SELECT && !repeat && g != null) {
+            GameItems.options(host, g) {
+                // Deleted: take it out of the results (nothing else here changes what's listed).
+                if (g.file?.exists() == false) list.set(list.items.filter { it.data != g }, keepIndex = true)
+            }
+            return true
+        }
         if (b == Btn.Y && !repeat) { close(); SearchFlow.start(host); return true }
         return super.onKey(b, repeat)
     }

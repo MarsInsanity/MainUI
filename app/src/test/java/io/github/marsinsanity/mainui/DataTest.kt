@@ -1186,3 +1186,56 @@ class ReviewFollowUpTest {
         b.success(); assertTrue(b.allow())
     }
 }
+
+/** Which files "Delete ROM" removes with a game. */
+class RomFilesTest {
+    private lateinit var dir: File
+    @org.junit.Before fun setUp() { dir = java.nio.file.Files.createTempDirectory("roms").toFile() }
+    @org.junit.After fun tearDown() { dir.deleteRecursively() }
+    private fun f(name: String, text: String = "x") = File(dir, name).apply { parentFile?.mkdirs(); writeText(text) }
+    private fun names(files: List<File>) = files.map { it.relativeTo(dir).path }.toSet()
+    private val rf = io.github.marsinsanity.mainui.data.RomFiles
+
+    @Test fun cueTakesItsTracks() {
+        val cue = f("Game (USA).cue", "FILE \"Game (USA) (Track 1).bin\" BINARY\n  TRACK 01 MODE2/2352\nFILE \"Game (USA) (Track 2).bin\" BINARY\n")
+        f("Game (USA) (Track 1).bin"); f("Game (USA) (Track 2).bin"); f("Other.bin")
+        assertEquals(setOf("Game (USA).cue", "Game (USA) (Track 1).bin", "Game (USA) (Track 2).bin"), names(rf.related(cue)))
+    }
+
+    @Test fun m3uTakesDiscsAndTheirTracks() {
+        val m3u = f("FF7.m3u", "FF7 (Disc 1).cue\n# comment\n.hidden/FF7 (Disc 2).chd\n")
+        f("FF7 (Disc 1).cue", "FILE \"FF7 (Disc 1).bin\" BINARY\n"); f("FF7 (Disc 1).bin"); f(".hidden/FF7 (Disc 2).chd")
+        assertEquals(setOf("FF7.m3u", "FF7 (Disc 1).cue", "FF7 (Disc 1).bin", ".hidden/FF7 (Disc 2).chd"), names(rf.related(m3u)))
+    }
+
+    @Test fun gdiTakesItsTracks() {
+        val gdi = f("Crazy Taxi.gdi", "3\n1 0 4 2352 track01.bin 0\n2 756 0 2352 \"track 02.raw\" 0\n3 45000 4 2352 track03.bin 0\n")
+        f("track01.bin"); f("track 02.raw"); f("track03.bin")
+        assertEquals(setOf("Crazy Taxi.gdi", "track01.bin", "track 02.raw", "track03.bin"), names(rf.related(gdi)))
+    }
+
+    @Test fun companionsByName() {
+        f("Game.img"); f("Game.sub"); f("Game2.mdf")
+        assertEquals(setOf("Game.ccd", "Game.img", "Game.sub"), names(rf.related(f("Game.ccd"))))
+        assertEquals(setOf("Game2.mds", "Game2.mdf"), names(rf.related(f("Game2.mds"))))
+        f("Halo.zip")
+        assertEquals(setOf("Halo.iso", "Halo.zip"), names(rf.related(f("Halo.iso"), setOf("iso"))))
+        assertEquals(setOf("Halo.zip", "Halo.iso"), names(rf.related(File(dir, "Halo.zip"), setOf("iso"))))
+    }
+
+    @Test fun neverATrackAnotherGameUsesOrAFileOutsideTheFolder() {
+        val a = f("A.cue", "FILE \"shared.bin\" BINARY\nFILE \"a.bin\" BINARY\nFILE \"../outside.bin\" BINARY\n")
+        f("B.cue", "FILE \"shared.bin\" BINARY\n"); f("shared.bin"); f("a.bin")
+        File(dir.parentFile, "outside.bin").writeText("keep")
+        try {
+            assertEquals(setOf("A.cue", "a.bin"), names(rf.related(a)))
+        } finally { File(dir.parentFile, "outside.bin").delete() }
+    }
+
+    @Test fun deletesAndReportsFailures() {
+        val cue = f("G.cue", "FILE \"G.bin\" BINARY\n"); f("G.bin")
+        val failed = rf.delete(rf.related(cue))
+        assertTrue(failed.isEmpty())
+        assertFalse(File(dir, "G.cue").exists()); assertFalse(File(dir, "G.bin").exists())
+    }
+}
