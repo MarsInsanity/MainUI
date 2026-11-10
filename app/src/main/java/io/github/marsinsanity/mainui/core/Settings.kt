@@ -59,6 +59,8 @@ class Settings(ctx: Context) {
     /** List games hidden with Hide ROM (and known BIOS sets) anyway, marked "hidden". */
     var showHiddenGames by bool("show_hidden_games", false)
     var showAndroidSystem by bool("show_android_system", true)
+    /** The Ports system in Games even before its ports folder exists (adding a port creates it). */
+    var showPortsSystem by bool("show_ports_system", true)
     var showSearchTile by bool("show_search_tile", true)
     var showGameArt by bool("show_game_art", true)
     var uiSounds by bool("ui_sounds", true)

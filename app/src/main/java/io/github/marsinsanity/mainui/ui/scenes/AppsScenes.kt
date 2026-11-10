@@ -79,6 +79,8 @@ class AppsScene(host: SceneHost) : ListScene(host, "Apps", large = true) {
                     MainUI.library.setAndroidGame(a.pkg, !isGame)
                     host.toast(if (isGame) "Moved to Apps" else "Moved to Games > Android"); changed()
                 }),
+                // An unofficial port (an Android build of a PC game): Games > Ports, a file in the ports folder.
+                UiItem("Move to Ports", onSelect = { Ports.add(host, a.label, a.pkg, changed) }),
                 UiItem("App info", onSelect = {
                     host.hostContext.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${a.pkg}"))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -137,11 +139,11 @@ class AppVisibilityScene(host: SceneHost) : ListScene(host, "Edit hidden apps", 
     override val showPreview = false
 
     override fun onEnter() {
-        host.io({ MainUI.apps.all() }) { apps ->
+        host.io({ MainUI.apps.all() to MainUI.games.portPackages() }) { (apps, ports) ->
             list.set(apps.map { a ->
                 UiItem(a.label, io.github.marsinsanity.mainui.ui.ItemType.TOGGLE, icon = { MainUI.apps.icon(a.pkg, 96) },
                     value = if (MainUI.library.isHidden(a.pkg)) 0 else 1, data = a,
-                    sub = if (MainUI.library.isAndroidGame(a.pkg)) "game" else null,
+                    sub = if (a.pkg in ports) "port" else if (MainUI.library.isAndroidGame(a.pkg)) "game" else null,
                     onChange = { item -> MainUI.library.setHidden(a.pkg, item.value == 0) })
             })
         }

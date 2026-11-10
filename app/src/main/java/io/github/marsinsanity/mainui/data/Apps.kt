@@ -63,11 +63,15 @@ class Apps(private val ctx: Context, private val library: Library, private val s
     fun launchIntent(pkg: String): Intent? = pm.getLaunchIntentForPackage(pkg)
         ?: pm.getLeanbackLaunchIntentForPackage(pkg)
 
-    /** Apps for the Apps menu: not hidden, not sorted into the Android system. */
+    /** Apps in the Ports system (files in the ports folders, see AndroidPorts). */
+    private fun portPackages(): Set<String> = runCatching { io.github.marsinsanity.mainui.MainUI.games.portPackages() }.getOrDefault(emptySet())
+
+    /** Apps for the Apps menu: not hidden, not sorted into the Android or Ports system. */
     fun visibleApps(): List<AppInfo> {
         val hidden = library.hiddenApps()
         val games = library.androidGames()
-        return all().filter { it.pkg !in hidden && it.pkg !in games }
+        val ports = portPackages()
+        return all().filter { it.pkg !in hidden && it.pkg !in games && it.pkg !in ports }
     }
 
     fun hiddenApps(): List<AppInfo> {
@@ -75,9 +79,11 @@ class Apps(private val ctx: Context, private val library: Library, private val s
         return all().filter { it.pkg in hidden }
     }
 
+    /** The Android system's games (a port is in Ports only). */
     fun androidGames(): List<AppInfo> {
         val games = library.androidGames()
-        return all().filter { it.pkg in games }
+        val ports = if (games.isEmpty()) emptySet() else portPackages()
+        return all().filter { it.pkg in games && it.pkg !in ports }
     }
 
     /**
@@ -95,7 +101,7 @@ class Apps(private val ctx: Context, private val library: Library, private val s
         val since = if (!java.io.File(io.github.marsinsanity.mainui.MainUI.storage.configDir, "android_games.json").exists()) 0L
             else settings.lastPackageReconcile
         invalidate()
-        val hidden = library.hiddenApps() // hidden stays hidden, never sorted back in
+        val hidden = library.hiddenApps() + portPackages() // hidden stays hidden, ports stay ports
         // Emulators sorted in as games before MainUI knew them (another build's id): take them out.
         for (pkg in library.androidGames()) {
             val label = all().firstOrNull { it.pkg == pkg }?.label
@@ -119,7 +125,7 @@ class Apps(private val ctx: Context, private val library: Library, private val s
         // Handled now: the next start's catch-up (reconcileNewInstalls) mustn't sort it again
         // after the user moved it back to Apps or hid it.
         settings.lastPackageReconcile = System.currentTimeMillis()
-        if (!settings.autoSortAndroidGames || emulators.isEmulatorPackage(pkg) || pkg in library.hiddenApps()) return
+        if (!settings.autoSortAndroidGames || emulators.isEmulatorPackage(pkg) || pkg in library.hiddenApps() || pkg in portPackages()) return
         val ai = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull() ?: return
         if (isGame(ai)) library.setAndroidGame(pkg, true)
     }

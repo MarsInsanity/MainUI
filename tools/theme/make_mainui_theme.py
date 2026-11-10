@@ -281,7 +281,7 @@ BADGES = {
     "ti99": "TI-99", "tic80": "TIC-80", "tigerlcd": "TIGER", "uzebox": "UZEBOX", "vectrex": "VECTREX",
     "videopac": "G7000", "tvc": "TVC", "vircon32": "VIRCON", "virtualboy": "VB", "onscripter": "ONS",
     "wasm4": "WASM-4", "supervision": "SV", "wolf": "WOLF3D", "wonderswan": "WS", "wonderswancolor": "WSC",
-    "zxspectrum": "ZX", "zx81": "ZX81", "android": "ANDROID", "search": None,
+    "zxspectrum": "ZX", "zx81": "ZX81", "ports": "PORTS", "android": "ANDROID", "search": None,
 }
 
 

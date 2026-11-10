@@ -72,6 +72,7 @@ class UiSettingsScene(host: SceneHost) : ListScene(host, "User interface") {
             toggle("Show Expert (RetroArch)", { s.showExpert }) { s.showExpert = it },
             toggle("Show Search tile", { s.showSearchTile }) { s.showSearchTile = it },
             toggle("Show Android system", { s.showAndroidSystem }) { s.showAndroidSystem = it },
+            toggle("Show Ports system", { s.showPortsSystem }) { s.showPortsSystem = it; MainUI.games.invalidate() },
             toggle("Show empty systems", { s.showEmptySystems }) { s.showEmptySystems = it },
             toggle("Show game art in lists", { s.showGameArt }) { s.showGameArt = it },
             multi("Background fit", listOf("cover" to "Crop", "stretch" to "Stretch", "fit" to "Fit"), { s.backgroundFit }) { s.backgroundFit = it },

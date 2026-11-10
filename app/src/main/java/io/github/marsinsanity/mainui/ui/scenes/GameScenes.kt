@@ -2,6 +2,7 @@ package io.github.marsinsanity.mainui.ui.scenes
 
 import android.graphics.Bitmap
 import io.github.marsinsanity.mainui.MainUI
+import io.github.marsinsanity.mainui.data.AndroidPorts
 import io.github.marsinsanity.mainui.data.Game
 import io.github.marsinsanity.mainui.data.GameListXml
 import io.github.marsinsanity.mainui.data.GameSystem
@@ -25,19 +26,28 @@ internal object GameItems {
 
     fun preview(host: SceneHost, sys: GameSystem?, g: Game): (() -> Bitmap?) = {
         if (g.isAndroid) Images.getBitmap("banner:${g.pkg}", host) { MainUI.apps.banner(g.pkg!!) ?: MainUI.apps.icon(g.pkg, 256) }
+        // An Android port: its art in the ports folder (images/<Name>.png), else the app's banner / icon.
+        else if (AndroidPorts.isPort(g.file)) Images.getBitmap("art:${g.key}", host) {
+            MainUI.games.imageFor(sys ?: Launch.gameSystem(g.systemId), g)?.let { Images.decode(it, 360) }
+                ?: AndroidPorts.packageOf(g.file!!)?.let { MainUI.apps.banner(it) ?: MainUI.apps.icon(it, 256) }
+        }
         else Images.get("art:${g.key}", host) { MainUI.games.imageFor(sys ?: Launch.gameSystem(g.systemId), g) }
     }
 
+    /** The list icon: folder, the app's icon (Android games, ports), else the favorite mark. */
+    fun icon(g: Game): (() -> Bitmap?)? = when {
+        g.isFolder -> ({ MainUI.themes.current.skin("icon-folder") ?: Glyphs.get("folder", 40) })
+        g.isAndroid -> ({ MainUI.apps.icon(g.pkg!!, 64) })
+        // (The package as read when the list was loaded: no file reading while drawing.)
+        AndroidPorts.isPort(g.file) -> ({ AndroidPorts.knownPackage(g.file)?.let { MainUI.apps.icon(it, 64) } })
+        MainUI.library.isFavorite(g.key) -> ({ MainUI.themes.current.skin("ic-favorite-mark") })
+        else -> null
+    }
+
     fun item(host: SceneHost, sys: GameSystem?, g: Game, sub: String? = null): UiItem {
-        val fav = !g.isFolder && MainUI.library.isFavorite(g.key)
         return UiItem(
             g.name, sub = sub ?: if (!g.isFolder && MainUI.games.isHidden(g)) "hidden" else null, data = g,
-            icon = when {
-                g.isFolder -> ({ MainUI.themes.current.skin("icon-folder") ?: Glyphs.get("folder", 40) })
-                g.isAndroid -> ({ MainUI.apps.icon(g.pkg!!, 64) })
-                fav -> ({ MainUI.themes.current.skin("ic-favorite-mark") })
-                else -> null
-            },
+            icon = icon(g),
             preview = if (g.isFolder) null else preview(host, sys, g),
         )
     }
@@ -47,13 +57,15 @@ internal object GameItems {
         val def = Launch.systemDef(g.systemId)
         // A system menu entry (PICO-8's Splore, from Recents / Favorites): no core, file or rom of its own.
         val isMenu = g.file != null && def?.menuItemFor(g.file) != null
+        // An Android app in Ports: no core or scraping; it leaves Ports instead of being deleted.
+        val port = if (AndroidPorts.isPort(g.file)) AndroidPorts.packageOf(g.file!!) else null
         val items = mutableListOf<UiItem>()
         val fav = MainUI.library.isFavorite(g.key)
         items += UiItem(if (fav) "Remove from favorites" else "Add to favorites", onSelect = {
             val now = MainUI.library.toggleFavorite(g)
             host.toast(if (now) "Added to favorites" else "Removed from favorites"); onChanged()
         })
-        if (def != null && !g.isAndroid && !isMenu) {
+        if (def != null && !g.isAndroid && !isMenu && !AndroidPorts.isPort(g.file)) {
             val cur = MainUI.emulators.choose(def, g)
             val own = MainUI.library.coreForGame(g.key) != null
             items += UiItem("Core: ${if (own) cur?.name ?: "none" else "Default (${cur?.shortName ?: "none"})"}",
@@ -78,7 +90,10 @@ internal object GameItems {
             })
         }
         // Last, away from the everyday entries.
-        if (!g.isAndroid && !g.isFolder && g.file != null && !isMenu) items += UiItem("Delete ROM", onSelect = { confirmDelete(host, g, onChanged) })
+        if (port != null) {
+            items += UiItem("Move back to Apps", onSelect = { Ports.remove(host, g.name, port, toAndroid = false, done = onChanged) })
+            items += UiItem("Move to Android games", onSelect = { Ports.remove(host, g.name, port, toAndroid = true, done = onChanged) })
+        } else if (!g.isAndroid && !g.isFolder && g.file != null && !isMenu) items += UiItem("Delete ROM", onSelect = { confirmDelete(host, g, onChanged) })
         host.push(PopMenuScene(host, g.name, items))
     }
 
@@ -146,7 +161,7 @@ internal object GameItems {
 }
 
 /** One folder of a system, like MainUI's game list. Sub folders open nested lists. */
-class GameListScene(host: SceneHost, private val sys: GameSystem, private val dir: File?) :
+class GameListScene(host: SceneHost, private var sys: GameSystem, private val dir: File?) :
     ListScene(host, if (dir == null) sys.name else dir.name) {
 
     private var loaded = false
@@ -161,9 +176,14 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
 
     private fun reload() {
         host.io({
+            // Listed before its folder existed (Ports): the system as it is now, folder and all.
+            if (sys.dirs.isEmpty()) MainUI.games.systems(MainUI.settings.showUnknownFolders).firstOrNull { it.id == sys.id }?.let { sys = it }
             // The system's menu entries first (PICO-8: Splore), at its top level only.
             val menu = if (dir == null) sys.menu.map { MainUI.games.menuGame(sys, it) } else emptyList()
             val games = MainUI.games.list(sys, dir).filter { g -> menu.none { it.file?.name.equals(g.file?.name, ignoreCase = true) } }
+            // Android ports: their apps known before drawing (icons).
+            games.forEach { g -> if (AndroidPorts.isPort(g.file)) AndroidPorts.packageOf(g.file!!) }
+            if (sys.id == AndroidPorts.SYSTEM && sys.gameCount < 0) runCatching { MainUI.games.countGames(sys) }
             menu to games
         }) { (menu, games) ->
             // With the emulator app's icon (the PICO-8 app for Splore).
@@ -174,7 +194,13 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
                     if (pkg != null && item.icon == null) item.icon = { MainUI.apps.icon(pkg, 64) }
                 }
             }
-            if (games.isEmpty() && dir == null) {
+            if (sys.id == AndroidPorts.SYSTEM && dir == null) {
+                // Ports: its apps, and how to add one (PortMaster's .sh ports don't run here yet).
+                list.set(top + games.map { GameItems.item(host, sys, it) } + Ports.hints(sys, host, games.isEmpty()) { reload() }, keepIndex = loaded)
+                if (!loaded || list.current?.disabled == true) {
+                    (0 until list.size).firstOrNull { list.items[it].disabled.not() }?.let { list.active = it }
+                }
+            } else if (games.isEmpty() && dir == null) {
                 // Say why: the folder has files, but not of a kind this system's emulators open.
                 val exts = sys.def.extensions.sorted().joinToString(" ") { ".$it" }
                 val found = sys.unplayableSummary
@@ -221,7 +247,7 @@ class GameListScene(host: SceneHost, private val sys: GameSystem, private val di
                 if (repeat || game == null || game.isFolder) return true
                 val now = MainUI.library.toggleFavorite(game)
                 host.toast(if (now) "Added to favorites" else "Removed from favorites")
-                list.current?.icon = if (now) ({ MainUI.themes.current.skin("ic-favorite-mark") }) else null
+                list.current?.icon = GameItems.icon(game)
                 return true
             }
             Btn.SELECT -> { if (!repeat && game != null && !game.isFolder && game.key !in menuKeys) GameItems.options(host, game) { reload() }; return true }
@@ -260,6 +286,7 @@ class AndroidGamesScene(host: SceneHost) : ListScene(host, "Android") {
             Btn.SELECT -> {
                 if (!repeat && g != null) GameItems.options(host, g, listOf(
                     UiItem("Move back to Apps", onSelect = { MainUI.library.setAndroidGame(g.pkg!!, false); reload() }),
+                    UiItem("Move to Ports", onSelect = { Ports.add(host, g.name, g.pkg!!) { reload() } }),
                     UiItem("Hide", onSelect = { MainUI.library.setHidden(g.pkg!!, true); MainUI.library.setAndroidGame(g.pkg, false); reload() }),
                 )) { reload() }
                 return true
