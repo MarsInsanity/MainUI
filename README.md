@@ -73,7 +73,7 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
    With root, MainUI presses RetroArch's Save, Load and Menu hotkeys on its own keyboard. RetroArch
    counts at most three keyboards per run (the volume keys included) and takes a later one for a
    controller with a port, so MainUI's keyboard introduces itself (a Ctrl tap) as soon as a RetroArch
-   game is up, and again before every hotkey.
+   game is up (once per RetroArch process; not before every hotkey, which made each Save / Load slower).
    **Nothing is injected as the handheld's controller**: since Android 12 an injected event arrives
    from device -1 ("Virtual") whatever device it names, and RetroArch made that a new controller with
    a port (port 1 when it came first). MainUI 0.1.5x did that for Save / Load and for handing back
@@ -339,8 +339,10 @@ only for emulators that handle new launches themselves (RetroArch).
 
 RetroArch only takes note of a new keyboard when it gets its first key, and ignored that key, so the
 first Save or Load did nothing. MainUI now taps Ctrl (unused by RetroArch) on its virtual keyboard
-when a RetroArch game is up and before every hotkey (RetroArch forgets its keyboards whenever it
-restarts its input, e.g. loading content).
+when a RetroArch game is up, once per RetroArch process. RetroArch forgets its keyboards when it
+restarts its input inside the same process (content loaded from RetroArch's own menu), which can't
+be seen from outside: the first Load or Menu key after that can be missed, so press it again (Save
+checks that RetroArch wrote the state and presses again by itself).
 
 **Home button behaviour is configurable** (Settings > Controls): *Press Home in game* and *Hold Home
 in game* can each be the in-game menu, the Game Switcher, "Go to MainUI" or nothing; *Hold time*

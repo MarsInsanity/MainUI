@@ -107,9 +107,10 @@ object VirtualKeys {
      * first Save or Load did nothing: tap Ctrl, which RetroArch doesn't use, and give it a moment.
      * Done when a RetroArch game starts, so MainUI's keyboard is among the first three keyboards
      * RetroArch hears from (it counts no more; a later one becomes a controller with a port),
-     * and with [always] before every hotkey: RetroArch forgets its keyboards whenever its input
-     * restarts (loading content), which can't be seen from outside. Otherwise once per RetroArch
-     * process and keyboard.
+     * and with [always] again (the game's start, a second time). Otherwise once per RetroArch
+     * process and keyboard: RetroArch also forgets its keyboards when its input restarts inside
+     * the same process (content loaded from its own menu), which can't be seen from outside, so
+     * the first key after that can be missed (Save checks and presses again; Load / Menu don't).
      */
     fun primeFor(pkg: String?, always: Boolean = false): Boolean {
         if (pkg == null) return false

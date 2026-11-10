@@ -239,8 +239,10 @@ class KeyboardScene(
     private var row = 1
     private var col = 0
 
-    private val rowsLower = listOf("1234567890-", "qwertyuiop'", "asdfghjkl:/", "zxcvbnm,._@")
-    private val rowsUpper = listOf("!#$%&*()=+?", "QWERTYUIOP\"", "ASDFGHJKL;\\", "ZXCVBNM<>!~")
+    // (Rows at the same index are the same length: the column stays when SHIFT switches. The last
+    // row has the symbols passwords and names like "[BIOS]" need.)
+    private val rowsLower = listOf("1234567890-", "qwertyuiop'", "asdfghjkl:/", "zxcvbnm,._@", "[]{}^`|")
+    private val rowsUpper = listOf("!#$%&*()=+?", "QWERTYUIOP\"", "ASDFGHJKL;\\", "ZXCVBNM<>|~", "[]{}^`|")
     private val specials = listOf("SHIFT", "SPACE", "DEL", "CANCEL", "OK")
     private val specialWidths = listOf(2f, 3.5f, 1.75f, 2f, 1.75f)   // in key widths
 
@@ -304,6 +306,9 @@ class KeyboardScene(
         press()
         return true
     }
+
+    /** A key held a little long is still typed (not SELECT, which would cancel and lose the text). */
+    override fun onLongPress(x: Float, y: Float): Boolean { onTap(x, y); return true }
 
     private fun type(ch: String) { sb.insert(cursor, ch); cursor += ch.length }
 

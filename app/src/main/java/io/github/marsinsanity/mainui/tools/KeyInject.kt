@@ -72,8 +72,9 @@ private fun injectDaemon(lib: String?) {
     val loaded = lib != null && runCatching { System.load(lib) }.isSuccess
     println("ready")
     while (true) {
-        val line = (readLine() ?: break).trim()
-        val parts = line.split(Regex("\\s+"), limit = 4)
+        // (Only the line end goes: a controller's name may end in spaces, as sysfs has it.)
+        val line = (readLine() ?: break).trimEnd('\r', '\n').trimStart()
+        val parts = line.split(Regex(" +"), limit = 4)
         when (parts.firstOrNull()) {
             "nudge" -> {
                 val vendor = parts.getOrNull(1)?.toIntOrNull()

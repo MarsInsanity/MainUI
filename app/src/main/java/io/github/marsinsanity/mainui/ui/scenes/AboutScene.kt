@@ -101,7 +101,7 @@ class AboutScene(host: SceneHost) : ListScene(host, "About") {
             host.push(CoresScene(host))
         }
         rows += row("Uptime", duration(SystemClock.elapsedRealtime() / 1000))
-        rows += row("MainUI data", MainUI.storage.dataRoot().path.removePrefix("/storage/emulated/0").ifEmpty { "/" }.let { "Internal$it" })
+        rows += row("MainUI data", RomFoldersScene.pretty(MainUI.storage.dataRoot()))
         rows += row("Licence", "GPL-3.0") {
             host.push(DialogScene(host, "MainUI for Android",
                 "An OnionOS style frontend for Android handhelds.\nGPL-3.0. Fonts under the SIL Open Font License.\ngithub.com/MarsInsanity/MainUI", "OK", null))

@@ -25,6 +25,8 @@ object Images {
     private val netPool = Executors.newFixedThreadPool(3) { r -> Thread(r, "mainui-img-net").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } }
     private val main = Handler(Looper.getMainLooper())
     private const val NET_RETRY_MS = 60_000L
+    /** A file that isn't there (yet: scraped or copied in later) is looked for again after this. */
+    private const val LOCAL_RETRY_MS = 15_000L
 
     private fun isMissing(key: String): Boolean {
         val until = missing[key] ?: return false
@@ -46,7 +48,7 @@ object Images {
                 val f = runCatching(resolve).getOrNull()
                 val b = f?.takeIf { it.isFile }?.let { decode(it, maxSize) }
                 if (b != null) cache.put(key, b)
-                else missing[key] = if (network) android.os.SystemClock.elapsedRealtime() + NET_RETRY_MS else Long.MAX_VALUE
+                else missing[key] = android.os.SystemClock.elapsedRealtime() + if (network) NET_RETRY_MS else LOCAL_RETRY_MS
                 if (b != null && host != null) main.post { host.invalidate() }
             } finally {
                 loading.remove(key)
@@ -62,7 +64,7 @@ object Images {
         pool.execute {
             try {
                 val b = runCatching(produce).getOrNull()
-                if (b != null) cache.put(key, b) else missing[key] = Long.MAX_VALUE
+                if (b != null) cache.put(key, b) else missing[key] = android.os.SystemClock.elapsedRealtime() + LOCAL_RETRY_MS
                 if (b != null && host != null) main.post { host.invalidate() }
             } finally {
                 loading.remove(key)

@@ -207,7 +207,8 @@ class AppDetailScene(host: SceneHost, private val app: AppStore.App) : ListScene
         val installed = AppStore.installedVersion(app.pkg)
         val apk = app.apk
         val items = mutableListOf<UiItem>()
-        val preview = { Images.get("appicon:${app.pkg}", host, 256, network = true) { AppStore.icon(app) } }
+        // (Its own key: the list's 96 px icon of the same app would be shown blown up.)
+        val preview = { Images.get("appicon@256:${app.pkg}", host, 256, network = true) { AppStore.icon(app) } }
         when {
             apk == null -> items += UiItem("No version for this device", disabled = true)
             installed == null -> items += UiItem("Install ${apk.versionName}", sub = sizeLabel(apk.size), preview = preview, onSelect = { install() })
