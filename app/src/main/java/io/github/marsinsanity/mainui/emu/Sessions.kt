@@ -79,10 +79,21 @@ class SessionManager(
     private val library: Library,
     private val emulators: EmulatorManager,
 ) {
-    var active: Session? = runCatching {
+    /**
+     * The game being played. Restored after MainUI's process restarts, but not after a reboot:
+     * a session started before this boot can't still be running (counting from then would add
+     * the whole night as play time, and HOME in an emulator opened by hand would act on it).
+     */
+    @Volatile var active: Session? = runCatching {
         settings.prefs.getString("active_session", null)?.let { Session.from(JSONObject(it)) }
-    }.getOrNull()
+    }.getOrNull()?.takeIf { it.startedAt >= bootTime() - 60_000 }
         private set
+
+    /** The last thing MainUI started was the game session (not another app): HOME then means "in the game". */
+    @Volatile var lastStartWasSession = active != null
+        private set
+
+    private fun bootTime() = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()
 
     /** Package names of every app launched from MainUI in this boot (for the process manager). */
     val launchedPackages: MutableSet<String> = linkedSetOf()
@@ -121,6 +132,7 @@ class SessionManager(
         return try {
             ctx.startActivity(intent)
             launchedPackages += pkg
+            if (!asGame) lastStartWasSession = false
             if (asGame) {
                 val g = Game(SystemDef.ANDROID.id, null, label, pkg = pkg)
                 endActive()
@@ -135,20 +147,21 @@ class SessionManager(
     }
 
     private fun begin(s: Session) {
-        active = s
+        synchronized(this) { active = s }
+        lastStartWasSession = true
         launchedPackages += s.pkg
         persist()
     }
 
     /** Ends the running session (play time accounting). Does not kill anything. */
     fun endActive() {
-        val s = active ?: return
+        // Taken under the lock, so two callers at once (exit thread, onResume) count it once.
+        val s = synchronized(this) { active.also { active = null } } ?: return
         val secs = (System.currentTimeMillis() - s.startedAt) / 1000
         if (secs in 1..(24 * 3600)) {
             library.addPlayTime(s.gameKey, secs)
             library.updateRecent(s.gameKey) { it.playSeconds += secs }
         }
-        active = null
         persist()
     }
 
@@ -164,6 +177,16 @@ class SessionManager(
      */
     fun resume(): Boolean {
         val s = active ?: return false
+        lastStartWasSession = true
+        // The task lookup runs root commands: never on the UI thread (it can wait seconds for the shell).
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            Thread({ resumeSession(s) }, "resume").start()
+            return true
+        }
+        return resumeSession(s)
+    }
+
+    private fun resumeSession(s: Session): Boolean {
         if (Root.knownAvailable()) {
             val id = runCatching { Tasks.idOf(Root.Shell.run("dumpsys activity recents", 4000).out, s.pkg) }.getOrNull()
             if (id != null && runCatching {
@@ -215,8 +238,9 @@ class SessionManager(
         f
     }.getOrNull()
 
+    /** Where a save slot's thumbnail is. Looked up while drawing, so it makes no folders: writers do. */
     fun slotThumb(gameKey: String, slot: Int): File =
-        File(File(storage.stateThumbDir, sha1(gameKey)).apply { mkdirs() }, "slot$slot.png")
+        File(File(storage.stateThumbDir, sha1(gameKey)), "slot$slot.png")
 
     companion object {
         fun sha1(s: String): String = MessageDigest.getInstance("SHA-1").digest(s.toByteArray())

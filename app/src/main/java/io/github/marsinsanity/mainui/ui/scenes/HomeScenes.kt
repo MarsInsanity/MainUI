@@ -178,14 +178,15 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
     /** Automatic update checks (MainUI every few hours, emulators daily); say so when there is something new. */
     private fun checkForUpdate() {
         if (io.github.marsinsanity.mainui.store.EmulatorUpdates.isDue()) {
-            host.io({ runCatching { io.github.marsinsanity.mainui.store.EmulatorUpdates.check() }.getOrNull() }) { ups ->
+            // (null while another check runs: the App Store's, or one from an earlier visit here)
+            host.io({ runCatching { io.github.marsinsanity.mainui.store.EmulatorUpdates.checkIfIdle() }.getOrNull() }) { ups ->
                 if (!ups.isNullOrEmpty()) host.toast(
                     if (ups.size == 1) "${ups[0].name} ${ups[0].latest} is available: Settings > Emulators & cores"
                     else "${ups.size} emulator updates: Settings > Emulators & cores", 4500)
             }
         }
         if (!io.github.marsinsanity.mainui.store.Updater.isDue()) return
-        host.io({ runCatching { io.github.marsinsanity.mainui.store.Updater.check() }.getOrNull() }) { u ->
+        host.io({ runCatching { io.github.marsinsanity.mainui.store.Updater.checkIfIdle() }.getOrNull() }) { u ->
             if (u != null && u.versionCode > io.github.marsinsanity.mainui.store.Updater.installed)
                 host.toast("MainUI ${u.versionName} is available: Settings > Updates", 4000)
         }

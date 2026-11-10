@@ -47,7 +47,11 @@ class OverlayService : AccessibilityService() {
         private set
     private var longFired = false
     @Volatile private var opening = false
-    private var hotkeys: HotkeyListener? = null
+    /** Counts menu opens: a completion for an older open (given up on) must not show its menu. */
+    private var openId = 0
+    @Volatile private var hotkeys: HotkeyListener? = null
+    /** Bumped by every [updateHotkeyListener] and by [onDestroy]: an older start is discarded. */
+    private val hotkeyGen = java.util.concurrent.atomic.AtomicInteger()
     private val shotExecutor = Executors.newSingleThreadExecutor()
     private val worker = Executors.newSingleThreadExecutor()
 
@@ -127,7 +131,8 @@ class OverlayService : AccessibilityService() {
 
     override fun onDestroy() {
         instance = null
-        hotkeys?.stop()
+        hotkeyGen.incrementAndGet()
+        synchronized(hotkeyGen) { hotkeys?.stop(); hotkeys = null }
         removeOverlay()
         // Never leave a game frozen behind a dead overlay.
         Freezer.frozen()?.let { pkg -> Thread { Freezer.thaw(pkg) }.start() }
@@ -331,6 +336,7 @@ class OverlayService : AccessibilityService() {
         if (overlay != null || opening) return
         opening = true
         openingSince = SystemClock.uptimeMillis()
+        val id = ++openId
         Log.d(TAG, "showing in-game menu for ${s.name}")
         worker.execute {
             val controller = MainUI.sessions.controllerFor(s)
@@ -339,6 +345,13 @@ class OverlayService : AccessibilityService() {
             Log.d(TAG, "paused=$paused (${controller.javaClass.simpleName})")
             capture { bmp ->
                 main.post {
+                    if (id != openId) {
+                        // Given up on (too slow) and opened again since: this open shows nothing,
+                        // and its pause is undone (a stale thaw is ignored if the newer one froze).
+                        Log.w(TAG, "late menu open $id dropped")
+                        worker.execute { runCatching { controller.unpause() } }
+                        return@post
+                    }
                     opening = false
                     val hold = pendingHold
                     pendingHold = null
@@ -352,8 +365,7 @@ class OverlayService : AccessibilityService() {
                         }
                         return@post
                     }
-                    addOverlay { view -> InGameMenuScene(view, s, bmp, overlayMode = true, controller = controller, paused = paused) }
-                    val v = overlay
+                    val v = addOverlay { view -> InGameMenuScene(view, s, bmp, overlayMode = true, controller = controller, paused = paused) }
                     if (v == null) worker.execute { controller.unpause() } // could not show: never leave it paused
                     else if (paused) {
                         // The game lost focus to the overlay while frozen: let it acknowledge that
@@ -398,10 +410,16 @@ class OverlayService : AccessibilityService() {
         return if (Root.screencap(f)) BitmapFactory.decodeFile(f.absolutePath) else null
     }
 
-    /** [translucent]: the app behind stays visible around the scene's own drawing (popups). */
-    private fun addOverlay(translucent: Boolean = false, scene: (MainUIView) -> io.github.marsinsanity.mainui.ui.Scene) {
-        if (overlay != null) return
-        val view = MainUIView(this) { main.post { removeOverlay() } }
+    /**
+     * [translucent]: the app behind stays visible around the scene's own drawing (popups).
+     * Returns the overlay this call added, null when it added none (one is already showing).
+     */
+    private fun addOverlay(translucent: Boolean = false, scene: (MainUIView) -> io.github.marsinsanity.mainui.ui.Scene): MainUIView? {
+        if (overlay != null) return null
+        var self: MainUIView? = null
+        // Emptied (its last scene finished): remove this overlay, never a newer one.
+        val view = MainUIView(this) { main.post { if (self != null && overlay === self) removeOverlay() } }
+        self = view
         if (translucent) view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
@@ -425,7 +443,13 @@ class OverlayService : AccessibilityService() {
                 it.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
             MainUI.themes.pauseBgm()
-        }.onFailure { Log.e(TAG, "addView failed", it) }
+        }.onFailure {
+            Log.e(TAG, "addView failed", it)
+            if (overlay === view) { overlay = null; runCatching { getSystemService(WindowManager::class.java).removeView(view) } }
+            view.destroy()
+            return null
+        }
+        return view
     }
 
     fun removeOverlay() {
@@ -463,7 +487,8 @@ class OverlayService : AccessibilityService() {
      * button's hold (see [homeHeld]). Without root there is nothing to listen with.
      */
     fun updateHotkeyListener() {
-        hotkeys?.stop(); hotkeys = null
+        val gen = hotkeyGen.incrementAndGet()
+        synchronized(hotkeyGen) { hotkeys?.stop(); hotkeys = null }
         val combo = when (MainUI.settings.comboTrigger) {
             "select_start" -> setOf("BTN_SELECT", "BTN_START")
             "l3_r3" -> setOf("BTN_THUMBL", "BTN_THUMBR")
@@ -471,9 +496,14 @@ class OverlayService : AccessibilityService() {
         }
         Thread {
             if (!Root.available()) return@Thread
-            hotkeys = HotkeyListener(combo, { main.post { if (gameInFront()) showMenu() } }) { key, down ->
-                if (key in HOME_BUTTONS) main.post { rawHome(down) }
-            }.also { it.start() }
+            synchronized(hotkeyGen) {
+                // A newer update (or the service ending) came while root was being checked.
+                if (gen != hotkeyGen.get()) return@Thread
+                hotkeys?.stop()
+                hotkeys = HotkeyListener(combo, { main.post { if (instance === this && gameInFront()) showMenu() } }) { key, down ->
+                    if (key in HOME_BUTTONS) main.post { if (instance === this) rawHome(down) }
+                }.also { it.start() }
+            }
         }.start()
     }
 

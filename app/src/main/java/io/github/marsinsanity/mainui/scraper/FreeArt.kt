@@ -68,6 +68,8 @@ object FreeArt {
         internal val indexes = ConcurrentHashMap<String, Any>()
         internal val lookups = ConcurrentHashMap<String, Any>()
         internal val identified = ConcurrentHashMap<String, List<String>>()
+        /** Per thumbnail set: title -> names (BoxArtMatch.titleIndex). */
+        internal val titles = ConcurrentHashMap<String, Map<String, List<String>>>()
     }
 
     private object None
@@ -94,8 +96,9 @@ object FreeArt {
                     // Its own DAT's names first; only then the other DATs' (a MAME name may be filed in
                     // another set too), so a second DAT is only read for games the first doesn't cover.
                     val available = index(s, lsrc.thumbs)
-                    val name = BoxArtMatch.pick(identified(lsrc), file.nameWithoutExtension, available, s.prefs)
-                        ?: BoxArtMatch.pick(identified(), file.nameWithoutExtension, available, s.prefs)
+                    val titles = available?.let { a -> s.titles.computeIfAbsent(lsrc.thumbs) { BoxArtMatch.titleIndex(a) } }
+                    val name = BoxArtMatch.pick(identified(lsrc), file.nameWithoutExtension, available, s.prefs, titles)
+                        ?: BoxArtMatch.pick(identified(), file.nameWithoutExtension, available, s.prefs, titles)
                         ?: continue
                     if (saveImage(thumbDir(lsrc.thumbs) + enc(name) + ".png", dest, maxWidth) ||
                         (testBase == null && saveImage(thumbGithub(lsrc.thumbs, name), dest, maxWidth))) return "libretro"
@@ -191,11 +194,11 @@ object FreeArt {
     /** The platform indexes for [systemId] as one lookup; null when there is no index (yet). */
     private fun launchBoxLookup(s: Session, systemId: String): LaunchBoxDb.Lookup? = s.lookups.computeIfAbsent(systemId) {
         val dir = File(launchBoxDir, "index")
-        val games = LaunchBoxDb.PLATFORMS[systemId].orEmpty().flatMap { p ->
+        val platforms = LaunchBoxDb.PLATFORMS[systemId].orEmpty().map { p ->
             val f = File(dir, LaunchBoxDb.fileName(p))
             if (f.isFile) f.bufferedReader().useLines { LaunchBoxDb.parseIndex(it) } else emptyList()
-        }
-        if (games.isEmpty()) None else LaunchBoxDb.Lookup(games)
+        }.filter { it.isNotEmpty() }
+        if (platforms.isEmpty()) None else LaunchBoxDb.Lookup(platforms)
     } as? LaunchBoxDb.Lookup
 
     /**
@@ -215,6 +218,7 @@ object FreeArt {
             progress("Downloading the LaunchBox database...")
             val info = Http.downloadFast(launchBoxMetadata, zip,
                 ifModifiedSince = if (have) stamp.takeIf { it.isFile }?.readText()?.trim()?.ifEmpty { null } else null) { done, total ->
+                if (cancelled()) throw java.io.InterruptedIOException("cancelled")
                 progress("Downloading the LaunchBox database: ${done shr 20} / ${if (total > 0) total shr 20 else "?"} MB")
             }
             if (info.notModified) { stamp.setLastModified(System.currentTimeMillis()); return true }
@@ -225,6 +229,7 @@ object FreeArt {
                 val size = e.size.coerceAtLeast(1)
                 java.io.BufferedReader(java.io.InputStreamReader(z.getInputStream(e), Charsets.UTF_8), 1 shl 16).use { r ->
                     val counts = LaunchBoxDb.buildIndex(r, LaunchBoxDb.PLATFORMS.values.flatten().toSet(), tmp) { read ->
+                        if (cancelled()) throw java.io.InterruptedIOException("cancelled")
                         progress("Reading the LaunchBox database: ${(read * 100 / size).coerceAtMost(99)}%")
                     }
                     Log.i(TAG, "LaunchBox index: ${counts.values.sum()} games on ${counts.size} platforms")
@@ -236,6 +241,7 @@ object FreeArt {
             true
         } catch (e: Exception) {
             Log.w(TAG, "LaunchBox database: ${e.message}")
+            File(dir, "index.new").deleteRecursively()
             have
         } finally {
             zip.delete()

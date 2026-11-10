@@ -96,8 +96,9 @@ class ProcessPopupScene(host: SceneHost) : Scene(host) {
             Btn.R1, Btn.RIGHT -> list.pageDown()
             Btn.A -> {
                 if (!repeat && p != null) {
-                    if (Processes.switchTo(host.hostContext, p)) host.finishHost()
-                    else host.toast("Cannot switch to ${MainUI.apps.label(p.pkg)}")
+                    host.io({ Processes.switchTo(host.hostContext, p) }) { ok ->
+                        if (ok) host.finishHost() else host.toast("Cannot switch to ${MainUI.apps.label(p.pkg)}")
+                    }
                 }
                 true
             }

@@ -92,10 +92,34 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
      * merged across every rom root (SD card + internal storage).
      */
     fun list(system: GameSystem, dir: File? = null): List<Game> {
-        val dirs = if (dir != null) listOf(dir) else system.dirs
+        val dirs = if (dir != null) mirrorsOf(system, dir) else system.dirs
+        // The same file (or folder) on several rom roots is listed once: keyed by its file name,
+        // never by display name, which region versions, revisions and discs share.
         val merged = LinkedHashMap<String, Game>()
-        for (d in dirs) for (g in listDir(system, d)) merged.putIfAbsent(g.name.lowercase() + "|" + g.isFolder, g)
-        return merged.values.sortedWith(compareBy<Game>({ !it.isFolder }, { sortKey(it.name) }))
+        for (d in dirs) for (g in listDir(system, d)) merged.putIfAbsent((g.file?.name ?: g.name).lowercase() + "|" + g.isFolder, g)
+        return distinctNames(merged.values.toList()).sortedWith(compareBy<Game>({ !it.isFolder }, { sortKey(it.name) }))
+    }
+
+    /** A sub folder and the folders at the same place in the system's other rom roots (SD + internal). */
+    private fun mirrorsOf(system: GameSystem, dir: File): List<File> {
+        val root = system.dirs.firstOrNull { dir.absolutePath == it.absolutePath || dir.absolutePath.startsWith(it.absolutePath + "/") }
+            ?: return listOf(dir)
+        val rel = dir.relativeTo(root).path
+        return listOf(dir) + system.dirs.filter { it.absolutePath != root.absolutePath }.map { if (rel.isEmpty()) it else File(it, rel) }
+            .filter { it.isDirectory }
+    }
+
+    /** Games whose display names are the same (USA / Europe, Rev 1 / Rev 2, Disc 1 / 2) show their file names. */
+    private fun distinctNames(games: List<Game>): List<Game> {
+        val clash = games.filter { !it.isFolder }.groupBy { it.name.lowercase() }.filterValues { it.size > 1 }
+        if (clash.isEmpty()) return games
+        val renamed = HashMap<Game, String>()
+        for (group in clash.values) {
+            val base = group.associateWith { it.file?.nameWithoutExtension ?: it.name }
+            val unique = base.values.map { it.lowercase() }.toSet().size == group.size
+            for (g in group) renamed[g] = if (unique) base.getValue(g) else g.file?.name ?: g.name
+        }
+        return games.map { g -> renamed[g]?.let { g.copy(name = it) } ?: g }
     }
 
     private fun sortKey(name: String): String = name.lowercase().removePrefix("the ")

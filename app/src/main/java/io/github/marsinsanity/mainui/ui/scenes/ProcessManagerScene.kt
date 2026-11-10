@@ -45,8 +45,9 @@ class ProcessManagerScene(host: SceneHost, private val overlayMode: Boolean = fa
 
     override fun activate() {
         val p = list.current?.data as? RunningApps.App ?: return
-        if (!Processes.switchTo(host.hostContext, p)) { host.toast("Cannot switch to ${MainUI.apps.label(p.pkg)}"); return }
-        if (overlayMode) host.finishHost()
+        host.io({ Processes.switchTo(host.hostContext, p) }) { ok ->
+            if (!ok) host.toast("Cannot switch to ${MainUI.apps.label(p.pkg)}") else if (overlayMode) host.finishHost()
+        }
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {

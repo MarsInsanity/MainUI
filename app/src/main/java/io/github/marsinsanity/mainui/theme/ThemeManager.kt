@@ -164,11 +164,16 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
             val entries = zf.entries().toList()
             val tops = entries.map { it.name.substringBefore('/') }.toSet()
             val hasTopFolder = tops.size == 1 && entries.any { it.name.contains('/') }
-            val target = if (hasTopFolder) File(zip.parentFile, tops.first()) else File(zip.parentFile, zip.nameWithoutExtension)
-            val base = if (hasTopFolder) zip.parentFile!! else target
+            val top = if (hasTopFolder) tops.first() else zip.nameWithoutExtension
+            // The theme folder must be a plain name: never "..", ".", or a path.
+            if (top.isBlank() || top == "." || top == ".." || top.contains('/') || top.contains('\\')) throw java.io.IOException("bad theme folder \"$top\"")
+            val target = File(zip.parentFile, top)
+            val inside = target.canonicalPath + File.separator
             for (e in entries) {
-                val out = File(base, e.name)
-                if (!out.canonicalPath.startsWith(base.canonicalPath)) continue // zip slip
+                val out = File(zip.parentFile, if (hasTopFolder) e.name else "$top/${e.name}")
+                // Zip slip: everything must land inside the theme's own folder (a prefix test of the
+                // bare path would let "Blue/../Blueprint/x" into a sibling theme "Blueprint").
+                if (!(out.canonicalPath + if (e.isDirectory) File.separator else "").startsWith(inside)) continue
                 if (e.isDirectory) out.mkdirs() else {
                     out.parentFile?.mkdirs()
                     zf.getInputStream(e).use { input -> out.outputStream().use { input.copyTo(it) } }

@@ -23,6 +23,13 @@ class HttpTest {
     @Volatile private var etag = "\"v1\""
     private var rangesSupported = true
     private var changeAfterFirstRequest = false
+    /** 206 answers give an unknown total ("bytes a-b/" then a star). */
+    private var unknownTotal = false
+    /** The URL redirects to a signed link that stops working after [expireAfter] uses (GitHub assets). */
+    private var signedRedirect = false
+    private var expireAfter = 3
+    private val linkGen = AtomicInteger(1)
+    private val linkUses = AtomicInteger()
     private val active = AtomicInteger()
     private val maxActive = AtomicInteger()
     private val requests = AtomicInteger()
@@ -45,7 +52,7 @@ class HttpTest {
     /** Minimal HTTP/1.0 server: Range, If-Range, If-None-Match, per-connection speed limit. */
     private fun handle(sock: Socket) {
         val input = sock.getInputStream().bufferedReader(Charsets.ISO_8859_1)
-        input.readLine() ?: return
+        val path = (input.readLine() ?: return).split(' ').getOrElse(1) { "/" }
         val headers = HashMap<String, String>()
         while (true) {
             val l = input.readLine() ?: break
@@ -62,6 +69,16 @@ class HttpTest {
                     .joinToString("\r\n") + "\r\n\r\n"
                 out.write(h.toByteArray(Charsets.ISO_8859_1))
             }
+            if (signedRedirect) {
+                if (!path.startsWith("/signed/")) {
+                    // A fresh signed link each time the original URL is asked for.
+                    val g = linkGen.incrementAndGet(); linkUses.set(0)
+                    head("302 Found", listOf("Location: /signed/$g"), 0); out.flush(); return
+                }
+                if (path.removePrefix("/signed/").toInt() != linkGen.get() || linkUses.incrementAndGet() > expireAfter) {
+                    head("403 Forbidden", emptyList(), 0); out.flush(); return
+                }
+            }
             if (headers["if-none-match"] == etag) { head("304 Not Modified", emptyList(), 0); out.flush(); return }
             var start = 0L
             var end = data.size - 1L
@@ -71,7 +88,7 @@ class HttpTest {
             if (partial) {
                 val parts = range!!.removePrefix("bytes=").split("-")
                 start = parts[0].toLong(); if (parts[1].isNotEmpty()) end = minOf(end, parts[1].toLong())
-                head("206 Partial Content", listOf("Content-Range: bytes $start-$end/${data.size}"), end - start + 1)
+                head("206 Partial Content", listOf("Content-Range: bytes $start-$end/${if (unknownTotal) "*" else data.size}"), end - start + 1)
             } else head("200 OK", emptyList(), end - start + 1)
             val t0 = System.nanoTime()
             var pos = start
@@ -116,6 +133,21 @@ class HttpTest {
         Http.downloadFast(url, dest)
         assertArrayEquals(data, dest.readBytes())
         assertEquals(1, maxActive.get())
+    }
+
+    @Test fun pieceOfUnknownTotalSizeIsNotTakenForTheFile() {
+        unknownTotal = true
+        val dest = tmp()
+        Http.downloadFast(url, dest)
+        assertArrayEquals(data, dest.readBytes())
+    }
+
+    @Test fun expiredRedirectLinkIsResolvedAgain() {
+        signedRedirect = true
+        val dest = tmp()
+        Http.downloadFast(url, dest)
+        assertArrayEquals(data, dest.readBytes())
+        assertTrue("links issued: ${linkGen.get()}", linkGen.get() > 2)
     }
 
     @Test fun fileChangingMidwayFallsBackToOneStream() {

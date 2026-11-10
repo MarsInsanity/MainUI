@@ -56,13 +56,29 @@ object AppStore {
 
     // ---- repositories --------------------------------------------------------------
 
+    /** The repositories in repos.json (edited by hand sometimes: entries that make no sense are skipped). */
     fun repos(): MutableList<Repo> {
         val arr = runCatching { JSONArray(configFile.readText()) }.getOrNull() ?: return DEFAULT_REPOS.map { it.copy() }.toMutableList()
-        return (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            Repo(o.getString("address"), o.optString("name"), o.optString("fingerprint").ifEmpty { null }, o.optBoolean("enabled", true))
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val address = o.optString("address").trim().takeIf { it.startsWith("http") } ?: return@mapNotNull null
+            Repo(address, o.optString("name").ifEmpty { address.substringAfter("://") },
+                o.optString("fingerprint").takeIf { it.isNotEmpty() && it != "null" }, o.optBoolean("enabled", true))
         }.toMutableList()
     }
+
+    /**
+     * A repository was trusted on first use (no fingerprint yet): pin the key in repos.json right
+     * away, whoever refreshed it (the automatic update check too), so later indexes must match it.
+     */
+    private fun rememberFingerprint(address: String, fp: String) = synchronized(configLock) {
+        val list = repos()
+        val r = list.firstOrNull { it.address.trimEnd('/') == address.trimEnd('/') } ?: return@synchronized
+        if (r.fingerprint != null) return@synchronized
+        r.fingerprint = fp
+        saveRepos(list)
+    }
+    private val configLock = Any()
 
     fun saveRepos(list: List<Repo>) {
         appsCache = null
@@ -114,7 +130,14 @@ object AppStore {
      * its last signed index are tried (an index from a mirror is verified the
      * same way, and an older one than we have is ignored).
      */
-    fun refresh(r: Repo, progress: (String) -> Unit): Int {
+    fun refresh(r: Repo, progress: (String) -> Unit): Int =
+        // Two refreshes of one repository (the automatic check while the App Store refreshes)
+        // would share its .jar / .part files: one at a time.
+        synchronized(repoLocks.computeIfAbsent(repoKey(r)) { Any() }) { refreshLocked(r, progress) }
+
+    private val repoLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+    private fun refreshLocked(r: Repo, progress: (String) -> Unit): Int {
         val jar = File(cacheDir, "${repoKey(r)}-index-v1.jar")
         val meta = readMeta(r)
         val haveIndex = compactFile(r).isFile && meta != null
@@ -151,7 +174,10 @@ object AppStore {
                     val certs = entry.certificates ?: throw SecurityException("${r.name}: index is not signed")
                     val fp = sha256(certs.first().encoded)
                     when {
-                        r.fingerprint == null -> { r.fingerprint = fp; Log.i(TAG, "trusting ${r.address} with $fp") }
+                        r.fingerprint == null -> {
+                            r.fingerprint = fp; Log.i(TAG, "trusting ${r.address} with $fp")
+                            rememberFingerprint(r.address, fp)
+                        }
                         !r.fingerprint.equals(fp, true) -> throw SecurityException("${r.name}: signing key changed! Expected ${r.fingerprint}, got $fp")
                     }
                 }
@@ -215,7 +241,7 @@ object AppStore {
             for (i in 0 until arr.length()) {
                 val a = arr.getJSONObject(i)
                 val pkg = a.getString("p")
-                if (out.containsKey(pkg)) continue
+                if (out.containsKey(pkg) || !PACKAGE_NAME.matches(pkg)) continue // (catalogs saved before names were checked)
                 val apk = if (a.has("an")) Apk(a.getLong("vc"), a.optString("vn"), a.getString("an"), a.optLong("sz"), a.optString("h").ifEmpty { null },
                     a.optString("sg").ifEmpty { null }) else null
                 val cats = a.optJSONArray("c")?.let { c -> (0 until c.length()).map { c.getString(it) } } ?: emptyList()
@@ -231,6 +257,11 @@ object AppStore {
 
     fun categories(): List<String> = apps().flatMap { it.categories }.groupingBy { it }.eachCount()
         .entries.sortedByDescending { it.value }.map { it.key }
+
+    private val LOCALIZED_FIELDS = setOf("name", "summary", "description", "icon")
+    private val HTML_TAG = Regex("<[^>]+>")
+    /** A real Android package name (it becomes file names: "../" must never get through). */
+    internal val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$")
 
     private class RepoInfo(var name: String? = null, val mirrors: MutableList<String> = mutableListOf(), var timestamp: Long = 0)
 
@@ -288,7 +319,8 @@ object AppStore {
         var pkg = ""; var name: String? = null; var summary: String? = null; var desc: String? = null
         var icon: String? = null; var license = ""; var updated = 0L; var suggested: Long? = null
         val cats = ArrayList<String>()
-        var locName: String? = null; var locSummary: String? = null; var locDesc: String? = null; var locIcon: String? = null
+        // Each locale's texts, chosen per field afterwards (see pickLocalized).
+        val localized = LinkedHashMap<String, MutableMap<String, String>>()
         r.beginObject()
         while (r.hasNext()) {
             when (r.nextName()) {
@@ -305,19 +337,14 @@ object AppStore {
                     r.beginObject()
                     while (r.hasNext()) {
                         val lang = r.nextName()
-                        val prefer = lang == "en-US" || (lang.startsWith("en") && locName == null)
+                        if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); continue }
+                        val m = localized.getOrPut(lang) { HashMap() }
                         r.beginObject()
                         while (r.hasNext()) {
                             val k = r.nextName()
                             if (r.peek() != JsonToken.STRING) { r.skipValue(); continue }
                             val v = r.nextString()
-                            if (!prefer && locName != null) continue
-                            when (k) {
-                                "name" -> locName = v
-                                "summary" -> locSummary = v
-                                "description" -> locDesc = v
-                                "icon" -> locIcon = "$address/$pkg/$lang/$v"
-                            }
+                            if (k in LOCALIZED_FIELDS && v.isNotBlank()) m[k] = v
                         }
                         r.endObject()
                     }
@@ -327,10 +354,38 @@ object AppStore {
             }
         }
         r.endObject()
-        if (pkg.isEmpty()) return null
-        val iconUrl = locIcon ?: icon?.let { "$address/icons-640/$it" }
-        val d = (locDesc ?: desc ?: "").replace(Regex("<[^>]+>"), "").take(700)
-        return App(pkg, locName ?: name ?: pkg, locSummary ?: summary ?: "", d, iconUrl, cats, license, updated, null, address) to suggested
+        // The package name becomes file names (icon, APK): anything else than a real one is refused.
+        if (!PACKAGE_NAME.matches(pkg)) { if (pkg.isNotEmpty()) Log.w(TAG, "$address: skipping app with package name \"${pkg.take(80)}\""); return null }
+        val loc = pickLocalized(localized, mapOf("name" to name, "summary" to summary, "description" to desc, "icon" to icon))
+        val iconUrl = loc["icon"]?.let { (lang, v) -> if (lang == null) "$address/icons-640/$v" else "$address/$pkg/$lang/$v" }
+        val d = (loc["description"]?.second ?: "").replace(HTML_TAG, "").take(700)
+        return App(pkg, loc["name"]?.second ?: pkg, loc["summary"]?.second ?: "", d, iconUrl, cats, license, updated, null, address) to suggested
+    }
+
+    /**
+     * Per field (name, summary, description, icon): the device's language ("de-DE", then "de"),
+     * then en-US, then any English, then the index's own top-level value ([top]), and only when
+     * that is missing too, any language. Returns field -> (locale, or null for [top], text).
+     */
+    internal fun pickLocalized(localized: Map<String, Map<String, String>>, top: Map<String, String?>,
+                               device: java.util.Locale = java.util.Locale.getDefault()): Map<String, Pair<String?, String>> {
+        val tag = device.toLanguageTag()
+        val order = buildList {
+            localized.keys.firstOrNull { it.equals(tag, true) }?.let { add(it) }
+            localized.keys.filter { it.equals(device.language, true) || it.startsWith(device.language + "-", true) }.forEach { add(it) }
+            localized.keys.firstOrNull { it.equals("en-US", true) }?.let { add(it) }
+            localized.keys.filter { it.equals("en", true) || it.startsWith("en-", true) }.forEach { add(it) }
+        }.distinct()
+        val out = HashMap<String, Pair<String?, String>>()
+        for (k in LOCALIZED_FIELDS) {
+            val lang = order.firstOrNull { localized[it]?.get(k) != null }
+            if (lang != null) { out[k] = lang to localized.getValue(lang).getValue(k); continue }
+            val own = top[k]?.takeIf { it.isNotBlank() }
+            if (own != null) { out[k] = null to own; continue }
+            val any = localized.keys.firstOrNull { localized[it]?.get(k) != null } ?: continue
+            out[k] = any to localized.getValue(any).getValue(k)
+        }
+        return out
     }
 
     private fun readApk(r: JsonReader, abis: Set<String>): Pair<Apk, Boolean> {
@@ -371,6 +426,11 @@ object AppStore {
         MainUI.app.packageManager.getPackageInfo(pkg, 0).longVersionCode
     }.getOrNull()
 
+    /** Every installed package's version code, in one call (call off the main thread). */
+    fun installedVersions(): Map<String, Long> = runCatching {
+        MainUI.app.packageManager.getInstalledPackages(0).associate { it.packageName to it.longVersionCode }
+    }.getOrDefault(emptyMap())
+
     /**
      * Downloads the APK, checks its SHA-256 and installs it: silently with
      * root, otherwise through Android's package installer (asks the user).
@@ -378,6 +438,7 @@ object AppStore {
      */
     fun install(app: App, progress: (String) -> Unit): String {
         val apk = app.apk ?: return "No compatible version for this device"
+        if (!PACKAGE_NAME.matches(app.pkg)) return "Invalid package name"
         val file = File(cacheDir, "${app.pkg}-${apk.versionCode}.apk")
         Http.download("${app.repo}/${apk.apkName}", file) { done, total ->
             progress("Downloading ${app.name}: ${formatBytes(done)}" + if (total > 0) " / ${formatBytes(total)}" else "")
@@ -426,6 +487,7 @@ object AppStore {
     /** Icon file for an app, downloaded once. */
     fun icon(app: App): File? {
         val url = app.icon ?: return null
+        if (!PACKAGE_NAME.matches(app.pkg)) return null
         val f = File(MainUI.storage.dataDir("cache/appstore/icons"), "${app.pkg}.png")
         if (f.isFile && f.length() > 0) return f
         return runCatching { Http.download(url, f); f }.getOrNull()

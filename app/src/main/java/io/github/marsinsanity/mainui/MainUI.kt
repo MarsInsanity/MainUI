@@ -34,6 +34,7 @@ object MainUI {
 
     /** Re-reads everything that depends on storage (after permissions are granted, SD swap...). */
     fun reloadStorage() {
+        storage.invalidate()
         library.load()
         games.invalidate()
         themes.reload()

@@ -20,6 +20,8 @@ import org.json.JSONObject
 object EmulatorUpdates {
     private const val TAG = "MainUI.EmuUpdates"
     private const val CHECK_EVERY_MS = 24L * 60 * 60 * 1000
+    /** After a check that couldn't reach everything. */
+    private const val RETRY_MS = 60L * 60 * 1000
 
     enum class Source { FDROID, GITHUB, RETROARCH }
 
@@ -80,12 +82,34 @@ object EmulatorUpdates {
 
     // ---- checking ------------------------------------------------------------------------------
 
-    /** Refreshes the repositories and checks every installed emulator. Call off the main thread. */
-    fun check(progress: (String) -> Unit = {}): List<Update> {
+    /** One check at a time: they share the repositories' download files and the saved results. */
+    private val checking = java.util.concurrent.locks.ReentrantLock()
+
+    /** The automatic check: skipped (null) while another check is running. */
+    fun checkIfIdle(): List<Update>? {
+        if (!checking.tryLock()) return null
+        try { return check() } finally { checking.unlock() }
+    }
+
+    /**
+     * Refreshes the repositories and checks every installed emulator. Call off the main thread.
+     * Emulators that couldn't be checked (offline, GitHub's rate limit) keep what the last check
+     * found, and another check is due in an hour instead of a day.
+     */
+    fun check(progress: (String) -> Unit = {}): List<Update> = checking.withLockInterruptibly { checkLocked(progress) }
+
+    private inline fun <T> java.util.concurrent.locks.ReentrantLock.withLockInterruptibly(block: () -> T): T {
+        lockInterruptibly()
+        try { return block() } finally { unlock() }
+    }
+
+    private fun checkLocked(progress: (String) -> Unit): List<Update> {
         val pm = MainUI.app.packageManager
+        val previous = known().associateBy { it.id }
         progress("Refreshing app repositories...")
         runCatching { AppStore.refreshAll(AppStore.repos().filter { it.enabled }) {} }
         val out = ArrayList<Update>()
+        var failed = 0
         val entries = EmulatorStore.entries().filter { it.installed != null }
         for ((i, e) in entries.withIndex()) {
             val pkg = e.installed ?: continue
@@ -94,10 +118,10 @@ object EmulatorUpdates {
             val installedName = info.versionName ?: ""
             if (installer(pkg) == "com.android.vending") continue   // Google Play updates it
             runCatching { find(e, pkg, installedName, info.longVersionCode, info.lastUpdateTime) }
-                .onFailure { Log.w(TAG, "${e.def.name}: ${it.message}") }
+                .onFailure { Log.w(TAG, "${e.def.name}: ${it.message}"); failed++; previous[e.def.id]?.let { p -> out += p } }
                 .getOrNull()?.let { out += it }
         }
-        save(out)
+        save(out, failed)
         return out
     }
 
@@ -139,19 +163,29 @@ object EmulatorUpdates {
         // Done (or asked Android to install it): drop it from the list unless it's still old.
         runCatching {
             val now = MainUI.app.packageManager.getPackageInfo(u.pkg, 0).versionName ?: ""
-            if (now != u.installed) save(known().filter { it.id != u.id })
+            if (now != u.installed) synchronized(this) {
+                // Only the list: when the last check ran (and whether it failed) stays as it was.
+                MainUI.settings.prefs.edit().putString("emu_updates",
+                    JSONArray().apply { known().filter { it.id != u.id }.forEach { put(it.json()) } }.toString()).apply()
+            }
         }
         return msg
     }
 
     // ---- remembered results ------------------------------------------------------------------
 
-    private fun save(list: List<Update>) {
+    private fun save(list: List<Update>, failed: Int) {
         val s = MainUI.settings
+        val now = System.currentTimeMillis()
         s.prefs.edit().putString("emu_updates", JSONArray().apply { list.forEach { put(it.json()) } }.toString())
-            .putLong("emu_updates_checked", System.currentTimeMillis())
+            .putLong("emu_updates_checked", now)
+            .putInt("emu_updates_failed", failed)
+            .putLong("emu_updates_retry", if (failed > 0) now + RETRY_MS else 0L)
             .putInt("emu_updates_build", io.github.marsinsanity.mainui.BuildConfig.VERSION_CODE).apply()
     }
+
+    /** How many installed emulators the last check couldn't check (offline...). */
+    fun lastFailures(): Int = MainUI.settings.prefs.getInt("emu_updates_failed", 0)
 
     /** Results from an older MainUI may have been judged by older rules: check again. */
     private fun sameBuild() = MainUI.settings.prefs.getInt("emu_updates_build", -1) == io.github.marsinsanity.mainui.BuildConfig.VERSION_CODE
@@ -172,6 +206,11 @@ object EmulatorUpdates {
     fun lastCheck(): Long = MainUI.settings.prefs.getLong("emu_updates_checked", 0L)
 
     /** Automatic checks are on and the last one was a day ago or more. */
-    fun isDue(): Boolean = autoCheck && (!sameBuild() || System.currentTimeMillis() - lastCheck() >= CHECK_EVERY_MS)
+    fun isDue(): Boolean {
+        if (!autoCheck) return false
+        val now = System.currentTimeMillis()
+        val retry = MainUI.settings.prefs.getLong("emu_updates_retry", 0L)
+        return !sameBuild() || now - lastCheck() >= CHECK_EVERY_MS || retry in 1..now
+    }
 
 }

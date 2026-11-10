@@ -1,6 +1,5 @@
 package io.github.marsinsanity.mainui.data
 
-import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
 import java.io.StringReader
@@ -50,7 +49,9 @@ class CombinedLookup(private val first: MetaLookup, private val second: MetaLook
  */
 class LogiqxDat(val file: File) : MetaLookup {
 
-    class Rom(val name: String, val size: Long?, val crc: String?, val md5: String?, val sha1: String?)
+    /** A <rom> or <disk> ([tag]); [attrs] keeps every attribute as written (status, merge, serial...). */
+    class Rom(val name: String, val size: Long?, val crc: String?, val md5: String?, val sha1: String?,
+              val tag: String = "rom", val attrs: LinkedHashMap<String, String>? = null)
 
     class Game(
         var name: String,
@@ -58,9 +59,18 @@ class LogiqxDat(val file: File) : MetaLookup {
         val fields: LinkedHashMap<String, String> = LinkedHashMap(),
         val attrs: LinkedHashMap<String, String> = LinkedHashMap(),
         val roms: MutableList<Rom> = mutableListOf(),
+        /** Children kept as written (attributes, nested tags, repeats such as several <release>). */
+        val raw: MutableList<String> = mutableListOf(),
     )
 
     val header = LinkedHashMap<String, String>()
+    /** Header children with attributes / nested tags (<clrmamepro forcenodump=.../>), as written. */
+    private val headerRaw = mutableListOf<String>()
+    /** Top-level elements other than the header and games, as written. */
+    private val others = mutableListOf<String>()
+    /** Why the file couldn't be read completely (null = it was): then it is never overwritten. */
+    var parseError: String? = null
+        private set
     private val games = ArrayList<Game>()
     private val byFile = HashMap<String, Game>()
     private val byName = HashMap<String, Game>()
@@ -71,10 +81,12 @@ class LogiqxDat(val file: File) : MetaLookup {
 
     fun load(): LogiqxDat {
         games.clear(); header.clear(); byFile.clear(); byName.clear(); byCrc.clear()
+        headerRaw.clear(); others.clear(); parseError = null
         loadedMtime = file.lastModified()
         if (!file.isFile) return this
-        val raw = runCatching { file.readText() }.getOrNull() ?: return this
-        val p = Xml.newPullParser()
+        val raw = runCatching { file.readText() }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
+        if (GameListXml.isEmptyXml(raw)) return this
+        val p = GameListXml.newParser()
         p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         try {
             // DOCTYPE declarations are fine for the pull parser; external DTDs are never fetched.
@@ -82,11 +94,13 @@ class LogiqxDat(val file: File) : MetaLookup {
             var game: Game? = null
             var inHeader = false
             var depth = 0
+            var sawRoot = false
             var ev = p.eventType
             while (ev != XmlPullParser.END_DOCUMENT) {
                 when (ev) {
                     XmlPullParser.START_TAG -> {
                         depth++
+                        if (depth == 1) sawRoot = true
                         val tag = p.name
                         when {
                             depth == 2 && tag == "header" -> inHeader = true
@@ -94,17 +108,27 @@ class LogiqxDat(val file: File) : MetaLookup {
                                 game = Game(p.getAttributeValue(null, "name") ?: "", isMachine = tag == "machine")
                                 for (i in 0 until p.attributeCount) game.attrs[p.getAttributeName(i)] = p.getAttributeValue(i)
                             }
-                            depth == 3 && inHeader -> { header[tag] = readText(p); depth-- }
+                            depth == 2 && tag != "header" -> { others += GameListXml.readElement(p).raw; depth-- }
+                            depth == 3 && inHeader -> {
+                                val el = GameListXml.readElement(p); depth--
+                                if (el.simple && tag !in header) header[tag] = el.text else headerRaw += el.raw
+                            }
                             depth == 3 && game != null && (tag == "rom" || tag == "disk") -> {
+                                val attrs = LinkedHashMap<String, String>()
+                                for (i in 0 until p.attributeCount) attrs[p.getAttributeName(i)] = p.getAttributeValue(i)
                                 game.roms += Rom(
                                     p.getAttributeValue(null, "name") ?: "",
                                     p.getAttributeValue(null, "size")?.toLongOrNull(),
                                     p.getAttributeValue(null, "crc")?.lowercase(),
                                     p.getAttributeValue(null, "md5")?.lowercase(),
                                     p.getAttributeValue(null, "sha1")?.lowercase(),
+                                    tag, attrs,
                                 )
                             }
-                            depth == 3 && game != null -> { game.fields[tag] = readText(p); depth-- }
+                            depth == 3 && game != null -> {
+                                val el = GameListXml.readElement(p); depth--
+                                if (el.simple && tag !in game.fields) game.fields[tag] = el.text else game.raw += el.raw
+                            }
                         }
                     }
                     XmlPullParser.END_TAG -> {
@@ -118,8 +142,11 @@ class LogiqxDat(val file: File) : MetaLookup {
                 }
                 ev = p.next()
             }
+            // Text that isn't XML at all (a clrmamepro DAT, some other file): not ours to rewrite.
+            if (!sawRoot) throw org.xmlpull.v1.XmlPullParserException("no XML elements in it")
         } catch (e: Exception) {
-            android.util.Log.w("MainUI.Logiqx", "Failed to parse ${file.path}: ${e.message}")
+            parseError = e.message ?: e.javaClass.simpleName
+            runCatching { android.util.Log.w("MainUI.Logiqx", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
         }
         return this
     }
@@ -131,20 +158,6 @@ class LogiqxDat(val file: File) : MetaLookup {
             byFile.putIfAbsent(r.name.substringAfterLast('/').substringAfterLast('\\').lowercase(), g)
             r.crc?.let { byCrc.putIfAbsent(it, g) }
         }
-    }
-
-    private fun readText(p: XmlPullParser): String {
-        val sb = StringBuilder()
-        var d = 1
-        while (d > 0) {
-            when (p.next()) {
-                XmlPullParser.TEXT -> sb.append(p.text)
-                XmlPullParser.START_TAG -> d++
-                XmlPullParser.END_TAG -> d--
-                XmlPullParser.END_DOCUMENT -> return sb.toString()
-            }
-        }
-        return sb.toString()
     }
 
     fun all(): List<Game> = games
@@ -204,7 +217,12 @@ class LogiqxDat(val file: File) : MetaLookup {
         desc?.let { g.fields["comment"] = it.replace('\n', ' ').take(2000) }
     }
 
+    /**
+     * Writes the DAT back. Throws (and writes nothing) when the file on disk couldn't be read
+     * completely (not XML, cut short...): rewriting it would lose whatever wasn't read.
+     */
     fun save() {
+        parseError?.let { throw java.io.IOException("${file.path} could not be read ($it): not overwriting it") }
         val esc = GameListXml::escape
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\"?>\n")
@@ -216,7 +234,9 @@ class LogiqxDat(val file: File) : MetaLookup {
             header["author"] = "MainUI"
         }
         for ((k, v) in header) sb.append("\t\t<").append(k).append('>').append(esc(v)).append("</").append(k).append(">\n")
+        for (r in headerRaw) sb.append("\t\t").append(r).append('\n')
         sb.append("\t</header>\n")
+        for (o in others) sb.append('\t').append(o).append('\n')
         // Logiqx element order: comment, description, year, manufacturer, ..., rom
         val order = listOf("comment", "description", "year", "manufacturer")
         for (g in games) {
@@ -227,18 +247,23 @@ class LogiqxDat(val file: File) : MetaLookup {
             sb.append(">\n")
             val keys = order.filter { g.fields.containsKey(it) } + g.fields.keys.filter { it !in order }
             for (k in keys) sb.append("\t\t<").append(k).append('>').append(esc(g.fields.getValue(k))).append("</").append(k).append(">\n")
+            for (r in g.raw) sb.append("\t\t").append(r).append('\n')
             for (r in g.roms) {
-                sb.append("\t\t<rom name=\"").append(esc(r.name)).append('"')
-                r.size?.let { sb.append(" size=\"").append(it).append('"') }
-                r.crc?.let { sb.append(" crc=\"").append(it).append('"') }
-                r.md5?.let { sb.append(" md5=\"").append(it).append('"') }
-                r.sha1?.let { sb.append(" sha1=\"").append(it).append('"') }
+                sb.append("\t\t<").append(r.tag)
+                val attrs = r.attrs ?: LinkedHashMap<String, String>().apply {
+                    put("name", r.name)
+                    r.size?.let { put("size", it.toString()) }
+                    r.crc?.let { put("crc", it) }
+                    r.md5?.let { put("md5", it) }
+                    r.sha1?.let { put("sha1", it) }
+                }
+                for ((k, v) in attrs) sb.append(' ').append(k).append("=\"").append(esc(v)).append('"')
                 sb.append("/>\n")
             }
             sb.append("\t</").append(tag).append(">\n")
         }
         sb.append("</datafile>\n")
-        val tmp = File(dir, file.name + ".tmp")
+        val tmp = File(dir, "${file.name}.${Thread.currentThread().id}.${System.nanoTime()}.tmp")
         tmp.writeText(sb.toString())
         if (file.exists()) {
             val bak = File(dir, file.name + ".bak")
@@ -254,7 +279,20 @@ class LogiqxDat(val file: File) : MetaLookup {
          * *.xml whose root element is <datafile> (Skraper's generic profile writes XML).
          */
         fun locate(dir: File): File? {
+            // Listing the folder and peeking into its .xml files is slow on big folders: remembered
+            // until the folder changes (adding / removing / renaming a file changes its mtime).
+            val key = dir.absolutePath
+            val mtime = dir.lastModified()
+            located[key]?.let { (m, f) -> if (m == mtime && (f == null || f.isFile)) return f }
+            return scan(dir).also { located[key] = mtime to it }
+        }
+
+        private val located = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, File?>>()
+
+        private fun scan(dir: File): File? {
             val files = dir.listFiles() ?: return null
+            // MainUI's own DAT, written when the folder's DAT couldn't be read (see forWriting).
+            files.firstOrNull { it.isFile && it.name.equals("${dir.name}.mainui.dat", true) }?.let { return it }
             files.firstOrNull { it.isFile && it.name.equals("${dir.name}.dat", true) }?.let { return it }
             files.filter { it.isFile && it.extension.equals("dat", true) }.minByOrNull { it.name.length }?.let { return it }
             return files.filter { it.isFile && it.extension.equals("xml", true) && !it.name.equals("gamelist.xml", true) }
@@ -262,7 +300,15 @@ class LogiqxDat(val file: File) : MetaLookup {
                     .getOrDefault("").contains("<datafile") }
         }
 
-        /** The DAT the scraper writes into: an existing one, or <folder>/<folder>.dat. */
-        fun forWriting(dir: File): LogiqxDat = LogiqxDat(locate(dir) ?: File(dir, "${dir.name}.dat")).load()
+        /**
+         * The DAT the scraper writes into: the folder's DAT when it reads cleanly as Logiqx XML,
+         * else (a clrmamepro text DAT, a broken file) <folder>.dat when there is none yet, or
+         * <folder>.mainui.dat next to it, so the user's own DAT is never overwritten.
+         */
+        fun forWriting(dir: File): LogiqxDat {
+            locate(dir)?.let { f -> LogiqxDat(f).load().let { if (it.parseError == null) return it } }
+            val own = File(dir, "${dir.name}.dat").takeUnless { it.exists() } ?: File(dir, "${dir.name}.mainui.dat")
+            return LogiqxDat(own).load().also { located.remove(dir.absolutePath) }
+        }
     }
 }

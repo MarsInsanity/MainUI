@@ -279,9 +279,14 @@ class JsonPull(private val r: Reader) {
 
     private fun valueDone() { if (stack.isNotEmpty() && stack.last() == OBJ_VALUE) stack[stack.size - 1] = OBJ_NAME }
 
+    /** The next token; [T.END] at the end of the input. Throws when the input ends inside a value (cut short). */
     fun next(): T {
         while (true) {
-            if (!fill()) return T.END
+            if (!fill()) {
+                // Every caller loops until its object / array closes: a dump cut short must not spin.
+                if (stack.isNotEmpty()) throw java.io.IOException("truncated JSON (${stack.size} levels open at $charsRead chars)")
+                return T.END
+            }
             val c = buf[pos]
             when (c) {
                 ' ', '\n', '\r', '\t', ',', ':' -> { pos++; continue }

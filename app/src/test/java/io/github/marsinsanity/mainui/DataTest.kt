@@ -929,3 +929,199 @@ class EmulatorVariantTest {
         assertFalse(v(listOf("org.ppsspp.ppsspp"), "PPSSPP", "ppsspp", "com.example.notes", "Notes"))
     }
 }
+
+/** Fixes from the bug review: parsers that must not hang or abort, and lookups that must not lose matches. */
+class ReviewFixesTest {
+    @Test fun truncatedJsonThrowsInsteadOfLoopingForever() {
+        val p = io.github.marsinsanity.mainui.scraper.JsonPull(java.io.StringReader("""{"data":{"games":[{"id":1},{"id":"""))
+        val t = Thread.currentThread()
+        val watchdog = Thread { runCatching { Thread.sleep(5000); t.interrupt() } }.apply { isDaemon = true; start() }
+        try {
+            var threw = false
+            try {
+                p.next(); p.next(); p.next(); p.next(); p.next() // { data { games [
+                while (true) { val tok = p.next(); if (tok == io.github.marsinsanity.mainui.scraper.JsonPull.T.BEGIN_OBJECT) p.skipRest(tok) }
+            } catch (e: java.io.IOException) { threw = true }
+            assertTrue(threw)
+        } finally { watchdog.interrupt() }
+    }
+
+    @Test fun completeJsonEndsNormally() {
+        val p = io.github.marsinsanity.mainui.scraper.JsonPull(java.io.StringReader("""{"a":[1,2]}"""))
+        val seen = generateSequence { p.next().takeIf { it != io.github.marsinsanity.mainui.scraper.JsonPull.T.END } }.toList()
+        assertEquals(io.github.marsinsanity.mainui.scraper.JsonPull.T.END_OBJECT, seen.last())
+    }
+
+    @Test fun outOfRangeEntityIsKeptAsWritten() {
+        val lb = io.github.marsinsanity.mainui.scraper.LaunchBoxDb
+        assertEquals("A &#1114112; B &#x7FFFFFFF; é", lb.unescape("A &#1114112; B &#x7FFFFFFF; &#233;"))
+    }
+
+    @Test fun launchBoxTitleOnTwoPlatformsTakesTheFirstPlatform() {
+        fun game(id: String, name: String) = io.github.marsinsanity.mainui.scraper.LaunchBoxDb.Game(id, listOf(name), listOf("" to "$id.jpg"))
+        fun lookup(vararg platforms: List<io.github.marsinsanity.mainui.scraper.LaunchBoxDb.Game>) =
+            io.github.marsinsanity.mainui.scraper.LaunchBoxDb.Lookup(platforms.toList())
+        val aes = listOf(game("1", "Metal Slug"))
+        val mvs = listOf(game("2", "Metal Slug"), game("3", "Blazing Star"))
+        val l = lookup(aes, mvs)
+        assertEquals("1", l.find("Metal Slug (World)")?.id)
+        assertEquals("3", l.find("Blazing Star")?.id)
+        // Two games with one title on the same platform still can't be told apart.
+        assertNull(lookup(aes + game("4", "Metal Slug")).find("Metal Slug"))
+    }
+
+    @Test fun titleIndexPicksTheSameAsAFullScan() {
+        val m = io.github.marsinsanity.mainui.scraper.BoxArtMatch
+        val names = setOf("Legend of Zelda, The - A Link to the Past (USA)", "Legend of Zelda, The - A Link to the Past (Europe)",
+            "Super Mario Bros. 3 (USA)", "Super Mario Bros. (World)", "Pokemon - Red Version (USA, Europe)")
+        val idx = m.titleIndex(names)
+        for (file in listOf("The Legend of Zelda - A Link to the Past (Europe)", "Super Mario Bros (USA)", "Pokémon - Red Version (USA)", "Nothing"))
+            assertEquals(m.pick(emptyList(), file, names, listOf("USA")), m.pick(emptyList(), file, names, listOf("USA"), idx))
+    }
+
+    @Test fun heldDirectionDoesNotWrapOrFlip() {
+        var flips = 0
+        val multi = io.github.marsinsanity.mainui.ui.UiItem("Brightness", io.github.marsinsanity.mainui.ui.ItemType.MULTI, values = listOf("1", "2", "3"))
+        multi.value = 2
+        val l = io.github.marsinsanity.mainui.ui.UiList().apply { set(listOf(multi), false) }
+        assertFalse(l.change(1, repeat = true)); assertEquals(2, multi.value)   // held: stops at the top
+        assertTrue(l.change(1)); assertEquals(0, multi.value)                    // a single press still wraps
+        assertFalse(l.change(-1, repeat = true)); assertEquals(0, multi.value)
+        val toggle = io.github.marsinsanity.mainui.ui.UiItem("Wi-Fi", io.github.marsinsanity.mainui.ui.ItemType.TOGGLE, onChange = { flips++ })
+        val t = io.github.marsinsanity.mainui.ui.UiList().apply { set(listOf(toggle), false) }
+        assertTrue(t.change(1)); assertFalse(t.change(1, repeat = true)); assertFalse(t.change(1, repeat = true))
+        assertEquals(1, flips)
+    }
+
+    @Test fun packageNamesThatArePathsAreRefused() {
+        val re = io.github.marsinsanity.mainui.store.AppStore.PACKAGE_NAME
+        assertTrue(re.matches("org.ppsspp.ppsspp")); assertTrue(re.matches("com.retroarch.aarch64")); assertTrue(re.matches("a.b_c.D9"))
+        for (bad in listOf("../../../roms/snes/images/Game", "com.foo/../x", "single", ".com.foo", "com..foo", "com.foo.", "com.foo bar"))
+            assertFalse(bad, re.matches(bad))
+    }
+
+    @Test fun localizedTextIsChosenPerField() {
+        val pick = io.github.marsinsanity.mainui.store.AppStore::pickLocalized
+        val loc = linkedMapOf(
+            "de" to mapOf("name" to "Spiel", "description" to "Beschreibung", "summary" to "Kurz"),
+            "en-US" to mapOf("summary" to "Short"),
+        )
+        val top = mapOf("name" to "Game", "summary" to null, "description" to null, "icon" to "icon.png")
+        // English device: en-US where it has the field, else the index's own text, never German.
+        val en = pick(loc, top, java.util.Locale.US)
+        assertEquals("Short", en["summary"]?.second)
+        assertEquals("Game", en["name"]?.second); assertNull(en["name"]?.first)
+        assertEquals("Beschreibung", en["description"]?.second) // nothing else has one: any language
+        assertEquals(null to "icon.png", en["icon"])
+        // German device: German first.
+        assertEquals("Spiel", pick(loc, top, java.util.Locale.GERMANY)["name"]?.second)
+    }
+}
+
+/** gamelist.xml / Logiqx DAT rewriting keeps what MainUI doesn't use, and never overwrites a file it couldn't read. */
+class MetadataFilesTest {
+    private lateinit var dir: File
+
+    @org.junit.Before fun setUp() {
+        GameListXml.newParser = { org.kxml2.io.KXmlParser() }
+        dir = java.nio.file.Files.createTempDirectory("snes").toFile()
+    }
+
+    @org.junit.After fun tearDown() { dir.deleteRecursively() }
+
+    @Test fun gamelistKeepsOtherToolsData() {
+        val f = File(dir, "gamelist.xml")
+        f.writeText("""<?xml version="1.0"?>
+<gameList>
+	<provider><System>SNES</System><software>Skraper</software></provider>
+	<alternativeEmulator><label>Snes9x</label></alternativeEmulator>
+	<game id="5" source="ScreenScraper.fr">
+		<path>./Game (USA).sfc</path>
+		<name>Game</name>
+		<desc>Fun &amp; games</desc>
+		<scrap name="ScreenScraper" date="20240101T000000"/>
+		<scrap name="TheGamesDB" date="20240102T000000"/>
+		<genre>Action</genre>
+	</game>
+</gameList>
+""")
+        val gl = GameListXml(dir).load()
+        assertNull(gl.parseError)
+        val rom = File(dir, "Game (USA).sfc")
+        assertEquals("Game", gl.get(rom)?.name)
+        assertEquals("Fun & games", gl.get(rom)?.desc)
+        gl.put(rom) { it.fields["image"] = "./images/Game (USA).png" }
+        gl.save()
+        val text = f.readText()
+        for (kept in listOf("<provider><System>SNES</System><software>Skraper</software></provider>",
+            "<alternativeEmulator><label>Snes9x</label></alternativeEmulator>",
+            "<scrap name=\"ScreenScraper\" date=\"20240101T000000\"/>", "<scrap name=\"TheGamesDB\" date=\"20240102T000000\"/>",
+            "<genre>Action</genre>", "<desc>Fun &amp; games</desc>"))
+            assertTrue("lost $kept in\n$text", text.contains(kept))
+        val again = GameListXml(dir).load()
+        assertNull(again.parseError)
+        assertEquals("./images/Game (USA).png", again.get(rom)?.image)
+        assertEquals(1, File(dir, ".").listFiles()!!.count { it.name.endsWith(".tmp") }.let { if (it == 0) 1 else 0 })
+    }
+
+    @Test fun brokenGamelistIsNeverOverwritten() {
+        val f = File(dir, "gamelist.xml")
+        val broken = "<gameList><game><path>./a.sfc</path><name>A</name></game><game><path>./b.sfc</path><desc>a < b</desc></game><game><path>./c.sfc</path></game></gameList>"
+        f.writeText(broken)
+        val gl = GameListXml(dir).load()
+        assertTrue(gl.parseError != null)
+        assertEquals("A", gl.get(File(dir, "a.sfc"))?.name)   // what was read is still used for display
+        gl.put(File(dir, "d.sfc")) { it.fields["name"] = "D" }
+        assertTrue(runCatching { gl.save() }.isFailure)
+        assertEquals(broken, f.readText())
+    }
+
+    @Test fun emptyGamelistIsJustEmpty() {
+        File(dir, "gamelist.xml").writeText("<?xml version=\"1.0\"?>\n")
+        val gl = GameListXml(dir).load()
+        assertNull(gl.parseError)
+        gl.put(File(dir, "a.sfc")) { it.fields["name"] = "A" }
+        gl.save()
+        assertEquals("A", GameListXml(dir).load().get(File(dir, "a.sfc"))?.name)
+    }
+
+    @Test fun logiqxDatKeepsDisksAttributesAndRepeats() {
+        val f = File(dir, "${dir.name}.dat")
+        f.writeText("""<?xml version="1.0"?>
+<datafile>
+	<header>
+		<name>Nintendo - SNES</name>
+		<clrmamepro forcenodump="required"/>
+	</header>
+	<game name="Game (USA)">
+		<description>Game (USA)</description>
+		<release name="Game (USA)" region="USA"/>
+		<release name="Game (Canada)" region="CAN"/>
+		<rom name="Game (USA).sfc" size="1024" crc="abcd1234" status="verified"/>
+		<disk name="game-disc" sha1="0123456789abcdef0123456789abcdef01234567"/>
+	</game>
+</datafile>
+""")
+        val d = io.github.marsinsanity.mainui.data.LogiqxDat.forWriting(dir)
+        assertEquals(f.name, d.file.name)
+        assertNull(d.parseError)
+        d.put(File(dir, "Game (USA).sfc"), "Game", "A game", "1994", "Maker", null)
+        d.save()
+        val text = f.readText()
+        for (kept in listOf("<clrmamepro forcenodump=\"required\"/>", "<release name=\"Game (USA)\" region=\"USA\"/>",
+            "<release name=\"Game (Canada)\" region=\"CAN\"/>", "status=\"verified\"", "<disk name=\"game-disc\"", "<manufacturer>Maker</manufacturer>"))
+            assertTrue("lost $kept in\n$text", text.contains(kept))
+    }
+
+    @Test fun textDatIsLeftAloneAndMainUiWritesItsOwn() {
+        val theirs = File(dir, "${dir.name}.dat")
+        val text = "clrmamepro (\n\tname \"Nintendo - SNES\"\n)\n\ngame (\n\tname \"Game (USA)\"\n\trom ( name \"Game (USA).sfc\" size 1024 crc ABCD1234 )\n)\n"
+        theirs.writeText(text)
+        val d = io.github.marsinsanity.mainui.data.LogiqxDat.forWriting(dir)
+        assertEquals("${dir.name}.mainui.dat", d.file.name)
+        d.put(File(dir, "Game (USA).sfc"), "Game", null, null, null, null)
+        d.save()
+        assertEquals(text, theirs.readText())
+        assertEquals("${dir.name}.mainui.dat", io.github.marsinsanity.mainui.data.LogiqxDat.locate(dir)?.name)
+    }
+}

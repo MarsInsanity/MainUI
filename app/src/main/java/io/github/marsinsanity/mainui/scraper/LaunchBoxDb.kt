@@ -206,8 +206,9 @@ object LaunchBoxDb {
     fun unescape(s: String): String = if ('&' !in s) s else Regex("&(#x[0-9a-fA-F]+|#[0-9]+|amp|lt|gt|quot|apos);").replace(s) { m ->
         val e = m.groupValues[1]
         when {
-            e.startsWith("#x") -> e.drop(2).toIntOrNull(16)?.let { String(Character.toChars(it)) } ?: m.value
-            e.startsWith("#") -> e.drop(1).toIntOrNull()?.let { String(Character.toChars(it)) } ?: m.value
+            // Out-of-range numbers (a typo in a community entry) stay as they are rather than abort the index.
+            e.startsWith("#x") -> e.drop(2).toIntOrNull(16)?.takeIf { Character.isValidCodePoint(it) }?.let { String(Character.toChars(it)) } ?: m.value
+            e.startsWith("#") -> e.drop(1).toIntOrNull()?.takeIf { Character.isValidCodePoint(it) }?.let { String(Character.toChars(it)) } ?: m.value
             e == "amp" -> "&"; e == "lt" -> "<"; e == "gt" -> ">"; e == "quot" -> "\""; else -> "'"
         }
     }
@@ -229,19 +230,27 @@ object LaunchBoxDb {
     }
 
     /** Title -> games, for one platform's games. */
-    class Lookup(games: List<Game>) {
-        private val byTitle = HashMap<String, MutableSet<Game>>()
-        init {
-            for (g in games) for (n in g.names) for (k in keys(n)) if (k.isNotEmpty()) byTitle.getOrPut(k) { LinkedHashSet() } += g
+    /**
+     * Title lookup over a system's LaunchBox platforms, given in order of preference. LaunchBox
+     * lists a game once per platform (Neo Geo AES and MVS both have "Metal Slug"), so a title is
+     * looked up platform by platform: the first platform that has it decides.
+     */
+    class Lookup(platforms: List<List<Game>>) {
+        constructor(games: List<Game>, @Suppress("UNUSED_PARAMETER") single: Unit = Unit) : this(listOf(games))
+
+        private val byTitle: List<Map<String, Set<Game>>> = platforms.map { games ->
+            val m = HashMap<String, MutableSet<Game>>()
+            for (g in games) for (n in g.names) for (k in keys(n)) if (k.isNotEmpty()) m.getOrPut(k) { LinkedHashSet() } += g
+            m
         }
 
         /**
          * The game called [source] (a canonical dump name or a file name), or null when no game
-         * or more than one has that title: then it can't be told which one this is.
+         * or more than one on the same platform has that title: then it can't be told which one.
          */
         fun find(source: String): Game? {
             for (k in keys(source)) {
-                val hits = byTitle[k] ?: continue
+                val hits = byTitle.firstNotNullOfOrNull { it[k] } ?: continue
                 return hits.singleOrNull()
             }
             return null
