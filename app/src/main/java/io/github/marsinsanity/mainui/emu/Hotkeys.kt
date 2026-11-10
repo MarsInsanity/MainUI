@@ -34,7 +34,7 @@ object Hotkeys {
     // ---- auto load wait ------------------------------------------------------------------
 
     /** Seconds to wait before the auto load key, offered in the in-game menu (0 = no auto load). */
-    val DELAYS = listOf(0, 3, 5, 8, 10, 15, 20, 30, 45, 60)
+    val DELAYS = listOf(0, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 45, 60)
 
     /** The user's wait for [emuId] in seconds, null = the emulator's default. */
     fun loadDelay(emuId: String): Int? = MainUI.settings.prefs.getInt("autoload_delay:$emuId", -1).takeIf { it >= 0 }

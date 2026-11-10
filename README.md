@@ -268,9 +268,10 @@ emulators with save / load keys (DuckStation, PPSSPP, ... with root) save with t
 a game MainUI saved that way starts again, MainUI presses the emulator's load key once the game is up:
 when the emulator's screen has stayed the same for the emulator's wait (6 s; 8 s Flycast, 10 s Dolphin
 and the 3DS emulators, 15 s ARMSX2 / NetherSX2), counted from its last screen change, so a loading screen
-or dialog restarts it. A toast says when it is coming. The wait is set per emulator in the in-game menu
-(*Save / load keys... > Auto load wait*, "off" to never load by itself; default in `"loadDelay"` of the
-emulator's `ingame` entry in `emulators.json`). Skipped if you open the menu or leave first; picking the
+or dialog restarts it. A toast says when it is coming. The wait is set per emulator in **Settings > Emulators &
+cores > Auto load waits** or the in-game menu (*Save / load keys... > Auto load wait*), 0-60 s, "Off"
+to never load by itself; the default comes from `"loadDelay"` in the emulator's `ingame` entry of
+`emulators.json`. Skipped if you open the menu or leave first; picking the
 game in the Game Switcher continues it too. A game the emulator still has running is just brought back.
 
 **Resuming from the Game Switcher** brings the game's own task back to the front (with root:

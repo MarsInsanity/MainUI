@@ -1243,11 +1243,12 @@ class RomFilesTest {
 class AutoLoadDelayTest {
     @Test fun stepsThroughTheChoicesAndStopsAtTheEnds() {
         val h = io.github.marsinsanity.mainui.emu.Hotkeys
-        assertEquals(8, h.stepDelay(6, true))      // a default between choices goes to the next one up
-        assertEquals(3, h.stepDelay(5, false))
-        assertEquals(0, h.stepDelay(3, false))     // 0 = auto load off
+        assertEquals(8, h.stepDelay(7, true))      // a value between choices goes to the next one up...
+        assertEquals(6, h.stepDelay(7, false))     // ...or down
+        assertEquals(8, h.stepDelay(6, true))
+        assertEquals(0, h.stepDelay(2, false))     // 0 = auto load off
         assertEquals(0, h.stepDelay(0, false))
         assertEquals(60, h.stepDelay(60, true))
-        assertEquals(15, h.stepDelay(10, true))
+        assertEquals(12, h.stepDelay(10, true))
     }
 }
