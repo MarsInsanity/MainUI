@@ -218,7 +218,10 @@ class EmulatorManager(
                     // Package installed but the recipe's activity was renamed: use its launcher activity.
                     pkg to launcherOf(pkg)
                 }
-                ?: launchable.firstOrNull { (pkg, label) -> pkg !in listed && variantOf(d, pkg, label) }?.let { (pkg, _) ->
+                // (A package another recipe names counts only when this recipe's own activity is in
+                // it: Azahar's Play build keeps Lime3DS's id, Citra MMJ's org.citra.emu has no Citra activity.)
+                ?: launchable.firstOrNull { (pkg, label) -> variantOf(d, pkg, label) &&
+                    (pkg !in listed || d.components.any { (_, a) -> a != null && hasActivity(pkg, a) }) }?.let { (pkg, _) ->
                     // Another build of it (".debug", ".nightly", a fork): the recipe's activity classes
                     // keep their names under another application id; else its launcher activity.
                     pkg to (d.components.mapNotNull { it.second }.distinct().firstOrNull { hasActivity(pkg, it) } ?: launcherOf(pkg))
@@ -397,7 +400,8 @@ class EmulatorManager(
                 // A core with only containers (MAME 2003-Plus: zip) is offered for systems that
                 // only list containers (Arcade), to be picked by hand; it is never chosen by itself.
                 // Unknown folders (no extension list) offer every core, so one can be picked by hand.
-                if (sys.extensions.isEmpty() || exts.any { it in sys.extensions } || (exts.isEmpty() && all.any { it in sys.extensions })) {
+                if (sys.extensions.isEmpty() || exts.any { it in sys.extensions } ||
+                    (exts.isEmpty() && (sys.extensions - GENERIC_EXTENSIONS).isEmpty() && all.any { it in sys.extensions })) {
                     option(ref, false)?.let { out += it }
                 }
             }
@@ -423,11 +427,14 @@ class EmulatorManager(
         val ext = game?.file?.let { if (it.isDirectory) null else it.extension.lowercase() }
         // A container (.zip) only counts for a core made for this system (one of its own
         // extensions), not one that merely opens zips.
+        // (Without a file extension, for the system's Default or a folder game: only cores made
+        // for the system, never one that merely opens containers.)
         val fits = opts.filter { o ->
-            o.recommended || ext == null || !o.isRetroArch ||
+            o.recommended || !o.isRetroArch ||
                 (synchronized(coreInfo) { coreInfo[o.core]?.second }?.let { info ->
-                    ext in info && (ext !in GENERIC_EXTENSIONS || sys.extensions.isEmpty() || (info - GENERIC_EXTENSIONS).any { it in sys.extensions })
-                } ?: false)
+                    val own = sys.extensions.isEmpty() || (info - GENERIC_EXTENSIONS).any { it in sys.extensions }
+                    if (ext == null) own else ext in info && (ext !in GENERIC_EXTENSIONS || own)
+                } ?: (ext == null && sys.extensions.isEmpty()))
         }
         // Nothing that fits: none (MainUI says so), never whichever core sorts first.
         return fits.firstOrNull { it.installed == true }

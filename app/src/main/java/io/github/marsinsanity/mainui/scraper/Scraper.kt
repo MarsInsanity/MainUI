@@ -109,6 +109,8 @@ object Scraper {
             val freeArt = FreeArt.Session(free, BoxArtMatch.regionPrefs(MainUI.settings.ssRegions))
             var threads = if (useSs) 1 else 4
             var perMin = 0
+            // ScreenScraper left out for this run (an account-level error with free sources on), and why.
+            val ssOffReason = java.util.concurrent.atomic.AtomicReference<String?>(null)
             if (api != null) {
                 st.message = "Connecting to ScreenScraper..."
                 try {
@@ -123,6 +125,7 @@ object Scraper {
                         if (free.isEmpty()) { st.message = "Login failed: ${e.message}"; return }
                         // (401 is also "API closed for non-members" when it is busy.) The free sources still run.
                         fileLog("ScreenScraper off for this run"); st.addLog("ScreenScraper: ${e.message?.take(60)}: free sources only")
+                        ssOffReason.set(e.message?.take(60) ?: "login failed")
                         api = null
                     }
                     Log.w(TAG, "userInfo failed", e)
@@ -139,7 +142,9 @@ object Scraper {
             st.message = "Collecting games..."
             val systems = MainUI.games.systems(MainUI.settings.showUnknownFolders, refresh = true)
                 .filter { systemIds == null || it.id in systemIds }
-                .filter { (api != null && it.def.screenscraperId != null) || FreeArt.supports(free, it.id) }
+                // (Systems only ScreenScraper covers stay when it was turned off: their games are
+                // reported as not scraped because of that, not as "nothing to scrape".)
+                .filter { (useSs && it.def.screenscraperId != null) || FreeArt.supports(free, it.id) }
             val jobs = ArrayList<Pair<GameSystem, Game>>()
             for (s in systems) {
                 if (cancel.get()) break
@@ -169,7 +174,7 @@ object Scraper {
             val fatal = AtomicBoolean(false)
             // An account-level ScreenScraper error (quota, closed to non-members) with free sources
             // on: ScreenScraper is left out for the rest of the run, the free sources go on.
-            val ssOff = AtomicBoolean(false)
+            val ssOff = AtomicBoolean(ssOffReason.get() != null)
             val ssApi = api
             st.message = "Scraping with $threads thread${if (threads > 1) "s" else ""}" + if (api == null) " (no ScreenScraper)" else ""
             repeat(threads) {
@@ -177,6 +182,12 @@ object Scraper {
                     while (!cancel.get() && !fatal.get()) {
                         val (sys, game) = queue.poll() ?: break
                         st.current = "${sys.def.short}: ${game.name}"
+                        if ((ssOff.get() || ssApi == null) && useSs && !FreeArt.supports(free, sys.id)) {
+                            // Only ScreenScraper has this system, and it is off: an error with its reason.
+                            fileLog("${sys.id}: ${game.file?.name}: ScreenScraper off (${ssOffReason.get()})")
+                            st.errors.incrementAndGet(); st.done.incrementAndGet()
+                            continue
+                        }
                         try {
                             val r = scrapeGame(if (ssOff.get()) null else ssApi, freeArt, sys, game, gamelists, dats, limiter, breaker)
                             when (r) {
@@ -188,7 +199,10 @@ object Scraper {
                         } catch (e: ScreenScraper.ApiException) {
                             fileLog("${sys.id}: ${game.file?.name}: ScreenScraper ${e.code} ${e.message}")
                             if (e.fatal && free.isNotEmpty()) {
-                                if (ssOff.compareAndSet(false, true)) { fileLog("ScreenScraper off: ${describe(e)}"); st.addLog("ScreenScraper off for this run: ${describe(e)}") }
+                                if (ssOff.compareAndSet(false, true)) {
+                                    ssOffReason.set(describe(e))
+                                    fileLog("ScreenScraper off: ${describe(e)}"); st.addLog("ScreenScraper off for this run: ${describe(e)}")
+                                }
                                 queue.put(sys to game); continue
                             }
                             else if (e.fatal) { fatal.set(true); st.message = "Stopped: ${describe(e)}" }
@@ -217,7 +231,7 @@ object Scraper {
                 st.found.get() == 0 && st.errors.get() > 0 -> "Done, but every game failed: see the log below"
                 st.found.get() == 0 -> "Done: no box art found (check Box art sources)"
                 else -> "Done"
-            }
+            } + (ssOffReason.get()?.let { " (ScreenScraper off: $it)" } ?: "")
         } catch (e: Exception) {
             Log.e(TAG, "scraper crashed", e)
             fileLog("crashed: ${Log.getStackTraceString(e)}")
@@ -310,17 +324,21 @@ object Scraper {
             }
         }
         // Box art from the free sources when ScreenScraper had none (or isn't used).
+        // (A free source's failure doesn't throw away what ScreenScraper sent: it is kept below.)
+        var freeError: Exception? = null
         if (imageRel == null && freeArt.sources.isNotEmpty()) {
             val d = dest("png")
-            FreeArt.find(freeArt, sys.id, file, d, MainUI.settings.ssMaxImageWidth, hashes?.crc)?.let { imageRel = rel(d); source = it }
+            try {
+                FreeArt.find(freeArt, sys.id, file, d, MainUI.settings.ssMaxImageWidth, hashes?.crc)?.let { imageRel = rel(d); source = it }
+            } catch (e: Exception) { freeError = e }
         }
         val format = MainUI.settings.ssMetaFormat
         if (imageRel == null) {
-            // Nothing found anywhere: report why SS failed (an error, not "not found").
-            if (info == null) { ssError?.let { throw it }; return Result.NOT_FOUND }
+            // Nothing found anywhere: report why SS (or a free source) failed (an error, not "not found").
+            if (info == null) { (ssError ?: freeError)?.let { throw it }; return Result.NOT_FOUND }
             // SS knew the game but its image failed: with nothing else to save that is a failure too;
             // with metadata to save, keep that and say the image failed.
-            mediaError?.let { e ->
+            (mediaError ?: freeError)?.let { e ->
                 if (format == "none") throw e
                 fileLog("${sys.id}: ${file.name}: metadata saved, image download failed: $e")
                 ScrapeState.addLog("Image failed: ${game.name}: ${e.message?.take(50)}")

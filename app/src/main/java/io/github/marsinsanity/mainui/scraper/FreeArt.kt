@@ -102,6 +102,10 @@ object FreeArt {
                     // Its own DAT's names first; only then the other DATs' (a MAME name may be filed in
                     // another set too), so a second DAT is only read for games the first doesn't cover.
                     val available = index(s, lsrc.thumbs)
+                    // Its list (or DAT) couldn't be downloaded: an error if nothing else finds the game.
+                    if (available == null && s.failedAt.containsKey("index:${lsrc.thumbs}") ||
+                        dat(s, lsrc) == null && s.failedAt.containsKey("dat:${lsrc.dat}"))
+                        if (err == null) err = java.io.IOException("libretro's lists couldn't be downloaded")
                     val titles = available?.let { a -> s.titles.computeIfAbsent(lsrc.thumbs) { BoxArtMatch.titleIndex(a) } }
                     val name = BoxArtMatch.pick(identified(lsrc), file.nameWithoutExtension, available, s.prefs, titles)
                         ?: BoxArtMatch.pick(identified(), file.nameWithoutExtension, available, s.prefs, titles)
@@ -351,7 +355,10 @@ object FreeArt {
                 // Written beside it first: a kill or a full card never leaves a cut image that counts as art.
                 val part = File(dest.parentFile, dest.name + ".new")
                 try {
-                    if (!part.outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }) return false
+                    // (compress swallows a write error, a full card, and says false.)
+                    if (!part.outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }) {
+                        onError(java.io.IOException("could not write ${dest.name}")); return false
+                    }
                     if (!part.renameTo(dest)) part.copyTo(dest, true)
                 } finally { part.delete() }
             } else {

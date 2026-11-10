@@ -150,7 +150,8 @@
       "get": { "github": "azahar-emu/azahar", "play": "io.github.lime3ds.android" },
       "components": [
         "org.azahar_emu.azahar/org.citra.citra_emu.activities.EmulationActivity",
-        "io.github.azaharplus.android/org.citra.citra_emu.activities.EmulationActivity"
+        "io.github.azaharplus.android/org.citra.citra_emu.activities.EmulationActivity",
+        "io.github.lime3ds.android/org.citra.citra_emu.activities.EmulationActivity"
       ],
       "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2", "loadDelay": 10000 }

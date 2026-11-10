@@ -54,7 +54,8 @@ class GameListXml(val dir: File) : MetaLookup {
         loaded = true
         if (!file.isFile) return this
         // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
-        val raw = runCatching { readXmlText(file) }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
+        var lossy = false
+        val raw = runCatching { readXmlText(file) { lossy = true } }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
         // An empty file (or just the XML declaration) is an empty list, not a broken one.
         if (isEmptyXml(raw)) return this
         val parser = newParser()
@@ -105,6 +106,7 @@ class GameListXml(val dir: File) : MetaLookup {
             if (!sawRoot) throw org.xmlpull.v1.XmlPullParserException("no XML elements in it")
             // Cut short (a copy that didn't finish): the parser just stops, with elements still open.
             if (depth != 0) throw org.xmlpull.v1.XmlPullParserException("unexpected end of file")
+            if (lossy) parseError = "not valid UTF-8 (read, but not rewritten)"
         } catch (e: Exception) {
             parseError = e.message ?: e.javaClass.simpleName
             runCatching { android.util.Log.w("MainUI.GameList", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
@@ -259,24 +261,42 @@ class GameListXml(val dir: File) : MetaLookup {
          * The file's text: UTF-8, else the encoding its declaration names, else Windows' "ANSI"
          * (Notepad), never UTF-8 with replacement characters, which a save would then make permanent.
          */
-        fun readXmlText(f: File): String {
-            val bytes = f.readBytes()
+        fun readXmlText(f: File, lossy: () -> Unit = {}): String {
+            var bytes = f.readBytes()
+            // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
+            val bom = bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()
+            if (bom) bytes = bytes.copyOfRange(3, bytes.size)
             val utf8 = runCatching {
                 java.nio.charset.StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                     .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
                     .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
             }.getOrNull()
-            val text = utf8 ?: run {
-                val head = String(bytes, 0, minOf(bytes.size, 200), Charsets.ISO_8859_1)
-                val cs = DECLARED.find(head)?.groupValues?.get(1)?.let { n -> runCatching { java.nio.charset.Charset.forName(n) }.getOrNull() }
-                    ?.takeUnless { it == Charsets.UTF_8 } ?: runCatching { java.nio.charset.Charset.forName("windows-1252") }.getOrDefault(Charsets.ISO_8859_1)
-                String(bytes, cs)
+            if (utf8 != null) return utf8
+            val head = String(bytes, 0, minOf(bytes.size, 200), Charsets.ISO_8859_1)
+            val declared = DECLARED.find(head)?.groupValues?.get(1)?.let { n -> runCatching { java.nio.charset.Charset.forName(n) }.getOrNull() }
+            // Mostly UTF-8 with a bad byte here and there (a stray Windows character): read as UTF-8,
+            // the bad bytes replaced, and never written back ([lossy]), which would make that permanent.
+            if (bom || declared == Charsets.UTF_8 || (declared == null && hasUtf8Sequences(bytes))) {
+                lossy()
+                return String(bytes, Charsets.UTF_8)
             }
-            // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
-            // A declaration naming another encoding no longer applies to the decoded text (saved as UTF-8).
-            val t = text.removePrefix("\uFEFF")
-            return if (utf8 == null) t.replaceFirst(Regex("""(<\?xml[^>]*?)\s+encoding\s*=\s*["'][^"']*["']"""), "$1") else t
+            // A single-byte file (its declared encoding, else Windows' "ANSI" from Notepad): decoded
+            // properly, and its declaration, which no longer applies, taken out (it is saved as UTF-8).
+            val cs = declared ?: runCatching { java.nio.charset.Charset.forName("windows-1252") }.getOrDefault(Charsets.ISO_8859_1)
+            return String(bytes, cs).replaceFirst(Regex("""(<\?xml[^>]*?)\s+encoding\s*=\s*["'][^"']*["']"""), "$1")
+        }
+
+        /** [b] holds at least one well-formed multi-byte UTF-8 character (so it is UTF-8, if a damaged one). */
+        private fun hasUtf8Sequences(b: ByteArray): Boolean {
+            var i = 0
+            while (i < b.size) {
+                val c = b[i].toInt() and 0xFF
+                val n = when { c in 0xC2..0xDF -> 1; c in 0xE0..0xEF -> 2; c in 0xF0..0xF4 -> 3; else -> 0 }
+                if (n > 0 && i + n < b.size && (1..n).all { (b[i + it].toInt() and 0xC0) == 0x80 }) return true
+                i++
+            }
+            return false
         }
 
         fun escape(s: String): String = buildString(s.length) {

@@ -166,7 +166,12 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
             // A pack of several themes ("CyberOnion (2-pack)"): each top folder that is a theme
             // (config.json or skin/) is installed as a theme of its own.
             val themeTops = tops.filter { t -> entries.any { it.name == "$t/config.json" || it.name.startsWith("$t/skin/") } }
-            if (themeTops.size > 1) return@runCatching themeTops.mapNotNull { extract(zf, entries, zip.parentFile!!, it, true) }.first()
+            if (themeTops.size > 1) {
+                val dirs = themeTops.mapNotNull { extract(zf, entries, zip.parentFile!!, it, true) }
+                // The pack's own name has no folder: remembered, so the Theme Downloader knows it is installed.
+                runCatching { packMarker(zip.parentFile!!, zip.nameWithoutExtension).writeText(dirs.joinToString("\n") { it.name }) }
+                return@runCatching dirs.first()
+            }
             val hasTopFolder = tops.size == 1 && entries.any { it.name.contains('/') }
             val top = if (themeTops.size == 1) themeTops[0] else if (hasTopFolder) tops.first() else zip.nameWithoutExtension
             extract(zf, entries, zip.parentFile!!, top, hasTopFolder || themeTops.size == 1) ?: throw java.io.IOException("bad theme folder \"$top\"")
@@ -174,6 +179,9 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     }.getOrNull()
         // Only a usable theme counts (and frees its zip); anything else keeps the zip and fails.
         ?.takeIf { File(it, "config.json").isFile || File(it, "skin").isDirectory }?.also { zip.delete() }
+
+    /** Lists the theme folders a pack of several themes ([name]: the pack's) was installed as. */
+    fun packMarker(themesDir: File, name: String) = File(themesDir, ".$name.pack")
 
     /**
      * Unpacks theme [top] into [dir]/[top]: the entries under "[top]/" when [inFolder], else every

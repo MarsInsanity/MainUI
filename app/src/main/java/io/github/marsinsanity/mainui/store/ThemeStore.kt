@@ -65,13 +65,23 @@ object ThemeStore {
         return runCatching { Http.download(previewUrl(e), f); f }.getOrNull()
     }
 
-    /** True when a theme folder with this name exists in any Themes folder. */
+    /** True when a theme folder with this name exists in any Themes folder (or one of a pack's themes, see [packInstalled]). */
     fun isInstalled(e: Entry): Boolean =
-        MainUI.storage.themeDirs().any { File(it, e.name).isDirectory }
+        MainUI.storage.themeDirs().any { File(it, e.name).isDirectory || packInstalled(it, e.name) }
 
-    /** Lower-case names of every installed theme folder (for marking a whole catalog at once). */
+    /** A pack of several themes ([name]) installed into [themesDir], one of its themes still there. */
+    private fun packInstalled(themesDir: File, name: String): Boolean {
+        val m = MainUI.themes.packMarker(themesDir, name)
+        return m.isFile && runCatching { m.readLines() }.getOrDefault(emptyList()).any { it.isNotBlank() && File(themesDir, it.trim()).isDirectory }
+    }
+
+    /** Lower-case names of every installed theme folder and pack (for marking a whole catalog at once). */
     fun installedNames(): Set<String> =
-        MainUI.storage.themeDirs().flatMap { d -> d.listFiles()?.filter { it.isDirectory }?.map { it.name.lowercase() }.orEmpty() }.toSet()
+        MainUI.storage.themeDirs().flatMap { d ->
+            d.listFiles()?.filter { it.isDirectory }?.map { it.name.lowercase() }.orEmpty() +
+                d.listFiles()?.filter { it.isFile && it.name.startsWith(".") && it.name.endsWith(".pack") }
+                    ?.map { it.name.removePrefix(".").removeSuffix(".pack") }?.filter { packInstalled(d, it) }?.map { it.lowercase() }.orEmpty()
+        }.toSet()
 
     /**
      * Downloads and installs a theme into the Themes folder on [onSd] storage

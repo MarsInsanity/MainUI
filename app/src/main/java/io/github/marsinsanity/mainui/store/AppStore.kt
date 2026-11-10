@@ -502,8 +502,12 @@ object AppStore {
         if (!PACKAGE_NAME.matches(app.pkg)) return null
         val f = File(MainUI.storage.dataDir("cache/appstore/icons"), "${app.pkg}.png")
         if (f.isFile && f.length() > 0) return f
-        return runCatching { Http.download(url, f); f }.getOrNull()
+        // One download per icon: the list and the detail page may ask for it at the same time.
+        return synchronized(iconLocks.computeIfAbsent(app.pkg) { Any() }) {
+            if (f.isFile && f.length() > 0) f else runCatching { Http.download(url, f); f }.getOrNull()
+        }
     }
+    private val iconLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
 
     private fun sha256(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
 }
