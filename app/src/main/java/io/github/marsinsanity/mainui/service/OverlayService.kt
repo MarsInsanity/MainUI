@@ -45,6 +45,9 @@ class OverlayService : AccessibilityService() {
     private var overlay: MainUIView? = null
     @Volatile var foregroundPackage: String? = null
         private set
+    /** When the app in front last changed its screen (a new activity, a dialog, its game window), uptime ms. */
+    @Volatile var lastWindowChangeAt = 0L
+        private set
     private var longFired = false
     @Volatile private var opening = false
     /** Counts menu opens: a completion for an older open (given up on) must not show its menu. */
@@ -152,6 +155,7 @@ class OverlayService : AccessibilityService() {
         if (pkg == "com.android.systemui" || pkg.contains("inputmethod")) return
         if (pkg != foregroundPackage) Log.d(TAG, "foreground: $pkg")
         foregroundPackage = pkg
+        lastWindowChangeAt = SystemClock.uptimeMillis()
         if (gameInFront()) prewarm()
     }
 

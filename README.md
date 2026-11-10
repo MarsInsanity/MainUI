@@ -264,10 +264,13 @@ game in the Game Switcher continues it where you left. The menu's Save / Load us
 MainUI applies these RetroArch settings by itself before a RetroArch game starts (while RetroArch isn't
 running) whenever it needs new ones, so *Configure RetroArch* doesn't have to be run again. Standalone
 emulators with save / load keys (DuckStation, PPSSPP, ... with root) save with their save key, and when
-a game MainUI saved that way starts again, MainUI presses the emulator's load key once the game is up
-(a few seconds after its window appears, longer for PS2 / GameCube / 3DS: `"loadDelay"` in the
-emulator's `ingame` entry of `emulators.json`; skipped if you open the menu or leave first), so picking
-it in the Game Switcher continues it too. A game the emulator still has running is just brought back.
+a game MainUI saved that way starts again, MainUI presses the emulator's load key once the game is up:
+when the emulator's screen has stayed the same for the emulator's wait (6 s; 8 s Flycast, 10 s Dolphin
+and the 3DS emulators, 15 s ARMSX2 / NetherSX2), counted from its last screen change, so a loading screen
+or dialog restarts it. A toast says when it is coming. The wait is set per emulator in the in-game menu
+(*Save / load keys... > Auto load wait*, "off" to never load by itself; default in `"loadDelay"` of the
+emulator's `ingame` entry in `emulators.json`). Skipped if you open the menu or leave first; picking the
+game in the Game Switcher continues it too. A game the emulator still has running is just brought back.
 
 **Resuming from the Game Switcher** brings the game's own task back to the front (with root:
 Android's task switch, `moveTaskToFront`), so nothing new is started in the emulator. Before, MainUI
