@@ -23,7 +23,6 @@ import io.github.marsinsanity.mainui.core.Root
 import io.github.marsinsanity.mainui.emu.Freezer
 import io.github.marsinsanity.mainui.ui.MainUIView
 import io.github.marsinsanity.mainui.ui.scenes.InGameMenuScene
-import io.github.marsinsanity.mainui.ui.scenes.ProcessManagerScene
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -399,15 +398,17 @@ class OverlayService : AccessibilityService() {
         return if (Root.screencap(f)) BitmapFactory.decodeFile(f.absolutePath) else null
     }
 
-    private fun addOverlay(scene: (MainUIView) -> io.github.marsinsanity.mainui.ui.Scene) {
+    /** [translucent]: the app behind stays visible around the scene's own drawing (popups). */
+    private fun addOverlay(translucent: Boolean = false, scene: (MainUIView) -> io.github.marsinsanity.mainui.ui.Scene) {
         if (overlay != null) return
         val view = MainUIView(this) { main.post { removeOverlay() } }
+        if (translucent) view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_FULLSCREEN or
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
-            PixelFormat.OPAQUE,
+            if (translucent) PixelFormat.TRANSLUCENT else PixelFormat.OPAQUE,
         ).apply {
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             // Cover the status / navigation bar area too so the screenshot lines up 1:1 with the game.
@@ -452,7 +453,7 @@ class OverlayService : AccessibilityService() {
     /** The process manager as a popup over whatever is in front (Back held). */
     fun showProcesses() {
         if (overlay != null || opening) return
-        addOverlay { view -> ProcessManagerScene(view, overlayMode = true) }
+        addOverlay(translucent = true) { view -> io.github.marsinsanity.mainui.ui.scenes.ProcessPopupScene(view) }
     }
 
     fun globalBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)

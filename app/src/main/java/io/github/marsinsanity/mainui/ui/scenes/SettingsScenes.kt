@@ -35,6 +35,7 @@ class SettingsScene(host: SceneHost) : ListScene(host, "Settings") {
 
     private fun build() {
         list.set(listOf(
+            action("Device", "brightness, volume, Wi-Fi") { host.push(DeviceScene(host)) },
             action("Theme", MainUI.themes.current.name) { host.push(ThemeSwitcherScene(host)) },
             action("User interface") { host.push(UiSettingsScene(host)) },
             action("Controls & in-game menu") { host.push(ControlSettingsScene(host)) },
