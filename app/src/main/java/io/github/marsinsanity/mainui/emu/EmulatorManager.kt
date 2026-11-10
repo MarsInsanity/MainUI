@@ -350,6 +350,12 @@ class EmulatorManager(
         else -> ref
     }
 
+    /** The emulator [ref] ("sa:<id>" / "ra:<core>") as a launch option, whatever system it is for. */
+    fun optionFor(ref: String): EmuOption? = option(ref, false)
+
+    /** True when [ref] is known to be installed. */
+    fun isInstalled(ref: String): Boolean = option(ref, false)?.installed == true
+
     private fun option(ref: String, recommended: Boolean): EmuOption? = when {
         ref.startsWith("ra:") -> {
             val core = ref.removePrefix("ra:")

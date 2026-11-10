@@ -77,11 +77,18 @@ object HomeScenes {
             SearchFlow.start(host)
         }
         for (sys in systems) {
-            // Empty folders stay hidden; a folder with files MainUI can't play is shown so it can say why.
+            // Empty folders stay hidden; a folder with files MainUI can't play is shown so it can say why,
+            // and a system with an installed emulator's menu (PICO-8: Splore) always is.
             val unplayable = sys.unplayableSummary
-            if (!s.showEmptySystems && sys.gameCount == 0 && unplayable == null) continue
+            val menu = sys.menu
+            if (!s.showEmptySystems && sys.gameCount == 0 && unplayable == null && menu.isEmpty()) continue
             out += Tile(sys.id, sys.name, "game", icons = sys.def.icons, short = sys.def.short,
-                sub = when { unplayable != null -> "no playable files"; sys.gameCount >= 0 -> plural(sys.gameCount, "game"); else -> null }, system = sys,
+                sub = when {
+                    sys.gameCount <= 0 && menu.isNotEmpty() -> menu.joinToString(" / ") { it.name }
+                    unplayable != null -> "no playable files"
+                    sys.gameCount >= 0 -> plural(sys.gameCount, "game")
+                    else -> null
+                }, system = sys,
                 open = { host.push(GameListScene(host, sys, null)) },
                 options = { systemOptions(host, sys) })
         }

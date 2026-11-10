@@ -304,8 +304,9 @@ class SessionManager(
     private fun autoLoad(s: Session) {
         val log = io.github.marsinsanity.mainui.core.SessionLog::log
         if (!settings.autoSaveOnExit) return
-        if (!hasSavedState(s.gameKey)) { log("auto load ${s.name}: skipped, MainUI never saved it"); return }
         val c = controllerFor(s) as? StandaloneController ?: return
+        if (c.states == StateSupport.NONE) return // no save states at all (PICO-8, Switch)
+        if (!hasSavedState(s.gameKey)) { log("auto load ${s.name}: skipped, MainUI never saved it"); return }
         if (c.states != StateSupport.HOTKEY || c.loadSpec == null) {
             log("auto load ${s.name}: skipped, no load key MainUI can press (states ${c.states}, key ${c.loadSpec}, root ${Root.knownAvailable()})"); return
         }

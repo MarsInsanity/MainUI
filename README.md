@@ -213,6 +213,12 @@ exposes:
 | Eden, Kenji-NX | Switch (`switch`) | No save states |
 | PICO-8 ([pico8-android](https://github.com/Macs75/pico8-android): runs your own PICO-8 Raspberry Pi zip from lexaloffle.com) | PICO-8 (`pico-8/carts`, or ES-DE's `pico8`; `.p8`, `.p8.png`) | No save states (PICO-8 has none) |
 
+**PICO-8 with Splore:** while the PICO-8 app is installed, the *Pico-8* system is in Games even without
+a carts folder, and its list starts with **Splore** (PICO-8's own cart browser): MainUI starts the app
+with a cart named `Splore.p8`, which the app answers with Splore (the file needn't exist; a
+`Splore.p8` of your own isn't listed twice). Splore works from Recents, Favorites and the Game Switcher
+too. The same works for any system: a `"menu"` list in `systems.json` (`name`, `emulator`, `rom`).
+
 **No Android emulator offers a remote save/load command.** RetroArch has one (network commands),
 but the official Android builds are compiled without it (checked in 1.22.2). Keys injected the usual
 way (`input keyevent`, accessibility actions) don't reach it either: they come from Android's virtual
