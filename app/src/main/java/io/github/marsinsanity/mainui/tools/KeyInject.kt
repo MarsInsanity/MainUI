@@ -84,8 +84,58 @@ private fun daemon(lib: String) {
     }
 }
 
+/**
+ * The handheld's built-in controller: a gamepad that isn't external (and not virtual).
+ * Keys "pressed on it" ([pad]) reach apps as that controller's, so RetroArch counts them for the
+ * player the controller is, and no other input device ever appears.
+ */
+fun builtInController(): InputDevice? = InputDevice.getDeviceIds().toList()
+    .mapNotNull { id: Int -> InputDevice.getDevice(id) }
+    .filter { d -> !d.isVirtual && d.id >= 0 && d.supportsSource(InputDevice.SOURCE_GAMEPAD) }
+    .sortedBy { d -> if (android.os.Build.VERSION.SDK_INT >= 29 && d.isExternal) 1 else 0 }
+    .firstOrNull()
+
+/** Presses [codes] (Android key codes, held together, in order) on the built-in controller. */
+private fun pad(inject: (InputEvent) -> Boolean, codes: List<Int>, holdMs: Long): String {
+    val d = builtInController() ?: return "error no controller"
+    val down = SystemClock.uptimeMillis()
+    fun send(action: Int, code: Int) = inject(KeyEvent(down, SystemClock.uptimeMillis(), action, code, 0, 0, d.id, 0,
+        KeyEvent.FLAG_FROM_SYSTEM, d.sources))
+    for (c in codes) { send(KeyEvent.ACTION_DOWN, c); Thread.sleep(60) } // a hotkey enable button first, a frame or more
+    Thread.sleep(holdMs)
+    for (c in codes.reversed()) { send(KeyEvent.ACTION_UP, c); Thread.sleep(20) }
+    return "ok ${d.id}"
+}
+
+/**
+ * `inject`: like [daemon] but without any virtual keyboard: lines "pad <code>[+code] <holdMs>"
+ * (keys pressed as the built-in controller, see [pad]) and "axes <deviceId> <v>..." ([axes]).
+ */
+private fun injectDaemon() {
+    val inject = injector()
+    println("ready")
+    while (true) {
+        val parts = (readLine() ?: break).trim().split(Regex("\\s+"))
+        when (parts.firstOrNull()) {
+            "pad" -> {
+                val codes = parts.getOrNull(1)?.split('+')?.mapNotNull { it.toIntOrNull() }.orEmpty()
+                println(if (codes.isEmpty()) "error usage" else runCatching { pad(inject, codes, parts.getOrNull(2)?.toLongOrNull() ?: 200L) }
+                    .getOrElse { "error ${it.message}" })
+            }
+            "axes" -> {
+                val id = parts.getOrNull(1)?.toIntOrNull()
+                val ok = id != null && runCatching { axes(inject, id, parts.drop(2).map { it.toFloatOrNull() ?: 0f }) }.getOrDefault(false)
+                println(if (ok) "ok" else "error axes")
+            }
+            null, "" -> {}
+            else -> println("error unknown command")
+        }
+    }
+}
+
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "daemon") { daemon(args[1]); return }
+    if (args.firstOrNull() == "inject") { injectDaemon(); return }
     // `axes <deviceId> <v>...`: one controller event (see [axes]), without making a virtual keyboard.
     if (args.firstOrNull() == "axes") {
         val id = args.getOrNull(1)?.toIntOrNull()

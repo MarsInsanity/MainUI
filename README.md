@@ -65,10 +65,16 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
    - **Root**: grant MainUI superuser in Magisk (core detection, process manager, key injection, force stop).
 3. In **Settings > Emulators & cores**, run **Configure RetroArch for MainUI** once. It makes RetroArch
    pause itself while MainUI's menu is open, flush in-game saves every 10 s, auto save / load states,
-   treat MainUI's virtual keyboard as a keyboard (`input_android_physical_keyboard`; otherwise RetroArch
-   can give it a controller port, even port 1), and turns on the network command port (used by RetroArch builds that include it; the official
+   treat MainUI's virtual keyboard as a keyboard (`input_android_physical_keyboard`), binds Save / Load
+   State to controller buttons when they have none (F2 / F4's key codes, buttons no controller has),
+   and turns on the network command port (used by RetroArch builds that include it; the official
    Android builds don't, see below).
    MainUI applies newer settings by itself the next time a RetroArch game starts while RetroArch is closed.
+   With root, MainUI presses RetroArch's Save, Load and Menu **as the handheld's own controller**
+   (player 1, with the hotkey enable button when one is set; Menu is Back), so no extra input device
+   ever reaches RetroArch: it counts at most three keyboards per run and took a fourth for a
+   controller (given a port, port 1 when it came first, its hotkeys read as buttons). The virtual
+   keyboard is only the fallback when there is no built-in controller.
    What MainUI did around games (launches, the in-game menu, save / load keys, auto load) is written to
    `MainUI/logs/session.txt`, to send along with a problem report.
 4. **Settings > Emulators & cores > RetroArch cores > Get cores for my games** downloads a core for

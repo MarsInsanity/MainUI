@@ -542,6 +542,13 @@ class EmulatorManager(
             // the real controller, and then reads its F keys as buttons rather than hotkeys.
             "input_android_physical_keyboard" to "\"MainUI Keyboard\"",
         )
+        // Save / Load State as controller buttons, which MainUI presses as the handheld's controller
+        // (RetroArchController.hotkey): F2 / F4's key codes, buttons no controller has, unless the
+        // user bound them to buttons already (then MainUI presses those).
+        for ((k, code) in listOf("input_save_state_btn" to android.view.KeyEvent.KEYCODE_F2, "input_load_state_btn" to android.view.KeyEvent.KEYCODE_F4)) {
+            val cur = RetroArchCores.cfgValue(cfg, k)
+            if (cur == null || cur == "nul") wanted[k] = "\"$code\""
+        }
         if (settings.autoSaveOnExit) {
             wanted["savestate_auto_save"] = "\"true\""
             wanted["savestate_auto_load"] = "\"true\""
@@ -580,7 +587,7 @@ class EmulatorManager(
         }
 
         /** Bump when [configureRetroArch] writes something new. */
-        const val RA_CONFIG_VERSION = 3
+        const val RA_CONFIG_VERSION = 4
         private const val RA_CONFIG_STAMP = "ra_config_stamp"
 
         /** Archive / disc image extensions that many unrelated cores accept. */

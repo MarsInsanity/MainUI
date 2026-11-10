@@ -44,24 +44,60 @@ object VirtualKeys {
      * helper's CONTROLLER_AXES order: X, Y, Z, RZ, RX, RY, HAT_X, HAT_Y, LTRIGGER, RTRIGGER,
      * BRAKE, GAS). Used after MainUI's menu had focus while they moved. Root only.
      */
-    fun axes(deviceId: Int, values: FloatArray): Boolean {
-        val args = "$deviceId ${values.joinToString(" ")}"
-        // Through the running helper when there is one; otherwise a one-off root call, so no
-        // virtual keyboard appears just for this (a new keyboard while a game starts up could be
-        // taken for a controller).
-        synchronized(this) {
-            if (proc?.isAlive == true && out != null) return try {
-                replies.clear()
-                out!!.write("axes $args\n"); out!!.flush()
-                replies.poll(3000, TimeUnit.MILLISECONDS) == "ok"
-            } catch (e: Exception) { Log.w(TAG, "axes failed", e); false }
-        }
-        if (!Root.knownAvailable()) return false
+    fun axes(deviceId: Int, values: FloatArray): Boolean =
+        inject("axes $deviceId ${values.joinToString(" ")}", 3000) == "ok"
+
+    // ---- the injector: input as the handheld's own controller, no virtual device ----------------
+    // A second root helper (KeyInject "inject"). It never creates an input device: apps see its
+    // presses as the built-in controller's. RetroArch counts at most three keyboards per run (the
+    // volume / power keys and every virtual keyboard MainUI made included); past that it took
+    // MainUI's keyboard for a controller, gave it a port (port 1 when it came first) and read its
+    // hotkeys as buttons, so saves failed. RetroArch's keys go through here instead.
+
+    private var injProc: Process? = null
+    private var injOut: BufferedWriter? = null
+    private val injReplies = LinkedBlockingQueue<String>()
+
+    private fun ensureInjector(): Boolean {
+        if (injProc?.isAlive == true && injOut != null) return true
+        if (!Root.available()) return false
         val ai = MainUI.app.applicationInfo
-        val r = Root.exec("env CLASSPATH=${Root.q(ai.sourceDir)} app_process /system/bin " +
-            "io.github.marsinsanity.mainui.tools.KeyInject axes $args", timeoutSec = 15)
-        return r.ok && r.out.contains("ok")
+        val p = Root.startInteractive("env CLASSPATH=${Root.q(ai.sourceDir)} app_process /system/bin " +
+            "io.github.marsinsanity.mainui.tools.KeyInject inject") ?: return false
+        injReplies.clear()
+        Thread({ runCatching { p.inputStream.bufferedReader().forEachLine { injReplies.put(it.trim()) } } }, "inject-reader")
+            .apply { isDaemon = true }.start()
+        if (injReplies.poll(15, TimeUnit.SECONDS) == "ready") {
+            injProc = p; injOut = p.outputStream.bufferedWriter()
+            return true
+        }
+        p.destroy()
+        return false
     }
+
+    /** One command to the injector; its reply, or null when there is no injector (no root). */
+    @Synchronized
+    private fun inject(line: String, waitMs: Long): String? {
+        repeat(2) {
+            if (!ensureInjector()) return null
+            try {
+                injReplies.clear()
+                injOut!!.write(line + "\n"); injOut!!.flush()
+                injReplies.poll(waitMs, TimeUnit.MILLISECONDS)?.let { return it }
+            } catch (e: Exception) {
+                Log.w(TAG, "inject $line failed", e)
+            }
+            injProc?.destroy(); injProc = null; injOut = null
+        }
+        return null
+    }
+
+    /**
+     * Presses Android key codes [codes] together on the built-in controller (the first ones held
+     * first: a hotkey enable button). "ok <device id>", "error no controller", or null (no root).
+     */
+    fun pad(codes: List<Int>, holdMs: Int = 200): String? =
+        inject("pad ${codes.joinToString("+")} $holdMs", holdMs + 3000L)
 
     /** Bumped for every new virtual keyboard (helper start). */
     @Volatile private var deviceGen = 0
@@ -84,6 +120,9 @@ object VirtualKeys {
     }
 
     @Synchronized private fun ensureLocked() = ensure()
+
+    /** Starts the injector in the background (RetroArch's keys go through it), making no input device. */
+    fun warmUpInjector() { Thread({ synchronized(this) { ensureInjector() } }, "inject-warmup").apply { isDaemon = true }.start() }
 
     /** Starts the helper in the background so the first key press doesn't wait for it. */
     fun warmUp() { Thread({ synchronized(this) { ensure() } }, "keys-warmup").apply { isDaemon = true }.start() }
