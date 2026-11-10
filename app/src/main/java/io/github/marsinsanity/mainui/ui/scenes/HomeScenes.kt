@@ -111,9 +111,9 @@ object HomeScenes {
                 host.io({ MainUI.games.countGames(sys) }) { host.toast("${sys.name}: ${plural(it, "game")}") }
             }),
         ) + listOfNotNull(
-            // Zipped games of a system whose emulators can't open zips.
-            UnzipFlow.zips(sys).takeIf { it > 0 }?.let { n ->
-                UiItem("Unzip all $n .zip ${if (n == 1) "file" else "files"}", onSelect = {
+            // Zipped (.zip / .rar) games of a system whose emulators can't open them.
+            UnzipFlow.archives(sys).takeIf { it > 0 }?.let {
+                UiItem(UnzipFlow.label(sys), onSelect = {
                     UnzipFlow.start(host, sys) { host.invalidate() }
                 })
             },

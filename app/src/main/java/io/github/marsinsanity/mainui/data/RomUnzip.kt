@@ -2,33 +2,48 @@ package io.github.marsinsanity.mainui.data
 
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 import java.util.zip.ZipFile
 
 /**
- * Unzips the .zip files in a system's folders for systems whose emulators can't open archives
- * (Game & Watch's .mgw, disc images...). Only zips holding files the system plays are touched;
- * each one is unpacked next to itself (its own folders kept), never over an existing file, and
- * through a temporary ".part" file, so a stopped or failed unzip leaves nothing half written.
+ * Unpacks the .zip and .rar files in a system's folders for systems whose emulators can't open
+ * archives (Game & Watch's .mgw, disc images...). Only archives holding files the system plays
+ * are touched; each one is unpacked next to itself (its own folders kept), never over an
+ * existing file, and through a temporary ".part" file, so a stopped or failed unpack leaves
+ * nothing half written. RAR (RAR4 and RAR5, solid and multi-part) is read with junrar.
  */
 object RomUnzip {
-    /** Kept free on top of what an unzip needs, so the storage never fills up completely. */
+    /** Kept free on top of what an unpack needs, so the storage never fills up completely. */
     const val MARGIN = 64L shl 20
 
-    /** Files in a game zip that aren't worth unpacking. */
+    /** Archive types MainUI can unpack. */
+    val TYPES = setOf("zip", "rar")
+
+    /** Files in a game archive that aren't worth unpacking. */
     private val JUNK = setOf("txt", "nfo", "diz", "url", "htm", "html", "pdf", "db", "ini", "md")
 
-    /** What happens to the zips. */
+    /** "Game.part2.rar": a later part of a multi-part RAR, read through its first part. */
+    private val LATER_PART = Regex("""\.part0*([2-9]|[1-9]\d+)\.rar$""", RegexOption.IGNORE_CASE)
+    private val PART = Regex("""^(.*)\.part\d+\.rar$""", RegexOption.IGNORE_CASE)
+    private val OLD_PART = Regex("""r\d\d""", RegexOption.IGNORE_CASE)
+
+    /** What happens to the archives. */
     enum class Mode {
-        /** All unpacked first, then every zip that came out whole deleted (none if it stopped part way). */
+        /** All unpacked first, then every archive that came out whole deleted (none if it stopped part way). */
         DELETE_AFTER,
-        /** Each zip deleted as soon as it is unpacked: room for only the biggest one is needed. */
+        /** Each archive deleted as soon as it is unpacked: room for only the biggest one is needed. */
         DELETE_EACH,
-        /** The zips stay. */
+        /** The archives stay. */
         KEEP,
     }
 
-    /** A zip with games in it: the entries to unpack and their unpacked size. */
-    class Archive(val zip: File, val entries: List<String>, val bytes: Long, val games: Int)
+    /**
+     * An archive with games in it: the entries to unpack and their unpacked size. [parts]: all of
+     * its files (a multi-part RAR has several), deleted together.
+     */
+    class Archive(val file: File, val entries: List<String>, val bytes: Long, val games: Int, val parts: List<File> = listOf(file)) {
+        val isRar get() = file.extension.equals("rar", true)
+    }
 
     class Plan(val archives: List<Archive>) {
         val bytes get() = archives.sumOf { it.bytes }
@@ -36,16 +51,16 @@ object RomUnzip {
         val games get() = archives.sumOf { it.games }
     }
 
-    class Result(val unpacked: Int, val existing: Int, val zipsDone: Int, val zipsDeleted: Int,
+    class Result(val unpacked: Int, val existing: Int, val done: Int, val deleted: Int,
                  val failed: List<Pair<File, String>>, val stopped: Boolean, val problem: String?)
 
     /**
-     * What to unpack from a zip with these entries (name to size): its files when at least one
-     * is a game the system plays ([accepts]), leaving out folders, Mac / hidden files and readmes.
-     * Empty when it holds no game. The game count comes along.
+     * What to unpack from an archive with these entries (name to size): its files when at least
+     * one is a game the system plays ([accepts]), leaving out folders, Mac / hidden files and
+     * readmes. Empty when it holds no game. The game count comes along.
      */
     fun pick(entries: List<Pair<String, Long>>, accepts: (String) -> Boolean): Pair<List<Pair<String, Long>>, Int> {
-        val files = entries.filter { (n, _) ->
+        val files = entries.map { (n, s) -> n.replace('\\', '/') to s }.filter { (n, _) ->
             !n.endsWith("/") && !n.startsWith("__MACOSX/") && !n.substringAfterLast('/').startsWith(".") &&
                 n.substringAfterLast('.', "").lowercase() !in JUNK
         }
@@ -53,25 +68,48 @@ object RomUnzip {
         return if (games == 0) emptyList<Pair<String, Long>>() to 0 else files to games
     }
 
+    /** Entry names (with "/" separators, folders ending in "/") and unpacked sizes of [f]: a .zip or .rar. */
+    fun list(f: File): List<Pair<String, Long>> =
+        if (f.extension.equals("rar", true)) com.github.junrar.Archive(f).use { a ->
+            if (a.isEncrypted) throw IOException("it is password protected")
+            a.fileHeaders.map { h -> (h.fileName.replace('\\', '/') + if (h.isDirectory) "/" else "") to h.fullUnpackSize.coerceAtLeast(0) }
+        } else ZipFile(f).use { z -> z.entries().asSequence().map { it.name to it.size.coerceAtLeast(0) }.toList() }
+
+    /** The files of the archive [f]: all parts of a multi-part RAR ("X.part1.rar", "X.part2.rar"... or "X.rar", "X.r00"...). */
+    fun partsOf(f: File): List<File> {
+        if (!f.extension.equals("rar", true)) return listOf(f)
+        val siblings = f.parentFile?.listFiles().orEmpty()
+        PART.find(f.name)?.let { m ->
+            val base = m.groupValues[1]
+            return listOf(f) + siblings.filter { it != f && PART.find(it.name)?.groupValues?.get(1)?.equals(base, true) == true }
+                .sortedBy { it.name }
+        }
+        val base = f.nameWithoutExtension
+        return listOf(f) + siblings.filter { it.nameWithoutExtension.equals(base, true) && OLD_PART.matches(it.extension) }
+            .sortedBy { it.name }
+    }
+
     /**
-     * The zips under [dirs] (a few folders deep, skipping folders [skipDir] names: artwork,
-     * BIOS...) that hold games, with what to unpack from each. Unreadable zips are left out.
+     * The archives under [dirs] (a few folders deep, skipping folders [skipDir] names: artwork,
+     * BIOS...) of [types] that hold games, with what to unpack from each. [problems] gets the
+     * ones that can't be read (password protected, damaged).
      */
-    fun scan(dirs: List<File>, accepts: (String) -> Boolean, skipDir: (String) -> Boolean = { false }): Plan {
+    fun scan(dirs: List<File>, accepts: (String) -> Boolean, skipDir: (String) -> Boolean = { false },
+             types: Set<String> = TYPES, problems: MutableList<Pair<File, String>>? = null): Plan {
         val out = ArrayList<Archive>()
         fun walk(d: File, depth: Int) {
             for (f in d.listFiles().orEmpty().sortedBy { it.name.lowercase() }) {
                 if (f.name.startsWith(".")) continue
                 if (f.isDirectory) { if (depth < 3 && !skipDir(f.name.lowercase())) walk(f, depth + 1); continue }
-                if (!f.extension.equals("zip", true)) continue
-                runCatching {
-                    ZipFile(f).use { z ->
-                        val entries = z.entries().asSequence().map { it.name to it.size.coerceAtLeast(0) }.toList()
-                        val (files, games) = pick(entries, accepts)
-                        // Unknown sizes count as the zip's own size: never less than that unpacked.
-                        if (files.isNotEmpty()) out += Archive(f, files.map { it.first },
-                            maxOf(files.sumOf { it.second }, f.length()), games)
-                    }
+                if (f.extension.lowercase() !in types || LATER_PART.containsMatchIn(f.name)) continue
+                try {
+                    val (files, games) = pick(list(f), accepts)
+                    val parts = partsOf(f)
+                    // Unknown sizes count as the archive's own size: never less than that unpacked.
+                    if (files.isNotEmpty()) out += Archive(f, files.map { it.first },
+                        maxOf(files.sumOf { it.second }, parts.sumOf { it.length() }), games, parts)
+                } catch (e: Exception) {
+                    problems?.add(f to (e.message ?: e.javaClass.simpleName))
                 }
             }
         }
@@ -80,14 +118,14 @@ object RomUnzip {
     }
 
     /**
-     * Free space an unzip needs on the storage holding [archives], plus [MARGIN]: everything for
-     * [Mode.KEEP] and [Mode.DELETE_AFTER] (the zips are all still there until the end), only the
-     * biggest zip's contents for [Mode.DELETE_EACH] (each zip goes once it's unpacked).
+     * Free space an unpack needs on the storage holding [archives], plus [MARGIN]: everything for
+     * [Mode.KEEP] and [Mode.DELETE_AFTER] (the archives are all still there until the end), only
+     * the biggest one's contents for [Mode.DELETE_EACH] (each archive goes once it's unpacked).
      */
     fun spaceNeeded(archives: List<Archive>, mode: Mode): Long =
         (if (mode == Mode.DELETE_EACH) archives.maxOfOrNull { it.bytes } ?: 0L else archives.sumOf { it.bytes }) + MARGIN
 
-    /** Where [entry] of a zip in [dir] goes, or null for a name pointing outside [dir] ("../x"). */
+    /** Where [entry] of an archive in [dir] goes, or null for a name pointing outside [dir] ("../x"). */
     fun target(dir: File, entry: String): File? {
         val rel = entry.replace('\\', '/').trimStart('/')
         if (rel.isEmpty() || rel.split('/').any { it == ".." }) return null
@@ -96,68 +134,111 @@ object RomUnzip {
         return f.takeIf { runCatching { it.canonicalPath.startsWith(base) }.getOrDefault(false) }
     }
 
+    /** Counts for one archive. */
+    private class Tally { var written = 0; var already = 0; var differs: String? = null }
+
     /**
-     * Unpacks [plan], zip by zip; what happens to the zips depends on [mode] (a zip is only ever
-     * deleted when all of it unpacked). Before each zip its storage must have room for it (plus
-     * [MARGIN]), else it stops there and says so. [fallback] can unpack a zip another way (root)
-     * when writing its folder fails; it gets the zip and its folder and says whether that worked.
-     * [progress] gets (zip number, zip count, zip name).
+     * Writes one entry to [dest] through a ".part" file. An existing [dest] is left alone:
+     * counted as already unpacked when it has the entry's [size], else noted as a different file.
+     * Returns whether it was written.
+     */
+    private fun write(dest: File, size: Long, t: Tally, copy: (OutputStream) -> Unit): Boolean {
+        if (dest.exists()) {
+            if (size < 0 || dest.length() == size) t.already++ else t.differs = dest.name
+            return false
+        }
+        dest.parentFile?.mkdirs()
+        val part = File(dest.parentFile, ".${dest.name}.part")
+        try {
+            part.outputStream().buffered(1 shl 20).use(copy)
+            if (!part.renameTo(dest)) throw IOException("could not rename ${part.name}")
+            t.written++
+            return true
+        } finally {
+            part.delete()
+        }
+    }
+
+    private object Discard : OutputStream() {
+        override fun write(b: Int) {}
+        override fun write(b: ByteArray, off: Int, len: Int) {}
+    }
+
+    private fun unpackZip(a: Archive, dir: File, t: Tally, cancelled: () -> Boolean) {
+        ZipFile(a.file).use { z ->
+            for (name in a.entries) {
+                if (cancelled()) throw StopException()
+                val e = z.getEntry(name) ?: continue
+                val dest = target(dir, name) ?: continue // outside the folder: never written
+                write(dest, e.size, t) { out -> z.getInputStream(e).use { it.copyTo(out, 1 shl 20) } }
+            }
+        }
+    }
+
+    /**
+     * RAR entries are read in archive order: in a solid archive each file needs the ones before
+     * it, so the ones not written (readmes, files already there) are still unpacked, into nothing.
+     */
+    private fun unpackRar(a: Archive, dir: File, t: Tally, cancelled: () -> Boolean) {
+        val wanted = a.entries.toHashSet()
+        com.github.junrar.Archive(a.file).use { ar ->
+            if (ar.isEncrypted) throw IOException("it is password protected")
+            val solid = ar.mainHeader?.isSolid == true
+            for (h in ar.fileHeaders) {
+                if (cancelled()) throw StopException()
+                if (h.isDirectory) continue
+                val name = h.fileName.replace('\\', '/')
+                val dest = if (name in wanted) target(dir, name) else null // outside the folder: never written
+                val written = dest != null && write(dest, h.fullUnpackSize, t) { out -> ar.extractFile(h, out) }
+                if (!written && solid) ar.extractFile(h, Discard)
+            }
+        }
+    }
+
+    /**
+     * Unpacks [plan], archive by archive; what happens to the archives depends on [mode] (one is
+     * only ever deleted, with all its parts, when all of it unpacked). Before each archive its
+     * storage must have room for it (plus [MARGIN]), else it stops there and says so. [fallback]
+     * can unpack a .zip another way (root) when writing its folder fails; it gets the zip and its
+     * folder and says whether that worked. [progress] gets (archive number, count, name).
      */
     fun unpack(plan: Plan, mode: Mode, progress: (Int, Int, String) -> Unit, cancelled: () -> Boolean,
                fallback: ((File, File) -> Boolean)? = null): Result {
         var unpacked = 0; var existing = 0; var done = 0; var deleted = 0
         val failed = ArrayList<Pair<File, String>>()
-        val whole = ArrayList<File>() // came out whole: deleted at the end for DELETE_AFTER
+        val whole = ArrayList<Archive>() // came out whole: deleted at the end for DELETE_AFTER
+        fun delete(a: Archive) { if (a.parts.map { it.delete() }.first()) deleted++ }
         // DELETE_AFTER deletes nothing unless the whole run got through.
         fun finish(stopped: Boolean, problem: String?): Result {
-            if (mode == Mode.DELETE_AFTER && !stopped && problem == null) whole.forEach { if (it.delete()) deleted++ }
+            if (mode == Mode.DELETE_AFTER && !stopped && problem == null) whole.forEach(::delete)
             return Result(unpacked, existing, done, deleted, failed, stopped, problem)
         }
         for ((i, a) in plan.archives.withIndex()) {
             if (cancelled()) return finish(true, null)
-            progress(i + 1, plan.archives.size, a.zip.name)
-            val dir = a.zip.parentFile ?: continue
+            progress(i + 1, plan.archives.size, a.file.name)
+            val dir = a.file.parentFile ?: continue
             if (dir.usableSpace < a.bytes + MARGIN) {
-                return finish(false, "Not enough space for ${a.zip.name}: it needs ${size(a.bytes + MARGIN)}, ${size(dir.usableSpace)} is free")
+                return finish(false, "Not enough space for ${a.file.name}: it needs ${size(a.bytes + MARGIN)}, ${size(dir.usableSpace)} is free")
             }
+            val t = Tally()
             var ok = true
-            var written = 0; var already = 0; var differs: String? = null
             try {
-                ZipFile(a.zip).use { z ->
-                    for (name in a.entries) {
-                        if (cancelled()) throw StopException()
-                        val e = z.getEntry(name) ?: continue
-                        val dest = target(dir, name) ?: continue // outside the folder: never written
-                        if (dest.exists()) {
-                            // Unpacked before (same size): fine. Another file of that name: left alone, zip kept.
-                            if (e.size < 0 || dest.length() == e.size) already++ else differs = dest.name
-                            continue
-                        }
-                        dest.parentFile?.mkdirs()
-                        val part = File(dest.parentFile, ".${dest.name}.part")
-                        try {
-                            z.getInputStream(e).use { input -> part.outputStream().use { input.copyTo(it, 1 shl 20) } }
-                            if (!part.renameTo(dest)) throw IOException("could not rename ${part.name}")
-                            written++
-                        } finally {
-                            part.delete()
-                        }
-                    }
-                }
+                if (a.isRar) unpackRar(a, dir, t, cancelled) else unpackZip(a, dir, t, cancelled)
             } catch (e: StopException) {
-                unpacked += written; existing += already
+                unpacked += t.written; existing += t.already
                 return finish(true, null)
             } catch (e: Exception) {
-                ok = fallback?.invoke(a.zip, dir) == true
-                if (!ok) failed += a.zip to (e.message ?: e.toString())
+                ok = !a.isRar && fallback?.invoke(a.file, dir) == true
+                if (!ok) failed += a.file to (e.message ?: e.javaClass.simpleName)
             }
-            unpacked += written; existing += already
+            unpacked += t.written; existing += t.already
             if (!ok) continue
             done++
-            if (differs != null) { failed += a.zip to "kept: a different $differs is already there"; continue }
+            val differs = t.differs
+            if (differs != null) { failed += a.file to "kept: a different $differs is already there"; continue }
             when (mode) {
-                Mode.DELETE_EACH -> if (a.zip.delete()) deleted++
-                Mode.DELETE_AFTER -> whole += a.zip
+                Mode.DELETE_EACH -> delete(a)
+                Mode.DELETE_AFTER -> whole += a
                 Mode.KEEP -> {}
             }
         }
