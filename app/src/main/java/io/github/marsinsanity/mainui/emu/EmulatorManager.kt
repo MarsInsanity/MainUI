@@ -600,6 +600,7 @@ class EmulatorManager(
             "parallel_n64" to "ParaLLEl N64", "flycast" to "Flycast", "fbneo" to "FinalBurn Neo", "mame2003_plus" to "MAME 2003-Plus",
             "mame2010" to "MAME 2010", "mame" to "MAME", "ppsspp" to "PPSSPP", "melondsds" to "melonDS DS", "melonds" to "melonDS",
             "desmume" to "DeSmuME", "citra" to "Citra", "dolphin" to "Dolphin", "yabasanshiro" to "YabaSanshiro", "yabadabadoo" to "Yabadabadoo",
+            "armgba" to "armGBA", "armnes" to "armNES", "armnes_arcade" to "armNES Arcade", "armn64" to "armN64",
             "mednafen_saturn" to "Beetle Saturn", "dosbox_pure" to "DOSBox Pure", "scummvm" to "ScummVM",
             "mednafen_pce_fast" to "Beetle PCE Fast", "mednafen_ngp" to "Beetle NeoPop", "mednafen_wswan" to "Beetle WonderSwan",
             "mednafen_vb" to "Beetle VB", "handy" to "Handy", "stella" to "Stella", "stella2014" to "Stella 2014",

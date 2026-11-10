@@ -149,7 +149,13 @@ object RetroArchCores {
      * Cores the libretro buildbot doesn't build for Android. MainUI's GitHub Actions build them
      * from source (.github/workflows/cores.yml) into the "cores" release of MainUI's repository.
      */
-    val EXTRA_CORES = mapOf("yabadabadoo" to "ProRapSuperstarOriginalMaster/Yabadabadoo")
+    val EXTRA_CORES = mapOf(
+        "yabadabadoo" to "ProRapSuperstarOriginalMaster/Yabadabadoo",
+        "armgba" to "MagnominusGit/armGBA",
+        "armnes" to "MagnominusGit/armNES",
+        "armnes_arcade" to "MagnominusGit/armNES",
+        "armn64" to "MagnominusGit/armN64",
+    )
 
     fun downloadUrl(abi: String, core: String) = when {
         core !in EXTRA_CORES -> "$buildbot/$abi/$core$SUFFIX.zip"

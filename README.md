@@ -367,7 +367,10 @@ small, installs three at a time, and B stops it after the cores in progress.
 **Yabadabadoo** (a Saturn core tuned for the Miyoo Mini) isn't on the buildbot, and its own releases are
 Miyoo (Linux) builds Android can't load, so MainUI's GitHub Actions build it for Android from its source
 (`.github/workflows/cores.yml`, weekly and on demand) into this repository's **`cores`** release
-(`yabadabadoo_libretro_android-<abi>.zip`); MainUI downloads it from there like any other core.
+(`yabadabadoo_libretro_android-<abi>.zip`); MainUI downloads it from there like any other core. The
+same goes for Magnominus' cores, offered for their systems: **armGBA** (GBA / GB / GBC), **armNES** (NES /
+FDS; **armNES Arcade** for VS. System / PlayChoice-10 sets in arcade) and **armN64** (N64). armSNES has no
+RetroArch core yet.
 (Up to 0.1.33 MainUI asked for `..._android.so-<abi>.zip`, which doesn't exist: HTTP 404.) Other cores that aren't on the buildbot can be installed
 from **`MainUI/cores`**: drop `<name>_libretro_android.so` (or a `.zip` of it, optionally with
 `<name>_libretro.info`) there and it appears in the list.

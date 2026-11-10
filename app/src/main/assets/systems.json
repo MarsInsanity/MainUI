@@ -256,7 +256,8 @@
     "ra:fbneo",
     "ra:fbalpha2012",
     "ra:mame",
-    "sa:mame4droid"
+    "sa:mame4droid",
+    "ra:armnes_arcade"
    ],
    "screenscraper": 75,
    "icons": [
@@ -1002,7 +1003,8 @@
    ],
    "emulators": [
     "ra:nestopia",
-    "ra:fceumm"
+    "ra:fceumm",
+    "ra:armnes"
    ],
    "screenscraper": 106,
    "icons": [
@@ -1046,7 +1048,8 @@
     "ra:gambatte",
     "ra:mgba",
     "ra:tgbdual",
-    "ra:DoubleCherryGB"
+    "ra:DoubleCherryGB",
+    "ra:armgba"
    ],
    "screenscraper": 9,
    "icons": [
@@ -1071,7 +1074,8 @@
     "ra:mgba",
     "ra:vbam",
     "ra:vba_next",
-    "ra:gpsp"
+    "ra:gpsp",
+    "ra:armgba"
    ],
    "screenscraper": 12,
    "icons": [
@@ -1096,7 +1100,8 @@
     "ra:gambatte",
     "ra:mgba",
     "ra:tgbdual",
-    "ra:DoubleCherryGB"
+    "ra:DoubleCherryGB",
+    "ra:armgba"
    ],
    "screenscraper": 10,
    "icons": [
@@ -1584,7 +1589,8 @@
    "emulators": [
     "sa:m64plusfz",
     "ra:parallel_n64",
-    "ra:mupen64plus_next_gles3"
+    "ra:mupen64plus_next_gles3",
+    "ra:armn64"
    ],
    "screenscraper": 14,
    "icons": [
@@ -1652,7 +1658,8 @@
    ],
    "emulators": [
     "ra:nestopia",
-    "ra:fceumm"
+    "ra:fceumm",
+    "ra:armnes"
    ],
    "screenscraper": 3,
    "icons": [
