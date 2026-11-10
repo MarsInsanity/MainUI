@@ -173,7 +173,7 @@ Differences from a Miyoo Mini, due to the screen:
 | | START (grid) | Rescan roms |
 | Game list | Y | Toggle favorite |
 | | X | Search this system's games |
-| | SELECT | Game options: favorite, core for this game (*Default* follows the system's core), system core, scrape, info, **Delete ROM** (asks first; also deletes the files that belong to the game: `.cue` / `.gdi` tracks, `.m3u` discs, CloneCD / Alcohol companions, the zip an image was unpacked from, its box art and gamelist entry, never a track another game uses) |
+| | SELECT | Game options: favorite, core for this game (*Default* follows the system's core), system core, scrape, info, **Hide ROM** / **Unhide ROM** (for files that must stay but aren't games; known arcade BIOS sets such as `neogeo.zip`, `pgm.zip`, `qsound.zip` are hidden by themselves; *Settings > Library & storage > Show hidden games* lists them, marked "hidden"), **Delete ROM** (asks first; also deletes the files that belong to the game: `.cue` / `.gdi` tracks, `.m3u` discs, CloneCD / Alcohol companions, the zip an image was unpacked from, its box art and gamelist entry, never a track another game uses) |
 | Game Switcher | A / B / X / Y | Resume / back / remove / view mode |
 | | SELECT / UP / DOWN | Play time / brightness |
 | In game | Home | In-game menu, opened on the press itself (hold: Game Switcher). A trigger or stick that moves while MainUI's menu or Game Switcher has focus is handed back to the game afterwards (root), so a held R2 doesn't stay "held" in it (RetroArch: fast-forward, muted). |

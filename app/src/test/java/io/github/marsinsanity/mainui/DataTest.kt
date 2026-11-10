@@ -1252,3 +1252,15 @@ class AutoLoadDelayTest {
         assertEquals(12, h.stepDelay(10, true))
     }
 }
+
+class HiddenGamesTest {
+    @Test fun knownBiosSetsAreRecognised() {
+        val r = io.github.marsinsanity.mainui.data.GameRepository
+        assertTrue(r.isBios(File("/roms/neogeo/neogeo.zip")))
+        assertTrue(r.isBios(File("/roms/arcade/PGM.7z")))
+        assertTrue(r.isBios(File("/roms/arcade/qsound.zip")))
+        assertFalse(r.isBios(File("/roms/neogeo/mslug.zip")))
+        assertFalse(r.isBios(File("/roms/psx/neogeo.cue")))   // only archives are BIOS sets
+        assertFalse(r.isBios(null))
+    }
+}
