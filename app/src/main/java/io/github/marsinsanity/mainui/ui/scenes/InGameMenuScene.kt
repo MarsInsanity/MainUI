@@ -317,9 +317,7 @@ class InGameMenuScene(
     }
 
     private fun saveThumb(b: Bitmap) = runCatching {
-        val f = MainUI.sessions.slotThumb(session.gameKey, slot)
-        f.parentFile?.mkdirs()
-        FileOutputStream(f).use { b.compress(Bitmap.CompressFormat.PNG, 85, it) }
+        io.github.marsinsanity.mainui.emu.SessionManager.writeImage(MainUI.sessions.slotThumb(session.gameKey, slot), b)
     }
 
     /** Unpause exactly once, whatever path leaves the menu. */
