@@ -238,21 +238,25 @@ exposes:
 | RPCSX | PS3 (`ps3`, `.ps3` files holding the title ID of a game installed in RPCSX; root) | No save states |
 | Vita3K | PS Vita (`psvita`, `.psvita` files holding the title ID) | No save states |
 | hakuX | Xbox (`xbox`) | **MainUI build: slots 0-9**; official: through hakuX's own menu |
-| PPSSPP | PSP (`psp`) | Hotkeys F2 / F4 (PPSSPP's keyboard defaults) |
+| PPSSPP | PSP (`psp`) | **MainUI build: slots 0-9**; official: hotkeys F2 / F4 (PPSSPP's keyboard defaults) |
 | DuckStation | PS1 (`psx`) | Hotkeys F2 / F1 (DuckStation's defaults: F1 loads, F2 saves) |
 | melonDS | DS (`nds`) | **MainUI build: slots 0-8**; official: hotkeys F1 / F2 |
 | DraStic | DS (`nds`) | Hotkeys F1 / F2 |
+| SeedlessDS (open source, DraStic's core rebuilt from source) | DS (`nds`) | **MainUI build: slots 0-9**; official: through its own menu |
 | Dolphin | GameCube / Wii (`gc`, `wii`) | **MainUI build: slots 0-9**; official: hotkeys F1 / F2 |
-| Azahar, Lime3DS, Citra | 3DS (`3ds`) | Hotkeys F1 / F2 |
+| Azahar | 3DS (`3ds`) | **MainUI build: slots 0-9** (Azahar's 1-10); official: hotkeys F1 / F2 |
+| Lime3DS, Citra, AzaharPlus | 3DS (`3ds`) | Hotkeys F1 / F2 |
 | Flycast | Dreamcast, Naomi, Atomiswave | **MainUI build: slots 0-9**; official: hotkeys F1 / F2 |
-| M64Plus FZ | N64 (`n64`) | Hotkeys F1 / F2 |
-| Dolphin MMJR, Citra MMJ, Redream, Yaba Sanshiro 2, MAME4droid | | Through the emulator's own menu |
+| Mupen64Plus AE / M64Plus FZ | N64 (`n64`) | **MainUI build (of AE): slots 0-9**; FZ / official AE: hotkeys F1 / F2 |
+| MAME4droid | arcade | **MainUI build: positions 0-9** (MAME's own save positions; some drivers can't save); official: through its own menu |
+| Dolphin MMJR, Citra MMJ, Redream, Yaba Sanshiro 2 | | Through the emulator's own menu |
 | Eden, Kenji-NX | Switch (`switch`) | No save states |
 | PICO-8 ([pico8-android](https://github.com/Macs75/pico8-android): runs your own PICO-8 Raspberry Pi zip from lexaloffle.com) | PICO-8 (`pico-8/carts`, or ES-DE's `pico8`; `.p8`, `.p8.png`) | No save states (PICO-8 has none) |
 
 ### MainUI builds (the MainUI State API)
 
-Dolphin, melonDS, Flycast, ARMSX2, ARMSX3 and hakuX also come as **MainUI builds**:
+Dolphin, melonDS, Flycast, ARMSX2, ARMSX3, hakuX, PPSSPP, Azahar, Mupen64Plus AE, SeedlessDS and
+MAME4droid also come as **MainUI builds**:
 [MainUI-Android](https://github.com/MainUI-Android)'s forks of them, "Dolphin (MainUI)" and so on,
 package `<official>.mainui`, installed beside the official app. They take MainUI's save / load
 commands directly (the **MainUI State API**, `tools/stateapi`), so for them:
@@ -448,7 +452,8 @@ Home actions to "Go to MainUI" (the service then stops consuming keys) and use t
 Apps > App Store > **Emulators** (also Settings > Emulators & cores > *Get emulators*, the core picker,
 and the prompt when a game's emulator is missing). For each emulator, in order:
 
-0. **MainUI build** (Dolphin, melonDS, Flycast, ARMSX2, ARMSX3, hakuX): *Install the MainUI build*, the
+0. **MainUI build** (Dolphin, melonDS, Flycast, ARMSX2, ARMSX3, hakuX, PPSSPP, Azahar, Mupen64Plus AE,
+   SeedlessDS, MAME4droid): *Install the MainUI build*, the
    latest release of MainUI-Android's fork (see *MainUI builds* above). The official sources follow.
 1. **F-Droid compatible repository**: if any enabled repository has the package (found by package
    name in the signed index; F-Droid itself has RetroArch, PPSSPP, Dolphin, Mupen64Plus AE, Lemuroid).

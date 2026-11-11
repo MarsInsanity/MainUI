@@ -1725,7 +1725,7 @@ class MainUIBuildsTest {
             // The official app it is built from is listed too.
             assertTrue(comps[0], comps.drop(1).any { it.substringBefore('/') == pkg.removeSuffix(".mainui") })
         }
-        assertEquals(6, seen)
+        assertEquals(11, seen)
         val melon = (0 until sa.length()).map { sa.getJSONObject(it) }.first { it.getString("id") == "melonds" }
         assertEquals(9, melon.getJSONObject("ingame").getInt("slots"))
     }

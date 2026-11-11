@@ -42,7 +42,15 @@ hakuX) carry it; MainUI's side is `app/src/main/java/.../emu/StateApi.kt`.
 | flycast-mainui | flyinghead/flycast | `FlycastStates.java` + JNI (`gui_mainuiState`) | slot 99 |
 | ARMSX2-mainui | ARMSX2/ARMSX2 | `Armsx2States.java` (`saveStateToSlot` / `loadStateFromSlot`) | slot 99 |
 | armsx3-mainui | ARMSX2/ARMSX3 | `Armsx3States.kt` (waits for RPCS3's stop-and-restart) | slot 99 |
-| hakux-mainui | rfandango/hakuX | in `NativeCoreActivity` (a load restarts the core: it answers first) | slot 99 |
+| hakuX-mainui | rfandango/hakuX | in `NativeCoreActivity` (a load restarts the core: it answers first) | slot 99 |
+| ppsspp-mainui | hrydgard/ppsspp | `PpssppStates.java` + JNI in app-android.cpp (SaveState::SaveSlot / LoadSlot, answered on PPSSPP's callback) | slot 99 |
+| azahar-mainui | azahar-emu/azahar | `AzaharStates.kt` + JNI in native.cpp (MainUI's 0-9 are Azahar's 1-10) | slot 99 |
+| mupen64plus-ae-mainui | mupen64plus-ae/mupen64plus-ae | `MainUIStates.java` in the emulation process (the core's slots, its save / load complete callback) | MainUI/resume.st |
+| SeedlessDS-mainui | SapphireRhodonite/SeedlessDS | in `EmulatorActivity` (the core's slots, written by the emulation thread) | slot 99 |
+| MAME4droid-Current-mainui | seleuco/MAME4droid-Current | `Mame4droidStates.java` (MAME's save / load key, then the position key); CI takes the MAME core from upstream's release APK | position "m" |
+
+Not patched: RetroArch (its official Android builds already have network commands, which MainUI
+uses), RPCSX (its emulator core is a separate library the app downloads; it has no state calls).
 
 Every fork's default branch is upstream plus the patch commits; keep the patch small and in new
 files where possible, so nightly merges stay clean.

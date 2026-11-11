@@ -93,8 +93,8 @@
     },
     {
       "id": "ppsspp", "name": "PPSSPP",
-      "get": { "page": "https://www.ppsspp.org/download/", "play": "org.ppsspp.ppsspp" },
-      "components": ["org.ppsspp.ppssppgold/org.ppsspp.ppsspp.PpssppActivity", "org.ppsspp.ppsspp/.PpssppActivity"],
+      "get": { "mainui": "MainUI-Android/ppsspp-mainui", "page": "https://www.ppsspp.org/download/", "play": "org.ppsspp.ppsspp" },
+      "components": ["org.ppsspp.ppsspp.mainui/org.ppsspp.ppsspp.PpssppActivity", "org.ppsspp.ppssppgold/org.ppsspp.ppsspp.PpssppActivity", "org.ppsspp.ppsspp/.PpssppActivity"],
       "action": "android.intent.action.VIEW", "category": "android.intent.category.DEFAULT", "data": "%ROMSAF%",
       "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F2", "load": "keys:KEYCODE_F4" }
@@ -113,6 +113,13 @@
       "components": ["com.dsemu.drastic/.DraSticActivity"],
       "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+    },
+    {
+      "id": "seedlessds", "name": "SeedlessDS",
+      "get": { "mainui": "MainUI-Android/SeedlessDS-mainui", "github": "SapphireRhodonite/SeedlessDS", "note": "Open-source DS emulator: DraStic's core, rebuilt from source" },
+      "components": ["com.seedlessds.app.mainui/com.seedlessds.app.emu.EmulatorActivity", "com.seedlessds.app/.emu.EmulatorActivity"],
+      "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
+      "ingame": { "menu": "back", "states": "menu" }
     },
     {
       "id": "melonds", "name": "melonDS",
@@ -152,8 +159,9 @@
     },
     {
       "id": "azahar", "name": "Azahar",
-      "get": { "github": "azahar-emu/azahar", "play": "io.github.lime3ds.android" },
+      "get": { "mainui": "MainUI-Android/azahar-mainui", "github": "azahar-emu/azahar", "play": "io.github.lime3ds.android" },
       "components": [
+        "org.azahar_emu.azahar.mainui/org.citra.citra_emu.activities.EmulationActivity",
         "org.azahar_emu.azahar/org.citra.citra_emu.activities.EmulationActivity",
         "io.github.azaharplus.android/org.citra.citra_emu.activities.EmulationActivity",
         "io.github.lime3ds.android/org.citra.citra_emu.activities.EmulationActivity"
@@ -208,20 +216,22 @@
       "ingame": { "menu": "back", "states": "menu" }
     },
     {
-      "id": "m64plusfz", "name": "M64Plus FZ",
-      "get": { "play": "org.mupen64plusae.v3.fzurita" },
+      "id": "m64plusfz", "name": "Mupen64Plus (FZ / AE)",
+      "get": { "mainui": "MainUI-Android/mupen64plus-ae-mainui", "play": "org.mupen64plusae.v3.fzurita" },
       "components": [
+        "org.mupen64plusae.v3.alpha.mainui/paulscode.android.mupen64plusae.SplashActivity",
         "org.mupen64plusae.v3.fzurita.pro/paulscode.android.mupen64plusae.SplashActivity",
         "org.mupen64plusae.v3.fzurita/paulscode.android.mupen64plusae.SplashActivity",
-        "org.mupen64plusae.v3.fzurita.amazon/paulscode.android.mupen64plusae.SplashActivity"
+        "org.mupen64plusae.v3.fzurita.amazon/paulscode.android.mupen64plusae.SplashActivity",
+        "org.mupen64plusae.v3.alpha/paulscode.android.mupen64plusae.SplashActivity"
       ],
       "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
     },
     {
       "id": "mame4droid", "name": "MAME4droid",
-      "get": { "github": "seleuco/MAME4droid-Current", "play": "com.seleuco.mame4d2024" },
-      "components": ["com.seleuco.mame4d2024/com.seleuco.mame4droid.MAME4droid", "com.seleuco.mame4droid/.MAME4droid"],
+      "get": { "mainui": "MainUI-Android/MAME4droid-Current-mainui", "github": "seleuco/MAME4droid-Current", "play": "com.seleuco.mame4d2024" },
+      "components": ["com.seleuco.mame4d2024.mainui/com.seleuco.mame4droid.MAME4droid", "com.seleuco.mame4d2024/com.seleuco.mame4droid.MAME4droid", "com.seleuco.mame4droid/.MAME4droid"],
       "action": "android.intent.action.VIEW", "data": "%ROMPROVIDER%",
       "extras": { "cli_params": "-rompath '%GAMEDIR%'" }, "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "menu" }
