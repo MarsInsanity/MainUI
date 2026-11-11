@@ -437,7 +437,7 @@ class OverlayService : AccessibilityService() {
                     val ok = c.saveToResume()
                     io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: save for ${s.name}: ${if (ok) "done" else "FAILED ${c.saveProblem ?: ""}"}")
                     // RetroArch's save is checked (written and copied by now); others get time to write.
-                    if (ok && c !is io.github.marsinsanity.mainui.emu.RetroArchController) Thread.sleep(800)
+                    if (ok && c !is io.github.marsinsanity.mainui.emu.RetroArchController && c.states != io.github.marsinsanity.mainui.emu.StateSupport.DIRECT) Thread.sleep(800)
                     else if (!ok) MainUI.sessions.toast("${s.name} wasn't saved: ${c.saveProblem ?: "the save key failed"}")
                     // Saved, but not all the way (RetroArch: not into the auto slot): said too.
                     if (ok) c.saveProblem?.let { MainUI.sessions.toast("${s.name}: $it") }

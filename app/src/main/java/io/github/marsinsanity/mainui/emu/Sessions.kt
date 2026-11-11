@@ -443,6 +443,7 @@ class SessionManager(
         val c = controllerFor(s) as? StandaloneController ?: return
         if (c.states == StateSupport.NONE) return // no save states at all (PICO-8, Switch)
         if (!hasSavedState(s.gameKey)) { log("auto load ${s.name}: skipped, MainUI never saved it"); return }
+        if (c.states == StateSupport.DIRECT) { autoLoadDirect(s, c); return }
         if (c.states != StateSupport.HOTKEY || c.loadSpec == null) {
             log("auto load ${s.name}: skipped, no load key MainUI can press (states ${c.states}, key ${c.loadSpec}, root ${Root.knownAvailable()})"); return
         }
@@ -487,6 +488,29 @@ class SessionManager(
             if (ok && loadPending === s) loadPending = null
             io.github.marsinsanity.mainui.core.SessionLog.log("auto load ${s.name}: load key ${if (ok) "sent" else "FAILED"} after ${settle} ms")
             if (ok) toast("Loaded your last save")
+        }, "auto-load").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * Auto load through the State API (the emulator's MainUI-Android build): the emulator itself
+     * waits until this game (started now, not one running before it) has booted and runs, then
+     * loads MainUI's resume state. No keys, no guessing how long the game takes to start.
+     */
+    private fun autoLoadDirect(s: Session, c: StandaloneController) {
+        val log = io.github.marsinsanity.mainui.core.SessionLog::log
+        if (c.loadDelayMs <= 0) { log("auto load ${s.name}: turned off for this emulator"); return }
+        log("auto load ${s.name}: ${s.pkg} loads MainUI's resume state once the game runs (State API)")
+        loadPending = s
+        Thread({
+            val r = StateApi.call(s.pkg, "load", StateApi.RESUME_SLOT, waitMs = 180_000, settleMs = 2_000, notBefore = s.startedUptime)
+            val mine = loadPending === s
+            if (mine) loadPending = null
+            log("auto load ${s.name}: ${if (r.ok) "loaded" else "not loaded: ${r.error}"}")
+            when {
+                r.ok -> if (mine && active === s) toast("Loaded your last save")
+                // (No resume state: nothing was left to continue from.)
+                active === s && r.error?.contains("empty") != true -> toast("Your last save wasn't loaded: ${r.error}")
+            }
         }, "auto-load").apply { isDaemon = true }.start()
     }
 

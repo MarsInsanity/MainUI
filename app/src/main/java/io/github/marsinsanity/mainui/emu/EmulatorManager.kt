@@ -26,7 +26,13 @@ enum class StateSupport {
     /** Only through the emulator's own menu. */
     MENU,
     /** The emulator has no save states. */
-    NONE;
+    NONE,
+    /**
+     * The MainUI State API (StateApi: the emulators' MainUI-Android builds): MainUI asks the
+     * emulator itself, with slots and no root. Like HOTKEY, the game must be running in front.
+     * Found from the installed app, never set in emulators.json.
+     */
+    DIRECT;
 
     companion object {
         fun parse(s: String?) = when (s?.lowercase()) {
@@ -60,6 +66,8 @@ data class EmuDef(
      * load key works (auto load on start). 0 = MainUI's default.
      */
     val loadDelayMs: Long = 0,
+    /** "slots" in "ingame": how many save slots its MainUI build has (the State API's slots 0 .. slots-1). */
+    val slots: Int = 10,
     /**
      * "freeze" in "ingame": names of the helper programs that run the game (PICO-8 runs it in
      * proot / pico8_64 processes started by the app). Pausing then freezes just those, the way the
@@ -191,6 +199,7 @@ class EmulatorManager(
             rootLaunch = o.optBoolean("root", false),
             loadDelayMs = ingame?.optLong("loadDelay", 0L) ?: 0L,
             freezeOnly = ingame?.optJSONArray("freeze")?.strings()?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() },
+            slots = (ingame?.optInt("slots", 10) ?: 10).coerceIn(1, 100),
         )
     }
 

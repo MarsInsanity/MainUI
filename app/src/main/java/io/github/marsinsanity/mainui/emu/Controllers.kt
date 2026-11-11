@@ -21,8 +21,10 @@ interface GameController {
      */
     fun warmUp() = prepare()
     val states: StateSupport
-    /** True when save/load can address slots 0-9 (RetroArch). */
+    /** True when save/load can address slots (RetroArch, the State API's emulators). */
     val hasSlots: Boolean
+    /** How many slots: 0 .. slotCount-1. */
+    val slotCount: Int get() = 10
     /** Human readable key names the emulator must have bound (HOTKEY only). */
     val saveKeyName: String?
     val loadKeyName: String?
@@ -47,7 +49,7 @@ interface GameController {
     /** Why the last [save] failed, in words for the user; null when unknown. */
     val saveProblem: String? get() = null
     /** [saveToResume] can save the running game where its next start continues from. */
-    val savesToResume: Boolean get() = states == StateSupport.HOTKEY
+    val savesToResume: Boolean get() = states == StateSupport.HOTKEY || states == StateSupport.DIRECT
     /** Saves the running game where its next start continues from (leaving for the Game Switcher). */
     fun saveToResume(): Boolean = save(0)
     fun load(slot: Int): Boolean
@@ -542,10 +544,10 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
 }
 
 /**
- * Standalone Android emulators have no remote control API. MainUI pauses them
- * by freezing the process (root), opens their menu with Back, and injects the
- * save/load hotkeys declared in emulators.json (root) for emulators that let
- * you bind hotkeys.
+ * Standalone Android emulators. MainUI pauses them by freezing the process (root) and opens
+ * their menu with Back. Their MainUI-Android builds save and load states when MainUI asks
+ * ([StateApi]: slots, no root); others get the save / load hotkeys declared in emulators.json
+ * injected (root), for emulators that let you bind hotkeys.
  */
 class StandaloneController(
     private val pkg: String,
@@ -572,15 +574,22 @@ class StandaloneController(
     } ?: DEFAULT_LOAD_DELAY_MS
     val defaultLoadDelayMs: Long get() = def?.loadDelayMs?.takeIf { it > 0 } ?: DEFAULT_LOAD_DELAY_MS
 
+    /** The installed app has the MainUI State API (its MainUI-Android build): read once. */
+    private val apiVersion: Int by lazy { if (def == null) 0 else StateApi.version(pkg) }
+    /** States go through the State API ([StateSupport.DIRECT]). */
+    val direct: Boolean get() = apiVersion > 0
+
     override val states: StateSupport get() = when {
         def == null -> StateSupport.MENU // Android games: their own UI
+        direct -> StateSupport.DIRECT
         // Keys set for it (by emulators.json or the user): MainUI presses them, which needs root.
         saveSpec != null && loadSpec != null && (def.states == StateSupport.HOTKEY || Hotkeys.get(def.id) != (null to null)) ->
             if (Root.knownAvailable()) StateSupport.HOTKEY else StateSupport.MENU
         def.states == StateSupport.HOTKEY -> StateSupport.MENU
         else -> def.states
     }
-    override val hasSlots = false
+    override val hasSlots get() = direct
+    override val slotCount get() = if (direct) def?.slots ?: 10 else 10
     override val saveKeyName get() = saveSpec?.let { Hotkeys.label(it) }
     override val loadKeyName get() = loadSpec?.let { Hotkeys.label(it) }
     private var frozen = false
@@ -600,8 +609,30 @@ class StandaloneController(
         frozen = false
     }
 
-    override fun save(slot: Int) = keys(saveSpec).also { if (it) onSaved() }
-    override fun load(slot: Int) = keys(loadSpec)
+    override fun save(slot: Int): Boolean {
+        if (direct) {
+            val r = StateApi.call(pkg, "save", slot, waitMs = 20_000, settleMs = 500)
+            saveProblem = r.error?.let { "${def?.name ?: "The emulator"} couldn't save: $it" }
+            return r.ok.also { if (it) onSaved() }
+        }
+        return keys(saveSpec).also { if (it) onSaved() }
+    }
+
+    /** Why the last State API load failed, in words for the user. */
+    @Volatile var loadProblem: String? = null
+        private set
+
+    override fun load(slot: Int): Boolean {
+        if (direct) {
+            val r = StateApi.call(pkg, "load", slot, waitMs = 20_000, settleMs = 500)
+            loadProblem = r.error?.let { "${def?.name ?: "The emulator"} couldn't load: $it" }
+            return r.ok
+        }
+        return keys(loadSpec)
+    }
+
+    /** State API: MainUI's own resume state, apart from the user's slots. */
+    override fun saveToResume(): Boolean = save(if (direct) StateApi.RESUME_SLOT else 0)
 
     override fun openNativeMenu(): Boolean {
         val m = def?.menu ?: "back"
@@ -619,6 +650,13 @@ class StandaloneController(
 
     override fun quit(autoSave: Boolean): Boolean {
         saveProblem = null
+        if (autoSave && direct) {
+            unpause()
+            // Not stopped without its save: false with saveProblem set, the game keeps running.
+            // (The answer comes once the state is written: nothing to wait for after.)
+            if (!save(StateApi.RESUME_SLOT)) return false
+            return Root.forceStop(pkg)
+        }
         if (autoSave && states == StateSupport.HOTKEY && saveSpec != null) {
             unpause()
             // Not stopped without its save: false with saveProblem set, the game keeps running.

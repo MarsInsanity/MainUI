@@ -232,22 +232,54 @@ exposes:
 | Emulator | Systems (folder) | Save / Load from MainUI's in-game menu |
 |---|---|---|
 | RetroArch (all cores) | everything | Official Android builds: **Save / Load** through RetroArch's keyboard hotkeys (F2 / F4, root), **slots 0-9** (F7 / F6 step RetroArch's slot), *Native Menu* = F1. Builds with network commands: slots 0-9 while paused |
-| ARMSX2 | PS2 (`ps2`) | Hotkeys F1 / F3 (PCSX2's defaults) |
+| ARMSX2 | PS2 (`ps2`) | **MainUI build: slots 0-9**; official: hotkeys F1 / F3 (PCSX2's defaults) |
 | NetherSX2 / AetherSX2 | PS2 (`ps2`) | Hotkeys F1 / F3 |
-| ARMSX3 | PS3 (`ps3`: disc images, game folders, `.ps3` files holding a title ID) | No save states |
+| ARMSX3 | PS3 (`ps3`: disc images, game folders, `.ps3` files holding a title ID) | **MainUI build: slots 0-9**; official: none from MainUI |
 | RPCSX | PS3 (`ps3`, `.ps3` files holding the title ID of a game installed in RPCSX; root) | No save states |
 | Vita3K | PS Vita (`psvita`, `.psvita` files holding the title ID) | No save states |
-| hakuX | Xbox (`xbox`) | Through hakuX's own menu |
+| hakuX | Xbox (`xbox`) | **MainUI build: slots 0-9**; official: through hakuX's own menu |
 | PPSSPP | PSP (`psp`) | Hotkeys F2 / F4 (PPSSPP's keyboard defaults) |
 | DuckStation | PS1 (`psx`) | Hotkeys F2 / F1 (DuckStation's defaults: F1 loads, F2 saves) |
-| DraStic, melonDS | DS (`nds`) | Hotkeys F1 / F2 |
-| Dolphin | GameCube / Wii (`gc`, `wii`) | Hotkeys F1 / F2 |
+| melonDS | DS (`nds`) | **MainUI build: slots 0-8**; official: hotkeys F1 / F2 |
+| DraStic | DS (`nds`) | Hotkeys F1 / F2 |
+| Dolphin | GameCube / Wii (`gc`, `wii`) | **MainUI build: slots 0-9**; official: hotkeys F1 / F2 |
 | Azahar, Lime3DS, Citra | 3DS (`3ds`) | Hotkeys F1 / F2 |
-| Flycast | Dreamcast, Naomi, Atomiswave | Hotkeys F1 / F2 |
+| Flycast | Dreamcast, Naomi, Atomiswave | **MainUI build: slots 0-9**; official: hotkeys F1 / F2 |
 | M64Plus FZ | N64 (`n64`) | Hotkeys F1 / F2 |
 | Dolphin MMJR, Citra MMJ, Redream, Yaba Sanshiro 2, MAME4droid | | Through the emulator's own menu |
 | Eden, Kenji-NX | Switch (`switch`) | No save states |
 | PICO-8 ([pico8-android](https://github.com/Macs75/pico8-android): runs your own PICO-8 Raspberry Pi zip from lexaloffle.com) | PICO-8 (`pico-8/carts`, or ES-DE's `pico8`; `.p8`, `.p8.png`) | No save states (PICO-8 has none) |
+
+### MainUI builds (the MainUI State API)
+
+Dolphin, melonDS, Flycast, ARMSX2, ARMSX3 and hakuX also come as **MainUI builds**:
+[MainUI-Android](https://github.com/MainUI-Android)'s forks of them, "Dolphin (MainUI)" and so on,
+package `<official>.mainui`, installed beside the official app. They take MainUI's save / load
+commands directly (the **MainUI State API**, `tools/stateapi`), so for them:
+
+- **Save / Load have slots** (left / right on Save or Load; 0-9, melonDS 0-8: the emulator's own
+  slots, the same ones its menu shows), with MainUI's screenshot of each slot. **No root and no hotkeys**
+  needed (and no *Save / load keys...*).
+- MainUI's **resume state** (Exit Game / the Game Switcher with auto save, loaded when the game starts
+  again) is a separate slot of its own, so it never overwrites yours.
+- Commands wait for **the best moment**: the emulator itself waits until the game has booted and runs,
+  not paused, not loading, not in its own menu, steadily for a moment, then saves or loads and answers
+  once the state is written. Auto load on start therefore needs no *Auto load wait*: the emulator
+  loads as soon as the game runs (only *Off* is honoured).
+- A failed save or load says why (the emulator's own reason: an empty slot, a memory card being written,
+  RetroAchievements hardcore mode...).
+
+MainUI uses the MainUI build when it is installed (it is listed first in each recipe) and the official
+app otherwise; any app whose manifest declares the State API is treated the same way. The App Store
+offers **Install the MainUI build** first for these emulators (from the fork's GitHub releases), and
+Emulator updates keeps it up to date from there; their own in-app updaters are switched off.
+
+How the forks are kept up to date: each is upstream plus a few patch commits. Every night at 00:00
+PST its CI merges upstream and builds a *nightly* (pre-release); when upstream publishes a release, CI
+builds that release with the patch on top as a **stable** release (`<tag>-mainui`), which is what
+MainUI installs. A merge or patch that no longer applies opens an issue (and fails the run) instead of
+publishing anything; a maintenance session fixes it. The protocol, the shared Java file and the CI
+script are in `tools/stateapi/`.
 
 **PICO-8 with Splore:** while the PICO-8 app is installed, the *Pico-8* system is in Games even without
 a carts folder, and its list starts with **Splore** (PICO-8's own cart browser): MainUI starts the app
@@ -255,7 +287,7 @@ with a cart named `Splore.p8`, which the app answers with Splore (the file needn
 `Splore.p8` of your own isn't listed twice). Splore works from Recents, Favorites and the Game Switcher
 too. The same works for any system: a `"menu"` list in `systems.json` (`name`, `emulator`, `rom`).
 
-**No Android emulator offers a remote save/load command.** RetroArch has one (network commands),
+**No official Android emulator offers a remote save/load command** (hence the MainUI builds above). RetroArch has one (network commands),
 but the official Android builds are compiled without it (checked in 1.22.2). Keys injected the usual
 way (`input keyevent`, accessibility actions) don't reach it either: they come from Android's virtual
 keyboard device, which RetroArch ignores, and it only treats Back from player 1's controller as the
@@ -416,6 +448,8 @@ Home actions to "Go to MainUI" (the service then stops consuming keys) and use t
 Apps > App Store > **Emulators** (also Settings > Emulators & cores > *Get emulators*, the core picker,
 and the prompt when a game's emulator is missing). For each emulator, in order:
 
+0. **MainUI build** (Dolphin, melonDS, Flycast, ARMSX2, ARMSX3, hakuX): *Install the MainUI build*, the
+   latest release of MainUI-Android's fork (see *MainUI builds* above). The official sources follow.
 1. **F-Droid compatible repository**: if any enabled repository has the package (found by package
    name in the signed index; F-Droid itself has RetroArch, PPSSPP, Dolphin, Mupen64Plus AE, Lemuroid).
 2. **GitHub**: the APK of the project's latest release (`api.github.com`, no account needed; 60
@@ -443,6 +477,8 @@ Settings shows the count. Where each update comes from:
   with the installed build (Vita3K's release `v12` is the app's `0.2.0-12`, version code 12). When the
   two can't be compared otherwise (a date tag against a version number), a release published after the
   app was installed counts as newer.
+
+- a **MainUI build** (`<official>.mainui`): its fork's GitHub releases (`<tag>-mainui`), the same way.
 
 Apps installed by Google Play are left to it.
 

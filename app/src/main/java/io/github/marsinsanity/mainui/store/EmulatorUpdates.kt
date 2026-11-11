@@ -145,9 +145,10 @@ object EmulatorUpdates {
             val r = EmulatorStore.latestRetroArch(pkg)
             return if (isNewer(r.version, installedName) == true) Update(e.def.id, e.def.name, pkg, installedName, r.version, Source.RETROARCH, "retroarch.com") else null
         }
-        // 3. GitHub releases.
-        // (Only for the package it publishes: a fork / other build listed beside it isn't updated by it.)
-        val repo = e.github?.takeIf { pkg == e.def.packages.first() } ?: return null
+        // 3. GitHub releases: the MainUI build from MainUI-Android's fork, the official app from its
+        // project. (Only for the package it publishes: another build listed beside it isn't updated by it.)
+        val repo = (if (pkg.endsWith(EmulatorStore.MAINUI_SUFFIX)) e.mainui
+            else e.github?.takeIf { pkg == e.officialPackage }) ?: return null
         val r = EmulatorStore.latestGithub(repo)
         val newer = isNewer(r.version, installedName) ?: buildNumberNewer(r.version, installedName, code)
             ?: (r.published > installedAt + 3_600_000L)
