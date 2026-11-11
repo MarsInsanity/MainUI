@@ -102,7 +102,7 @@ internal object GameItems {
         if (port != null) {
             items += UiItem("Move back to Apps", onSelect = { Ports.remove(host, g.name, port, toAndroid = false, done = onChanged) })
             items += UiItem("Move to Android games", onSelect = { Ports.remove(host, g.name, port, toAndroid = true, done = onChanged) })
-            // (Its port file stays: reinstalled, it is a port again.)
+            // (Once it is gone its port file goes too: see Ports.forgetUninstalled.)
             items += UiItem("Uninstall game", onSelect = { uninstallApp(host, port) })
         } else if (!g.isAndroid && !g.isFolder && g.file != null && !isMenu) items += UiItem("Delete ROM", onSelect = { confirmDelete(host, g, onChanged) })
         host.push(PopMenuScene(host, g.name, items))

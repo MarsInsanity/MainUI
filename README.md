@@ -139,8 +139,9 @@ You can make these by hand too (on a PC, for apps you'll install later). A port 
 Ports only: not in Apps or Games > Android, and Android games auto-sort leaves it alone. It starts
 like an Android game (recents, favorites, Game Switcher, play time; the in-game menu has no save
 states). Without its own art it shows the app's banner or icon. `SELECT` on it: *Move back to Apps*
-or *Move to Android games* (both delete its `.android` file), favorites, hide, *Uninstall game* (its
-`.android` file stays, so a reinstall is a port again).
+or *Move to Android games* (both delete its `.android` file), favorites, hide, *Uninstall game* (once
+it is uninstalled, from here or anywhere else, its `.android` file and its Recents / Favorites
+entries go too).
 
 [PortMaster](https://portmaster.games/) ports (a `.sh` script each, plus a data folder) can stay in
 the same folder: they don't run on Android, so MainUI doesn't list them yet, only counts them on

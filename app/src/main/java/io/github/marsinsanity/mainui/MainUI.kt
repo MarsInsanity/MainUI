@@ -99,6 +99,12 @@ class App : Application() {
                 MainUI.worker.execute {
                     MainUI.apps.invalidate()
                     if (i.action == Intent.ACTION_PACKAGE_ADDED && !replacing) MainUI.apps.onPackageAdded(pkg, MainUI.emulators)
+                    // Uninstalled (Uninstall game, or anywhere else): its Ports entry and recents go,
+                    // and the screen showing is read again.
+                    if (i.action == Intent.ACTION_PACKAGE_REMOVED && !replacing) {
+                        runCatching { io.github.marsinsanity.mainui.ui.scenes.Ports.forgetUninstalled(pkg) }
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { MainActivity.instance?.refreshTop() }
+                    }
                     if (MainUI.emulators.isEmulatorPackage(pkg)) MainUI.emulators.refresh()
                 }
             }
