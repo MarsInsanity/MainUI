@@ -265,7 +265,7 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
                 io.github.marsinsanity.mainui.emu.StateSupport.MENU -> "own menu"
                 io.github.marsinsanity.mainui.emu.StateSupport.NONE -> "no states"
             }
-            items += UiItem(d.name, sub = (if (pkg == null) "get  " else "") + states,
+            items += UiItem(d.name, sub = states, mark = pkg != null,
                 onSelect = { host.push(EmulatorDetailScene(host, d.id)) })
         }
         list.set(items)

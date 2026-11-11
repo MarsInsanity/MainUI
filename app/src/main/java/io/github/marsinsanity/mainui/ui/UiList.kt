@@ -20,6 +20,8 @@ class UiItem(
     var onChange: ((UiItem) -> Unit)? = null,
     /** MULTI: LEFT on the first value goes round to the last. Off for scales (volume, brightness). */
     var wrap: Boolean = true,
+    /** A check mark at the row's right end (an emulator that is installed). */
+    var mark: Boolean = false,
 ) {
     val checked get() = value == 1
 }
