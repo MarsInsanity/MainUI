@@ -53,6 +53,18 @@ object Ports {
         io.github.marsinsanity.mainui.ui.Images.invalidate("art:${from.key}")
     }
 
+    /**
+     * [pkg] was uninstalled (not updated): its Ports entry goes (the port file) and so do its
+     * Recents / Favorites entries, as a port and as an Android game. Off the UI thread.
+     */
+    fun forgetUninstalled(pkg: String) {
+        val label = pkg
+        runCatching { MainUI.games.removePort(pkg, ::delete) }.getOrNull()?.deleted?.forEach { f ->
+            moveEntries(Game(AndroidPorts.SYSTEM, f, f.nameWithoutExtension), null)
+        }
+        moveEntries(Game(SystemDef.ANDROID.id, null, label, pkg = pkg), null)
+    }
+
     /** Puts [label] ([pkg]) into Games > Ports (out of Apps, Hidden apps and Games > Android). */
     fun add(host: SceneHost, label: String, pkg: String, done: () -> Unit = {}) {
         if (running(host, label, pkg)) return

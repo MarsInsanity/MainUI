@@ -146,6 +146,13 @@ class MainActivity : Activity() {
         MainUI.sessions.park()
     }
 
+    /** Reads the screen showing again (an app was uninstalled meanwhile). Main thread. */
+    fun refreshTop() {
+        if (!resumed) return
+        view.top()?.onResume()
+        view.invalidate()
+    }
+
     override fun onPause() {
         super.onPause()
         resumed = false
