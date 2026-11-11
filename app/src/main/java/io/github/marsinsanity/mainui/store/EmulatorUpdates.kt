@@ -150,7 +150,9 @@ object EmulatorUpdates {
         val repo = (if (pkg.endsWith(EmulatorStore.MAINUI_SUFFIX)) e.mainui
             else e.github?.takeIf { pkg == e.officialPackage }) ?: return null
         val r = EmulatorStore.latestGithub(repo)
-        val newer = isNewer(r.version, installedName) ?: buildNumberNewer(r.version, installedName, code)
+        // A MainUI build's stable is built again, same name, when its patch changes: by date then.
+        val rebuilt = pkg.endsWith(EmulatorStore.MAINUI_SUFFIX) && r.version == installedName
+        val newer = (if (rebuilt) null else isNewer(r.version, installedName) ?: buildNumberNewer(r.version, installedName, code))
             ?: (r.published > installedAt + 3_600_000L)
         return if (newer) Update(e.def.id, e.def.name, pkg, installedName, r.version, Source.GITHUB, repo) else null
     }
