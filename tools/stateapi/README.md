@@ -35,7 +35,8 @@ hakuX) carry it; MainUI's side is `app/src/main/java/.../emu/StateApi.kt`.
 - `ci.sh`: the forks' CI helper (`.github/mainui/ci.sh` in each): nightly upstream merge, the stable
   release to build (upstream's newest release matching the fork's tag pattern, again when the
   patch's fingerprint in its notes is not the current one), the patch's net change applied onto
-  it, version numbers, signing (organization secrets `MAINUI_KEYSTORE` (base64),
+  it (or, for a release whose code it doesn't fit, the fork's `.github/mainui/stable/<tag>.patch`:
+  the patch outside `.github` with its conflicts resolved on that tag), version numbers, signing (organization secrets `MAINUI_KEYSTORE` (base64),
   `MAINUI_KEYSTORE_PASSWORD`, `MAINUI_KEY_ALIAS`, `MAINUI_KEY_PASSWORD`) and publishing.
 
 ## Forks
