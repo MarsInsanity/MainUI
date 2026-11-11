@@ -115,7 +115,7 @@ class OverlayService : AccessibilityService() {
             if (menu != null) { menu.leave(); performHold(hold) } else perform(hold)
             return
         }
-        if (overlay != null || opening || !gameInFront() || locked()) return
+        if (overlay != null || opening || locked() || !gameOrEmulatorInFront()) return
         holdRan(now)
         Log.d(TAG, "HOME held (${if (raw) "button" else "key"}) -> $hold")
         perform(hold)
@@ -252,6 +252,21 @@ class OverlayService : AccessibilityService() {
     }
 
     /**
+     * [gameInFront], or an emulator opened by itself is in front (no game of MainUI's running):
+     * it is adopted as the session (see SessionManager.adoptEmulator), so HOME works in it too.
+     */
+    private fun gameOrEmulatorInFront(): Boolean {
+        if (gameInFront()) return true
+        val fg = foregroundPackage ?: return false
+        if (fg == packageName || fg == "com.android.systemui") return false
+        val (added, removed) = MainUI.library.emulatorChoices()
+        val isEmu = fg in added || (fg !in removed && runCatching { MainUI.emulators.isEmulatorPackage(fg) }.getOrDefault(false))
+        if (!isEmu) return false
+        val label = runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(fg, 0)).toString() }.getOrDefault(fg)
+        return MainUI.sessions.adoptEmulator(fg, label) != null && gameInFront()
+    }
+
+    /**
      * Gets the root shell and the game's controller ready as soon as a game is in front,
      * so the first HOME press opens the menu as fast as the later ones.
      */
@@ -330,7 +345,7 @@ class OverlayService : AccessibilityService() {
         val hold = MainUI.settings.homeHold
         // On the lock screen (over a game): the menu would show and save the lock screen, and
         // offer Exit / Save / Load without unlocking.
-        if (locked() || !gameInFront() || (press == "home" && hold == "home")) {
+        if (locked() || !gameOrEmulatorInFront() || (press == "home" && hold == "home")) {
             Log.d(TAG, "HOME passed through (fg=$foregroundPackage, session=${MainUI.sessions.active?.pkg})")
             return HomePress.PASS
         }
@@ -646,7 +661,7 @@ class OverlayService : AccessibilityService() {
                 // A newer update (or the service ending) came while root was being checked.
                 if (gen != hotkeyGen.get()) return@Thread
                 hotkeys?.stop()
-                hotkeys = HotkeyListener(combo, { main.post { if (instance === this && gameInFront() && !locked() && SystemClock.uptimeMillis() >= leavingUntil) showMenu() } }) { key, down ->
+                hotkeys = HotkeyListener(combo, { main.post { if (instance === this && !locked() && gameOrEmulatorInFront() && SystemClock.uptimeMillis() >= leavingUntil) showMenu() } }) { key, down ->
                     if (key in HOME_BUTTONS) main.post { if (instance === this) rawHome(down) }
                 }.also { it.start() }
             }
