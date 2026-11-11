@@ -262,6 +262,7 @@ class SessionManager(
      * session (a game left running for days still gets its day, not nothing).
      */
     private fun account(s: Session) {
+        if (isAdopted(s)) return // an emulator on its own: no game's play time
         val secs = ((android.os.SystemClock.uptimeMillis() - s.startedUptime) / 1000).coerceAtMost(24 * 3600L)
         if (secs > 0) {
             library.addPlayTime(s.gameKey, secs)
@@ -329,6 +330,26 @@ class SessionManager(
     private fun isStandard(intent: Intent): Boolean = runCatching {
         ctx.packageManager.getActivityInfo(intent.component!!, 0).launchMode == android.content.pm.ActivityInfo.LAUNCH_MULTIPLE
     }.getOrDefault(false)
+
+    /** Sessions made for an emulator opened by itself (no game from MainUI): see [adoptEmulator]. */
+    fun isAdopted(s: Session?) = s?.gameKey?.startsWith(ADOPTED) == true
+
+    /**
+     * An emulator app opened by itself (from Emulators, Apps, its own menu) is in front, with no
+     * game of MainUI's running: it becomes the session, so HOME opens the in-game menu for it
+     * (Save / Load keys can be set there). Not in Recents or the Game Switcher. Replaces only no
+     * session or another adopted one (a game MainUI started stays the session). Returns it, or null.
+     */
+    fun adoptEmulator(pkg: String, label: String): Session? {
+        val cur = active
+        if (cur != null && cur.pkg == pkg) return cur
+        if (cur != null && !isAdopted(cur)) return null
+        val s = Session("$ADOPTED$pkg", "", null, label, emulators.refForPackage(pkg), pkg, null, System.currentTimeMillis())
+        synchronized(this) { if (active !== cur) return null; active = s }
+        persist()
+        io.github.marsinsanity.mainui.core.SessionLog.log("emulator $label ($pkg) opened by itself: a session for the in-game menu (${s.emuRef ?: "no recipe"})")
+        return s
+    }
 
     fun isRunning(s: Session): Boolean {
         if (!Root.knownAvailable()) return true // can't tell, assume so
@@ -488,6 +509,7 @@ class SessionManager(
         File(File(storage.stateThumbDir, sha1(gameKey)), "slot$slot.png")
 
     companion object {
+        const val ADOPTED = "emulator:"
         /**
          * Writes [bmp] to [f] as PNG without ever leaving a half-written [f]: into a temporary file
          * first, then swapped in. A big screenshot takes about a second to write, and the Game

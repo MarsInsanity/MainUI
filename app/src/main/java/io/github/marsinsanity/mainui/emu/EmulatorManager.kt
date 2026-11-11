@@ -353,6 +353,10 @@ class EmulatorManager(
 
     fun standaloneDefs(): Collection<EmuDef> = standalone.values
     fun installedPackage(id: String): String? = installedPkgs[id]
+
+    /** The emulator ref for the installed package [pkg]: "ra:" for RetroArch, "sa:<id>" for a recipe's; null if none. */
+    fun refForPackage(pkg: String): String? =
+        if (pkg == raPackage) "ra:" else installedPkgs.entries.firstOrNull { it.value == pkg }?.let { "sa:${it.key}" }
     fun coreDisplayName(core: String): String = synchronized(coreInfo) { coreInfo[core]?.first } ?: prettyCore(core)
 
     fun nameOf(ref: String): String = when {
