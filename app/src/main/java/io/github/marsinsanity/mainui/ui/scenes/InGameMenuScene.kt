@@ -209,11 +209,11 @@ class InGameMenuScene(
                 val ok = controller.save(slot)
                 if (ok) screenshot?.let { saveThumb(it) }
                 if (ok) "State saved to slot $slot" else "Save failed (run Configure RetroArch)"
-            } else hotkeyAction("Save") { controller.save(0).also { ok -> if (ok) { screenshot?.let { saveThumb(it) }; MainUI.sessions.loadDone(session) } } }
+            } else hotkeyAction("Save") { controller.save(if (controller.hasSlots) slot else 0).also { ok -> if (ok) { screenshot?.let { saveThumb(it) }; MainUI.sessions.loadDone(session) } } }
             // Loaded by hand: what runs is what the user wants, so it is saved again on leaving.
             Action.LOAD -> if (controller.states == StateSupport.API) apiAction("Loading...") {
                 if (controller.load(slot)) { MainUI.sessions.loadDone(session); "State loaded from slot $slot" } else "Load failed"
-            } else hotkeyAction("Load") { controller.load(0).also { ok -> if (ok) MainUI.sessions.loadDone(session) } }
+            } else hotkeyAction("Load") { controller.load(if (controller.hasSlots) slot else 0).also { ok -> if (ok) MainUI.sessions.loadDone(session) } }
             // From the fallback menu the game's task comes back first, which takes longer.
             Action.STATES_MENU, Action.NATIVE -> leaveThen(if (overlayMode) 250L else keyDelay) { controller.openNativeMenu() }
             Action.SWITCHER -> {
@@ -324,7 +324,12 @@ class InGameMenuScene(
             main.post {
                 // RetroArch saves are checked (its state file changed); other presses can't be.
                 // A save that worked only partly (not into RetroArch's auto slot) says so.
-                val done = if (what == "Save" && controller is io.github.marsinsanity.mainui.emu.RetroArchController) "State saved" else "$what state: hotkey sent"
+                val ra = controller as? io.github.marsinsanity.mainui.emu.RetroArchController
+                val done = when {
+                    what == "Save" && ra != null -> ra.lastSavedSlot?.takeIf { it >= 0 }?.let { "State saved to slot $it" } ?: "State saved"
+                    what == "Load" && controller.hasSlots -> "Load slot $slot: hotkey sent"
+                    else -> "$what state: hotkey sent"
+                }
                 Toast.makeText(ctx, if (ok) problem ?: done else problem ?: "$what state failed (needs root)",
                     if (ok && problem == null) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
             }

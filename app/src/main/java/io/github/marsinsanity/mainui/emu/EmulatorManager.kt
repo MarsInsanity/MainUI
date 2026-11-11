@@ -580,6 +580,9 @@ class EmulatorManager(
             "input_menu_toggle" to "\"f1\"",
             "input_save_state" to "\"f2\"",
             "input_load_state" to "\"f4\"",
+            // Slot keys (RetroArch's defaults): the in-game menu's slot picker steps with them.
+            "input_state_slot_increase" to "\"f7\"",
+            "input_state_slot_decrease" to "\"f6\"",
             "input_enable_hotkey" to "\"nul\"",
             "input_hotkey_device_merge" to "\"false\"",
             // MainUI's virtual keyboard (F keys only, no letters) is a keyboard, not a gamepad:
@@ -632,7 +635,7 @@ class EmulatorManager(
         }
 
         /** Bump when [configureRetroArch] writes something new. */
-        const val RA_CONFIG_VERSION = 5
+        const val RA_CONFIG_VERSION = 6
         private const val RA_CONFIG_STAMP = "ra_config_stamp"
 
         /** Archive / disc image extensions that many unrelated cores accept. */

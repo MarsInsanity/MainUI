@@ -265,7 +265,8 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
         keys -> StateSupport.HOTKEY
         else -> StateSupport.MENU
     }
-    override val hasSlots get() = api
+    /** Slots 0-9 with network commands, and with keys (F6 / F7 step RetroArch's slot, see [selectSlotByKey]). */
+    override val hasSlots get() = api || keys
     override val saveKeyName: String? = null
     override val loadKeyName: String? = null
 
@@ -306,6 +307,8 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     }
 
     companion object {
+        /** RetroArch's current slot per run ("<package>:<pid>"), as MainUI moved it. */
+        private val keySlots = java.util.concurrent.ConcurrentHashMap<String, Int>()
         private val probes = java.util.concurrent.ConcurrentHashMap<String, Pair<Boolean, Long>>()
     }
 
@@ -379,7 +382,8 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
                 val reply = ask("SAVE_STATE_SLOT 0", 1500)
                 if (reply != null && !reply.contains("-1")) true else { selectSlot(0); send("SAVE_STATE") }
             }
-        } else save(0)
+        } else if (!api) keys && saveByKey() // the slot it is on (the user's pick), copied into the auto slot
+        else save(0)
 
     /** Saves with [press] ([what]: for the log), checked and copied into the auto slot (see [saveByKey]). */
     private fun saveChecked(what: String, pressFailed: String, press: () -> Boolean): Boolean {
@@ -420,6 +424,9 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
                 }
                 log("RetroArch saved $saved")
                 val slot = RetroArchCores.stateSlotOf(saved.substringAfterLast('/'), base)
+                // Where RetroArch really is now (its slot count, in case MainUI's was off).
+                if (slot != null && slot >= 0) slotKey()?.let { keySlots[it] = slot }
+                lastSavedSlot = slot
                 if (slot != -1 && MainUI.settings.autoSaveOnExit) {
                     val auto = saved.substringBeforeLast('/') + "/$base.state.auto"
                     // Owner, mode and SELinux label copied from RetroArch's own file: in its private
@@ -442,8 +449,39 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
         return false
     }
 
+    /** The slot of the state file the last checked save wrote (null: unknown). */
+    @Volatile var lastSavedSlot: Int? = null
+        private set
+
+    /** "<package>:<pid>": one RetroArch run, whose current slot MainUI follows in [keySlots]. */
+    private fun slotKey(): String? {
+        val p = pkg ?: return null
+        val pid = Root.Shell.run("pidof $p", 3000).out.trim().substringBefore(' ')
+        return if (pid.isEmpty()) null else "$p:$pid"
+    }
+
+    /**
+     * Moves RetroArch's current slot to [slot] with its slot keys (F7 next, F6 previous), counting
+     * from the slot MainUI last knew this RetroArch run on: 0 when it started the game (RetroArch
+     * sets that whenever it loads a game), corrected by each checked save (the file it wrote).
+     */
+    private fun selectSlotByKey(slot: Int): Boolean {
+        val k = slotKey()
+        val cur = k?.let { keySlots[it] } ?: 0
+        val diff = slot - cur
+        if (diff == 0) return true
+        io.github.marsinsanity.mainui.core.VirtualKeys.primeFor(pkg)
+        repeat(kotlin.math.abs(diff)) {
+            if (!io.github.marsinsanity.mainui.core.VirtualKeys.press(if (diff > 0) "F7" else "F6", 70)) return false
+            Thread.sleep(90)
+        }
+        io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch slot $cur -> $slot (${kotlin.math.abs(diff)} slot key presses)")
+        if (k != null) keySlots[k] = slot
+        return true
+    }
+
     override fun save(slot: Int): Boolean {
-        if (!api) return keys && saveByKey()
+        if (!api) return keys && selectSlotByKey(slot) && saveByKey()
         // RetroArch >= 1.17 understands the *_SLOT variants; older builds ignore them,
         // so fall back to selecting the slot by stepping.
         val reply = ask("SAVE_STATE_SLOT $slot", 1500)
@@ -453,7 +491,7 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     }
 
     override fun load(slot: Int): Boolean {
-        if (!api) return keys && hotkey("F4")
+        if (!api) return keys && selectSlotByKey(slot) && hotkey("F4")
         val reply = ask("LOAD_STATE_SLOT $slot", 1500)
         if (reply != null && !reply.contains("-1")) return true
         selectSlot(slot)
