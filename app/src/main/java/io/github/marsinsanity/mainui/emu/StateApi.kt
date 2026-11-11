@@ -74,7 +74,8 @@ object StateApi {
     }
 
     /**
-     * Sends [command] ("save", "load" or "status") for [slot] to [pkg] and waits for its answer.
+     * Sends [command] ("save", "load", "status"; version 2: "pause", "resume", carried out at once)
+     * for [slot] to [pkg] and waits for its answer.
      * The emulator waits up to [waitMs] for the game to be ready, [settleMs] of it steady; with
      * [notBefore] (uptime ms) only a game started at or after it counts. Blocks (never on the UI
      * thread) for at most [timeoutMs].

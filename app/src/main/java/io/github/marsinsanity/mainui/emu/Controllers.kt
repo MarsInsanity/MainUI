@@ -596,7 +596,16 @@ class StandaloneController(
 
     private var frozenGen = -1
 
+    /** Paused through the State API (version 2): the emulator's own pause, not a freeze. */
+    @Volatile private var apiPaused = false
+
     override fun pause(): Boolean {
+        // A MainUI build pauses the way its own menu does: frozen apps can come back without sound.
+        if (apiVersion >= 2 && StateApi.call(pkg, "pause", timeoutMs = 2000).ok) {
+            apiPaused = true
+            frozen = false
+            return true
+        }
         frozen = MainUI.settings.freezeStandalone && Freezer.freeze(pkg, def?.freezeOnly)
         frozenGen = Freezer.generation
         return frozen
@@ -605,6 +614,10 @@ class StandaloneController(
     override fun settle() { if (frozen) Freezer.settle(pkg, frozenGen) }
 
     override fun unpause() {
+        if (apiPaused) {
+            apiPaused = false
+            StateApi.call(pkg, "resume", timeoutMs = 2000)
+        }
         if (frozen) Freezer.thaw(pkg, frozenGen)
         frozen = false
     }

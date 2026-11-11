@@ -1737,5 +1737,8 @@ class MainUIBuildsTest {
         assertTrue(java.contains("RESUME_SLOT = ${io.github.marsinsanity.mainui.emu.StateApi.RESUME_SLOT};"))
         for (extra in listOf("command", "slot", "request", "reply_to", "wait_ms", "settle_ms", "not_before", "ok", "error", "path"))
             assertTrue(extra, java.contains("\"$extra\""))
+        // Version 2 (StandaloneController pauses through it): its commands.
+        assertTrue(java.contains("VERSION = 2;"))
+        for (command in listOf("pause", "resume")) assertTrue(command, java.contains("\"$command\""))
     }
 }

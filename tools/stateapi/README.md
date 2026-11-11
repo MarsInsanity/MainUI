@@ -5,9 +5,9 @@ pressing hotkeys with root. The emulators' MainUI builds
 ([MainUI-Android](https://github.com/MainUI-Android): Dolphin, melonDS, Flycast, ARMSX2, ARMSX3,
 hakuX) carry it; MainUI's side is `app/src/main/java/.../emu/StateApi.kt`.
 
-## Protocol (version 1)
+## Protocol (version 2)
 
-- The emulator declares `<meta-data android:name="io.github.mainui.STATE_API" android:value="1"/>`
+- The emulator declares `<meta-data android:name="io.github.mainui.STATE_API" android:value="2"/>`
   in its application and an exported receiver
   `io.github.mainui.stateapi.MainUIStateApi$Receiver` for `io.github.mainui.stateapi.COMMAND`.
 - MainUI sends that broadcast to the emulator's package (foreground queue) with extras `command`
@@ -21,16 +21,21 @@ hakuX) carry it; MainUI's side is `app/src/main/java/.../emu/StateApi.kt`.
   `io.github.mainui.stateapi.RESULT` to `reply_to`: `request`, `ok`, `error` (words for the user),
   `path` (save), `version`; `status` answers `running`, `ready`, `slots`, `slot_times` (ms, 0 =
   empty) and `resume_time`.
-- The emulator must not be frozen (SIGSTOP) while a command is under way: MainUI thaws it first.
+- Version 2: `pause` and `resume` are carried out at once (not behind a waiting save or load):
+  the game pauses the way the emulator's own menu pauses it, sound included, while MainUI's menu is
+  over it. MainUI freezes (SIGSTOP) emulators without it, and a frozen app's audio stream can be
+  reclaimed, leaving the game without sound. A save or load comes after `resume`.
+- The emulator must not be frozen while a command is under way: MainUI thaws it first.
 
 ## Files
 
 - `MainUIStateApi.java`: the emulator side, the same file in every fork
   (`io/github/mainui/stateapi/`); each fork adds an `Emulator` adapter (`isRunning`, `isReady`,
-  `slotCount`, `save`, `load`, `slotTime`) and attaches it while a game runs.
+  `slotCount`, `save`, `load`, `slotTime`, `pause`, `resume`) and attaches it while a game runs.
 - `ci.sh`: the forks' CI helper (`.github/mainui/ci.sh` in each): nightly upstream merge, the stable
-  release to build (upstream's newest release matching the fork's tag pattern), cherry-picking the
-  patch onto it, version numbers, signing (organization secrets `MAINUI_KEYSTORE` (base64),
+  release to build (upstream's newest release matching the fork's tag pattern, again when the
+  patch's fingerprint in its notes is not the current one), the patch's net change applied onto
+  it, version numbers, signing (organization secrets `MAINUI_KEYSTORE` (base64),
   `MAINUI_KEYSTORE_PASSWORD`, `MAINUI_KEY_ALIAS`, `MAINUI_KEY_PASSWORD`) and publishing.
 
 ## Forks
