@@ -41,18 +41,26 @@ object EmulatorStore {
         val fdroid: AppStore.App?,
     ) {
         val github get() = def.get["github"]?.takeIf { it.contains('/') }
+        /**
+         * Its MainUI build ("mainui" in "get"): MainUI-Android's fork with the State API (MainUI
+         * saves and loads its states, with slots), package <official>.mainui, beside the official app.
+         */
+        val mainui get() = def.get["mainui"]?.takeIf { it.contains('/') }
+        /** The package the official GitHub releases publish (not the MainUI build's). */
+        val officialPackage get() = def.packages.firstOrNull { !it.endsWith(MAINUI_SUFFIX) }
         val page get() = def.get["page"]?.takeIf { it.startsWith("http") }
         val play get() = def.get["play"]?.takeIf { it.isNotBlank() }
         val note get() = def.get["note"]?.takeIf { it.isNotBlank() }
         val buildbot get() = def.get["buildbot"] == "true"
         val url get() = def.get["url"]?.takeIf { it.startsWith("http") }
-        val canDownload get() = fdroid?.apk != null || github != null || buildbot || url != null
+        val canDownload get() = fdroid?.apk != null || github != null || mainui != null || buildbot || url != null
 
         /** One word for the list: where it comes from. */
         val source: String get() = when {
             installed != null -> "installed"
             fdroid?.apk != null -> "F-Droid"
             buildbot -> "retroarch.com"
+            mainui != null -> "MainUI build"
             github != null -> "GitHub"
             url != null -> "download"
             play != null -> "Play Store"
@@ -77,6 +85,9 @@ object EmulatorStore {
             Entry(d, systems, installed, fdroid)
         }
     }
+
+    /** The MainUI builds' package suffix (MainUI-Android's forks: applicationIdSuffix). */
+    const val MAINUI_SUFFIX = ".mainui"
 
     data class Release(val version: String, val apkName: String, val url: String, val size: Long, val sha256: String?,
                        /** When it was published (ms since 1970), 0 when unknown. */

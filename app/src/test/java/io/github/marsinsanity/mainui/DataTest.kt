@@ -1700,3 +1700,42 @@ class AndroidPortsTest {
         assertFalse("ports" in io.github.marsinsanity.mainui.data.SystemRegistry.IGNORED_FOLDERS)
     }
 }
+
+/** The emulators' MainUI builds (MainUI-Android's forks with the MainUI State API). */
+class MainUIBuildsTest {
+    private fun file(p: String) = listOf(p, "app/$p").map(::File).first { it.isFile }
+
+    @Test fun mainuiBuildsComeFirstAndLaunchTheOfficialClasses() {
+        val sa = org.json.JSONObject(file("src/main/assets/emulators.json").readText()).getJSONArray("standalone")
+        var seen = 0
+        for (i in 0 until sa.length()) {
+            val e = sa.getJSONObject(i)
+            val repo = e.optJSONObject("get")?.optString("mainui").orEmpty()
+            val comps = e.getJSONArray("components").let { a -> (0 until a.length()).map { a.getString(it) } }
+            val mainui = comps.filter { it.substringBefore('/').endsWith(".mainui") }
+            if (repo.isEmpty()) { assertTrue("${e.getString("id")}: a MainUI build without get.mainui", mainui.isEmpty()); continue }
+            seen++
+            assertTrue(repo, repo.startsWith("MainUI-Android/"))
+            // First: used when installed, and the package MainUI updates from the fork.
+            assertEquals(1, mainui.size)
+            assertEquals(mainui[0], comps[0])
+            val (pkg, cls) = comps[0].split('/')
+            // applicationIdSuffix keeps the classes' names: never relative to the .mainui package.
+            assertFalse(comps[0], cls.startsWith("."))
+            // The official app it is built from is listed too.
+            assertTrue(comps[0], comps.drop(1).any { it.substringBefore('/') == pkg.removeSuffix(".mainui") })
+        }
+        assertEquals(6, seen)
+        val melon = (0 until sa.length()).map { sa.getJSONObject(it) }.first { it.getString("id") == "melonds" }
+        assertEquals(9, melon.getJSONObject("ingame").getInt("slots"))
+    }
+
+    @Test fun clientAndEmulatorsSpeakTheSameProtocol() {
+        val java = file("../tools/stateapi/MainUIStateApi.java").readText()
+        for (s in listOf(io.github.marsinsanity.mainui.emu.StateApi.ACTION_COMMAND, io.github.marsinsanity.mainui.emu.StateApi.ACTION_RESULT,
+            io.github.marsinsanity.mainui.emu.StateApi.META_DATA)) assertTrue(s, java.contains("\"$s\""))
+        assertTrue(java.contains("RESUME_SLOT = ${io.github.marsinsanity.mainui.emu.StateApi.RESUME_SLOT};"))
+        for (extra in listOf("command", "slot", "request", "reply_to", "wait_ms", "settle_ms", "not_before", "ok", "error", "path"))
+            assertTrue(extra, java.contains("\"$extra\""))
+    }
+}

@@ -42,6 +42,8 @@ import java.io.FileOutputStream
  *    load key bound in the emulator (root). "Bind hotkeys" sends those keys
  *    while the emulator's binding screen waits, so they can be bound with
  *    only a gamepad.
+ *  - DIRECT (the emulators' MainUI-Android builds, StateApi): like HOTKEY, the menu closes and
+ *    the game runs again, then MainUI asks the emulator to save / load the slot; no root, no keys.
  *  - MENU: one "Save / Load" entry that opens the emulator's own menu.
  *  - NONE: no entries (the Switch, Vita and PS3 emulators have no save states).
  */
@@ -55,7 +57,7 @@ class InGameMenuScene(
 ) : Scene(host) {
 
     private val list = UiList(false)
-    private var slot = MainUI.settings.prefs.getInt("slot:${session.gameKey}", 0)
+    private var slot = MainUI.settings.prefs.getInt("slot:${session.gameKey}", 0).coerceIn(0, controller.slotCount - 1)
     private var busy: String? = null
     private var bindMode = false
     private var resumed = false
@@ -102,7 +104,7 @@ class InGameMenuScene(
         } else {
             items += UiItem("Continue", data = Action.CONTINUE)
             when (controller.states) {
-                StateSupport.API, StateSupport.HOTKEY -> {
+                StateSupport.API, StateSupport.HOTKEY, StateSupport.DIRECT -> {
                     items += UiItem(if (controller.hasSlots) "Save  [slot $slot]" else "Save", data = Action.SAVE)
                     items += UiItem(if (controller.hasSlots) "Load  [slot $slot]" else "Load", data = Action.LOAD)
                 }
@@ -112,8 +114,9 @@ class InGameMenuScene(
             items += UiItem("Native Menu", data = Action.NATIVE)
             items += UiItem("Game Switcher", data = Action.SWITCHER)
             items += UiItem("Exit Game", data = Action.EXIT)
-            // RetroArch's hotkeys are its own defaults; standalone emulators get theirs set here (root presses them).
-            if (sa != null && Root.knownAvailable()) items += UiItem("Save / load keys...", data = Action.BIND)
+            // RetroArch's hotkeys are its own defaults; standalone emulators get theirs set here (root presses
+            // them). MainUI builds (the State API) need no keys.
+            if (sa != null && Root.knownAvailable() && controller.states != StateSupport.DIRECT) items += UiItem("Save / load keys...", data = Action.BIND)
         }
         list.set(items, false)
     }
@@ -181,7 +184,7 @@ class InGameMenuScene(
                 if (cur == Action.KEY_SAVE || cur == Action.KEY_LOAD) changeKey(cur == Action.KEY_SAVE, b == Btn.RIGHT)
                 else if (cur == Action.KEY_DELAY) changeDelay(b == Btn.RIGHT)
                 else if (controller.hasSlots && (cur == Action.SAVE || cur == Action.LOAD)) {
-                    slot = (slot + if (b == Btn.RIGHT) 1 else -1).coerceIn(0, 9)
+                    slot = (slot + if (b == Btn.RIGHT) 1 else -1).coerceIn(0, controller.slotCount - 1)
                     MainUI.settings.prefs.edit().putInt("slot:${session.gameKey}", slot).apply()
                     buildItems(); list.active = list.items.indexOfFirst { it.data == cur }.coerceAtLeast(0)
                 } else return false
@@ -225,8 +228,9 @@ class InGameMenuScene(
                     leaveThen(keyDelay) {
                         val ok = controller.saveToResume()
                         io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher (menu): save for ${session.name}: ${if (ok) "done" else "FAILED ${controller.saveProblem ?: ""}"}")
-                        // RetroArch's save is checked (written and copied by now); others get time to write.
-                        if (ok && controller !is io.github.marsinsanity.mainui.emu.RetroArchController) Thread.sleep(800)
+                        // RetroArch's save is checked (written and copied by now), the State API's answers
+                        // once written; others get time to write.
+                        if (ok && controller !is io.github.marsinsanity.mainui.emu.RetroArchController && controller.states != StateSupport.DIRECT) Thread.sleep(800)
                         else if (!ok) MainUI.sessions.toast("${session.name} wasn't saved: ${controller.saveProblem ?: "the save key failed"}")
                         // Saved, but not all the way (RetroArch: not into the auto slot): said too.
                         if (ok) controller.saveProblem?.let { MainUI.sessions.toast("${session.name}: $it") }
@@ -319,18 +323,20 @@ class InGameMenuScene(
         val ctx = host.hostContext
         leaveThen(keyDelay) {
             val ok = work()
-            val problem = if (what == "Save") controller.saveProblem else null
+            val direct = controller.states == StateSupport.DIRECT
+            val problem = if (what == "Save") controller.saveProblem else (controller as? StandaloneController)?.takeIf { direct }?.loadProblem
             io.github.marsinsanity.mainui.core.SessionLog.log("menu $what for ${session.name}: ${if (ok) "ok" else "FAILED ${problem ?: ""}"}")
             main.post {
                 // RetroArch saves are checked (its state file changed); other presses can't be.
                 // A save that worked only partly (not into RetroArch's auto slot) says so.
                 val ra = controller as? io.github.marsinsanity.mainui.emu.RetroArchController
                 val done = when {
+                    direct -> if (what == "Save") "State saved to slot $slot" else "State loaded from slot $slot"
                     what == "Save" && ra != null -> ra.lastSavedSlot?.takeIf { it >= 0 }?.let { "State saved to slot $it" } ?: "State saved"
                     what == "Load" && controller.hasSlots -> "Load slot $slot: hotkey sent"
                     else -> "$what state: hotkey sent"
                 }
-                Toast.makeText(ctx, if (ok) problem ?: done else problem ?: "$what state failed (needs root)",
+                Toast.makeText(ctx, if (ok) problem ?: done else problem ?: if (direct) "$what state failed" else "$what state failed (needs root)",
                     if (ok && problem == null) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
             }
         }
@@ -397,7 +403,7 @@ class InGameMenuScene(
      * Leaving saves with the emulator's key; not while MainUI's auto load of this game is still
      * pending (the running game is a fresh start, saving it would overwrite the real save).
      */
-    private val saveByKey get() = autoSave && controller.states == StateSupport.HOTKEY
+    private val saveByKey get() = autoSave && (controller.states == StateSupport.HOTKEY || controller.states == StateSupport.DIRECT)
     private val autoSave get() = MainUI.settings.autoSaveOnExit && !MainUI.sessions.autoLoadPending(session).also {
         if (it) io.github.marsinsanity.mainui.core.SessionLog.log("${session.name}: not saved on leaving, its last save wasn't loaded yet")
     }
@@ -427,7 +433,16 @@ class InGameMenuScene(
                 }
                 MainUI.sessions.endActive()
                 main.post { ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                if (!ok) Log.w("MainUI.InGame", "exit: could not stop ${session.pkg}")
+                if (!ok) {
+                    Log.w("MainUI.InGame", "exit: could not stop ${session.pkg}")
+                    // No root (a MainUI build saves without it): once MainUI is in front the
+                    // emulator is a background process, which the normal permission may kill.
+                    val kill = Runnable {
+                        runCatching { ctx.getSystemService(ActivityManager::class.java).killBackgroundProcesses(session.pkg) }
+                    }
+                    main.postDelayed(kill, 800)
+                    main.postDelayed(kill, 3000)
+                }
             }
             return
         }

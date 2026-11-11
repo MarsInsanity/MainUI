@@ -15,7 +15,10 @@
     "activity with root (for emulators that don't export it). Extras prefixed 'bool:', 'int:' or 'array:' (comma separated) are typed.",
     "ingame.states: 'api' (RetroArch network commands), 'hotkey' (MainUI injects ingame.save / ingame.load keys with root;",
     "bind the same keys in the emulator, the in-game menu's 'Bind hotkeys' sends them for you), 'menu' (only through the",
-    "emulator's own menu), 'none' (no save states). ingame.menu: back | key:<KEYCODE> | none."
+    "emulator's own menu), 'none' (no save states). ingame.menu: back | key:<KEYCODE> | none.",
+    "get.mainui: 'owner/repo' of its MainUI build (MainUI-Android's fork with the MainUI State API, package <official>.mainui,",
+    "listed first in components so it is used when installed): MainUI saves and loads its states itself (slots, no root,",
+    "auto load once the game runs). ingame.slots: how many slots that build has (10 by default)."
   ],
   "retroarch": {
     "get": { "buildbot": "true", "page": "https://www.retroarch.com/?page=platforms" },
@@ -35,8 +38,9 @@
   "standalone": [
     {
       "id": "armsx2", "name": "ARMSX2",
-      "get": { "github": "ARMSX2/ARMSX2", "page": "https://armsx2.net" },
+      "get": { "mainui": "MainUI-Android/ARMSX2-mainui", "github": "ARMSX2/ARMSX2", "page": "https://armsx2.net" },
       "components": [
+        "com.armsx2.mainui/com.armsx2.MainActivity",
         "come.nanodata.armsx2/com.armsx2.MainActivity",
         "com.armsx2/.MainActivity",
         "com.armsx2.nightly/com.armsx2.MainActivity",
@@ -60,8 +64,8 @@
     },
     {
       "id": "armsx3", "name": "ARMSX3",
-      "get": { "github": "ARMSX2/ARMSX3", "note": "Disc images, game folders, or .ps3 files holding a title id (ARMSX3's frontend export)" },
-      "components": ["com.armsx3/com.armsx2.Main", "com.armsx3.play/com.armsx2.Main"],
+      "get": { "mainui": "MainUI-Android/armsx3-mainui", "github": "ARMSX2/ARMSX3", "note": "Disc images, game folders, or .ps3 files holding a title id (ARMSX3's frontend export)" },
+      "components": ["com.armsx3.mainui/com.armsx2.Main", "com.armsx3/com.armsx2.Main", "com.armsx3.play/com.armsx2.Main"],
       "extras": { "path": "%ROM%" }, "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "none" }
     },
@@ -82,8 +86,8 @@
     },
     {
       "id": "hakux", "name": "hakuX",
-      "get": { "github": "rfandango/hakuX" },
-      "components": ["com.rfandango.haku_x/.LauncherActivity"],
+      "get": { "mainui": "MainUI-Android/hakux-mainui", "github": "rfandango/hakuX" },
+      "components": ["com.rfandango.haku_x.mainui/com.rfandango.haku_x.LauncherActivity", "com.rfandango.haku_x/.LauncherActivity"],
       "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "menu" }
     },
@@ -112,13 +116,14 @@
     },
     {
       "id": "melonds", "name": "melonDS",
-      "get": { "github": "rafaelvcaetano/melonDS-android", "play": "me.magnum.melonds" },
+      "get": { "mainui": "MainUI-Android/melonDS-android-mainui", "github": "rafaelvcaetano/melonDS-android", "play": "me.magnum.melonds" },
       "components": [
+        "me.magnum.melonds.mainui/me.magnum.melonds.ui.emulator.EmulatorActivity",
         "me.magnum.melonds/.ui.emulator.EmulatorActivity",
         "me.magnum.melondualds/me.magnum.melonds.ui.emulator.EmulatorActivity"
       ],
       "action": "me.magnum.melonds.LAUNCH_ROM", "extras": { "uri": "%ROMSAF%" }, "flags": ["NEW_TASK"],
-      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
+      "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2", "slots": 9 }
     },
     {
       "id": "melonds_nightly", "name": "melonDS Nightly",
@@ -129,8 +134,8 @@
     },
     {
       "id": "dolphin", "name": "Dolphin",
-      "get": { "page": "https://dolphin-emu.org/download/", "play": "org.dolphinemu.dolphinemu" },
-      "components": ["org.dolphinemu.dolphinemu/.ui.main.TvMainActivity"],
+      "get": { "mainui": "MainUI-Android/dolphin-mainui", "page": "https://dolphin-emu.org/download/", "play": "org.dolphinemu.dolphinemu" },
+      "components": ["org.dolphinemu.dolphinemu.mainui/org.dolphinemu.dolphinemu.ui.main.TvMainActivity", "org.dolphinemu.dolphinemu/.ui.main.TvMainActivity"],
       "action": "android.intent.action.MAIN", "category": "android.intent.category.LEANBACK_LAUNCHER",
       "extras": { "AutoStartFile": "%ROMSAF%" }, "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2", "loadDelay": 10000 }
@@ -186,8 +191,8 @@
     },
     {
       "id": "flycast", "name": "Flycast",
-      "get": { "github": "flyinghead/flycast", "play": "com.flycast.emulator" },
-      "components": ["com.flycast.emulator/com.flycast.emulator.MainActivity", "com.flycast.emulator/com.reicast.emulator.MainActivity"],
+      "get": { "mainui": "MainUI-Android/flycast-mainui", "github": "flyinghead/flycast", "play": "com.flycast.emulator" },
+      "components": ["com.flycast.emulator.mainui/com.flycast.emulator.MainActivity", "com.flycast.emulator/com.flycast.emulator.MainActivity", "com.flycast.emulator/com.reicast.emulator.MainActivity"],
       "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2", "loadDelay": 8000 }
     },

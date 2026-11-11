@@ -258,8 +258,8 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
         items += UiItem("Auto load waits", sub = "standalone emulators", onSelect = { host.push(AutoLoadScene(host)) })
         for (d in em.standaloneDefs()) {
             val pkg = em.installedPackage(d.id)
-            val states = when (d.states) {
-                io.github.marsinsanity.mainui.emu.StateSupport.API -> "slots"
+            val states = if (pkg != null && io.github.marsinsanity.mainui.emu.StateApi.version(pkg) > 0) "MainUI build: slots" else when (d.states) {
+                io.github.marsinsanity.mainui.emu.StateSupport.API, io.github.marsinsanity.mainui.emu.StateSupport.DIRECT -> "slots"
                 io.github.marsinsanity.mainui.emu.StateSupport.HOTKEY -> "hotkeys " + listOfNotNull(d.save, d.load)
                     .joinToString("/") { io.github.marsinsanity.mainui.emu.StandaloneController.keyLabel(it) }
                 io.github.marsinsanity.mainui.emu.StateSupport.MENU -> "own menu"

@@ -385,6 +385,17 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
                     if (err != null) host.toast(err)
                 })
             }
+            e.mainui?.let { repo ->
+                // MainUI-Android's build: MainUI saves and loads its states (slots, no root). Beside the official app.
+                val pkg = e.def.packages.firstOrNull { it.endsWith(io.github.marsinsanity.mainui.store.EmulatorStore.MAINUI_SUFFIX) }
+                val have = pkg != null && AppStore.installedVersion(pkg) != null
+                items += UiItem((if (have) "Update" else "Install") + " the MainUI build", sub = "save states from MainUI: $repo", preview = preview, onSelect = {
+                    run("Checking GitHub...") {
+                        val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestGithub(repo)
+                        io.github.marsinsanity.mainui.store.EmulatorStore.install("${e.def.name} (MainUI) ${r.version}", r, if (have) pkg else null) { busy = it; host.invalidate() }
+                    }
+                })
+            }
             e.fdroid?.let { app ->
                 val apk = app.apk ?: return@let
                 val repo = repoName(app.repo)
@@ -412,7 +423,7 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
             e.github?.let { repo ->
                 // An update only for the package the repository publishes; with a fork / other build
                 // installed it is a download of the original beside it.
-                val updates = e.installed != null && e.installed == e.def.packages.first()
+                val updates = e.installed != null && e.installed == e.officialPackage
                 items += UiItem((if (updates) "Update from" else "Download from") + " GitHub", sub = repo, preview = preview, onSelect = {
                     run("Checking GitHub...") {
                         val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestGithub(repo)
