@@ -197,6 +197,18 @@ class Gfx {
         c.drawCircle(cx, cy, r, fill)
     }
 
+    /** A white check in a green disc of radius [r] (see UiItem.mark). */
+    fun checkMark(cx: Float, cy: Float, r: Float, alpha: Int = 255) {
+        circle(cx, cy, r, Color.argb(alpha, 0x34, 0xB2, 0x5C))
+        stroke.color = Color.argb(alpha, 255, 255, 255); stroke.strokeWidth = r * 0.24f
+        stroke.strokeCap = Paint.Cap.ROUND; stroke.strokeJoin = Paint.Join.ROUND
+        path.reset()
+        path.moveTo(cx - r * 0.45f, cy + r * 0.02f)
+        path.lineTo(cx - r * 0.12f, cy + r * 0.34f)
+        path.lineTo(cx + r * 0.48f, cy - r * 0.32f)
+        c.drawPath(path, stroke)
+    }
+
     private fun setText(style: FontStyle, size: Float = style.size, color: Int = style.color) {
         tp.typeface = style.typeface
         tp.textSize = size
@@ -648,6 +660,11 @@ class Gfx {
                 x += iw + 17f
             }
             var end = labelEnd
+            if (item.mark && item.type != ItemType.MULTI) {
+                val r = if (large) 14f else 12f
+                checkMark(end - 20f - r, cy, r, alpha)
+                end -= 2 * r + 16f
+            }
             when (item.type) {
                 ItemType.TOGGLE -> {
                     val tw = toggle(item.checked, end - 20f, cy, alpha); end -= tw + 30f

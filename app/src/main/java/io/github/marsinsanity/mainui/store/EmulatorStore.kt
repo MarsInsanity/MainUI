@@ -57,6 +57,7 @@ object EmulatorStore {
 
         /** One word for the list: where it comes from. */
         val source: String get() = when {
+            installed?.endsWith(MAINUI_SUFFIX) == true -> "MainUI build"
             installed != null -> "installed"
             fdroid?.apk != null -> "F-Droid"
             buildbot -> "retroarch.com"

@@ -343,7 +343,7 @@ class EmulatorStoreScene(host: SceneHost) : ListScene(host, "Emulators", large =
             list.set(entries.map { e ->
                 UiItem(e.def.name, icon = { emuIcon(host, e) },
                     sub = listOf(e.systems.takeIf { it.isNotBlank() }, e.source).filterNotNull().joinToString("  ·  "),
-                    data = e, onSelect = { host.push(EmulatorDetailScene(host, e.def.id)) })
+                    data = e, mark = e.installed != null, onSelect = { host.push(EmulatorDetailScene(host, e.def.id)) })
             }, false)
             title = "Emulators (${entries.count { it.installed != null }}/${entries.size} installed)"
         }
