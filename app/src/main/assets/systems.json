@@ -1630,6 +1630,7 @@
    ],
    "emulators": [
     "sa:drastic",
+    "sa:seedlessds",
     "sa:melonds",
     "sa:melonds_nightly",
     "ra:melondsds",
