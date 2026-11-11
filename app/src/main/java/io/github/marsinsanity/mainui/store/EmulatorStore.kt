@@ -55,10 +55,10 @@ object EmulatorStore {
         val url get() = def.get["url"]?.takeIf { it.startsWith("http") }
         val canDownload get() = fdroid?.apk != null || github != null || mainui != null || buildbot || url != null
 
-        /** One word for the list: where it comes from. */
+        /** One word for the list: where it comes from; installed, which build (the list marks it installed). */
         val source: String get() = when {
             installed?.endsWith(MAINUI_SUFFIX) == true -> "MainUI build"
-            installed != null -> "installed"
+            installed != null -> ""
             fdroid?.apk != null -> "F-Droid"
             buildbot -> "retroarch.com"
             mainui != null -> "MainUI build"
