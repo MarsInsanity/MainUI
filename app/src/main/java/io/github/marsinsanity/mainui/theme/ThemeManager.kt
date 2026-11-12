@@ -40,6 +40,7 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     private fun loadTheme(path: String): Theme {
         // Themes that lack a system icon borrow the bundled theme's (it has one for every system).
         Theme.iconFallbackDir = File(builtinDir, "icons").takeIf { it.isDirectory }
+        Theme.onionIcons = settings.onionIcons
         val dir = when {
             path == CLASSIC -> null
             path.isBlank() -> builtinDir.takeIf { it.isDirectory }
