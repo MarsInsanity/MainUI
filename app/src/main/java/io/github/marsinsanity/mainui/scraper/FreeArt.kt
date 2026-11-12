@@ -300,7 +300,14 @@ object FreeArt {
             if (!f.isFile || System.currentTimeMillis() - f.lastModified() > INDEX_MAX_AGE) {
                 val names = runCatching { parseListing(Http.text(thumbDir(set))) }.getOrNull()?.takeIf { it.isNotEmpty() }
                     ?: if (testBase == null) runCatching { githubTree(set) }.getOrNull() else null
-                if (!names.isNullOrEmpty()) runCatching { f.writeText(names.joinToString("\n")) }
+                if (!names.isNullOrEmpty()) {
+                    // Swapped in whole: a list cut short (card full) would be trusted for a week.
+                    val tmp = File(f.parentFile, f.name + ".new")
+                    if (!runCatching { tmp.writeText(names.joinToString("\n")); tmp.renameTo(f) }.getOrDefault(false)) {
+                        tmp.delete()
+                        return@computeIfAbsent names.toHashSet()
+                    }
+                }
                 else { Log.w(TAG, "no thumbnail list for $set"); s.failedAt[key] = System.currentTimeMillis() }
             }
             if (f.isFile) f.readLines().filter { it.isNotEmpty() }.toHashSet() else None

@@ -209,7 +209,14 @@ class Theme private constructor(
     private fun image(rel: String): Bitmap? {
         bitmaps[rel]?.let { return it as? Bitmap }
         val f = file(rel)
-        val bmp = f?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
+        val bmp = f?.let { file ->
+            runCatching {
+                val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.absolutePath, b)
+                // (A huge picture, a phone photo as background, would crash drawing it: made smaller.)
+                BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sampleSize(b.outWidth, b.outHeight) })
+            }.getOrNull()
+        }
         bitmaps[rel] = bmp ?: MISSING
         return bmp
     }
@@ -242,4 +249,14 @@ class Theme private constructor(
         fun load(ctx: Context, dir: File?, overrideDir: File?, fontDirs: List<File>): Theme =
             Theme(ctx, dir, overrideDir, fontDirs).apply { load() }
     }
+}
+
+/**
+ * The power of two to decode a [w] x [h] image at so it is at most [maxW] wide (0: any width)
+ * and at most [maxBytes] in memory.
+ */
+fun sampleSize(w: Int, h: Int, maxW: Int = 0, maxBytes: Long = 64L shl 20): Int {
+    var s = 1
+    while ((maxW > 0 && w / s > maxW) || (w.toLong() / s) * (h.toLong() / s) * 4 > maxBytes) s *= 2
+    return s
 }

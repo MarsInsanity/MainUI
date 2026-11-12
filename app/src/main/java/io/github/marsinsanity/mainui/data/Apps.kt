@@ -101,7 +101,8 @@ class Apps(private val ctx: Context, private val library: Library, private val s
     fun androidGames(): List<AppInfo> {
         val games = library.androidGames()
         val ports = if (games.isEmpty()) emptySet() else portPackages()
-        return all().filter { it.pkg in games && it.pkg !in ports }
+        val hidden = if (games.isEmpty()) emptySet() else library.hiddenApps()
+        return all().filter { it.pkg in games && it.pkg !in ports && it.pkg !in hidden }
     }
 
     /**
@@ -119,7 +120,8 @@ class Apps(private val ctx: Context, private val library: Library, private val s
         val since = if (!java.io.File(io.github.marsinsanity.mainui.MainUI.storage.configDir, "android_games.json").exists()) 0L
             else settings.lastPackageReconcile
         invalidate()
-        val hidden = library.hiddenApps() + portPackages() // hidden stays hidden, ports stay ports
+        // Hidden stays hidden, ports stay ports, apps moved to Emulators stay there.
+        val hidden = library.hiddenApps() + portPackages() + library.emulatorChoices().first
         // Emulators sorted in as games before MainUI knew them (another build's id): take them out.
         for (pkg in library.androidGames()) {
             val label = all().firstOrNull { it.pkg == pkg }?.label
@@ -143,7 +145,8 @@ class Apps(private val ctx: Context, private val library: Library, private val s
         // Handled now: the next start's catch-up (reconcileNewInstalls) mustn't sort it again
         // after the user moved it back to Apps or hid it.
         settings.lastPackageReconcile = System.currentTimeMillis()
-        if (!settings.autoSortAndroidGames || emulators.isEmulatorPackage(pkg) || pkg in library.hiddenApps() || pkg in portPackages()) return
+        if (!settings.autoSortAndroidGames || emulators.isEmulatorPackage(pkg) || pkg in library.hiddenApps() || pkg in portPackages() ||
+            pkg in library.emulatorChoices().first) return
         val ai = runCatching { pm.getApplicationInfo(pkg, 0) }.getOrNull() ?: return
         if (isGame(ai)) library.setAndroidGame(pkg, true)
     }

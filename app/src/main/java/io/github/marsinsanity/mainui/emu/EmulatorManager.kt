@@ -145,13 +145,17 @@ class EmulatorManager(
     fun loadDefs() = synchronized(defsLock) {
         val defs = LinkedHashMap<String, EmuDef>()
         val base = JSONObject(ctx.assets.open("emulators.json").bufferedReader().use { it.readText() })
-        apply(base, defs)
+        apply(base, defs, trusted = true)
         val override = File(storage.dataRoot(), "emulators.json")
-        if (override.isFile) runCatching { apply(JSONObject(override.readText()), defs) }
+        if (override.isFile) runCatching { apply(JSONObject(override.readText()), defs, trusted = false) }
         standalone = defs
     }
 
-    private fun apply(root: JSONObject, standalone: MutableMap<String, EmuDef>) {
+    /**
+     * [trusted]: MainUI's own recipes. The user's emulators.json is in shared storage, which
+     * other apps can write: it can't start new things with root, only keep a recipe's root start.
+     */
+    private fun apply(root: JSONObject, standalone: MutableMap<String, EmuDef>, trusted: Boolean) {
         root.optJSONObject("retroarch")?.let { r ->
             retroarch = parseDef("retroarch", r)
             raCommandPort = r.optInt("commandPort", raCommandPort)
@@ -159,7 +163,11 @@ class EmulatorManager(
         root.optJSONArray("standalone")?.let { arr ->
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
-                standalone[o.getString("id")] = parseDef(o.getString("id"), o)
+                val id = o.getString("id")
+                val d = parseDef(id, o)
+                val base = standalone[id]
+                standalone[id] = if (trusted || !d.rootLaunch ||
+                    (base != null && base.rootLaunch && d.components.all { it in base.components })) d else d.copy(rootLaunch = false)
             }
         }
     }
@@ -220,10 +228,12 @@ class EmulatorManager(
         // Packages a recipe names are that recipe's: never "another build" of a different one
         // (Citra MMJ's org.citra.emu, labelled "Citra", is not the Citra recipe's).
         val listed = HashSet<String>().apply { standalone.values.forEach { d -> d.components.forEach { add(it.first) } }; addAll(retroarch.packages) }
+        // First recipe component whose package is installed and whose activity exists.
+        val exact = standalone.mapValues { (_, d) -> d.components.firstOrNull { (pkg, act) -> installed(pkg) && (act == null || hasActivity(pkg, act)) } }
         for ((id, d) in standalone) {
-            // First recipe component whose package is installed and whose activity exists.
-            val c = d.components.firstOrNull { (pkg, act) -> installed(pkg) && (act == null || hasActivity(pkg, act)) }
-                ?: d.components.firstOrNull { installed(it.first) }?.let { (pkg, _) ->
+            val c = exact[id]
+                // (Not a package another recipe's activity is in: Lime3DS has the id Azahar's Play build keeps.)
+                ?: d.components.firstOrNull { (p, _) -> installed(p) && exact.none { (o, oc) -> o != id && oc?.first == p } }?.let { (pkg, _) ->
                     // Package installed but the recipe's activity was renamed: use its launcher activity.
                     pkg to launcherOf(pkg)
                 }
@@ -437,7 +447,7 @@ class EmulatorManager(
         // Automatic choice: recommended emulators, or other cores whose .info lists this
         // game's extension (a Game Boy core claims .gb, which the GBA folder also accepts,
         // but it can't run a .gba file).
-        val ext = game?.file?.let { if (it.isDirectory) null else it.extension.lowercase() }
+        val ext = game?.file?.let(::launchFile)?.let { if (it.isDirectory) null else it.extension.lowercase() }
         // A container (.zip) only counts for a core made for this system (one of its own
         // extensions), not one that merely opens zips.
         // (Without a file extension, for the system's Default or a folder game: only cores made
@@ -459,9 +469,15 @@ class EmulatorManager(
     fun raCorePath(pkg: String, core: String) =
         corePaths[core] ?: "${raCoreDir ?: "/data/data/$pkg/cores"}/$core${RetroArchCores.SUFFIX}"
 
+    /**
+     * What a game's emulator gets: for a folder named like a rom ("Game.m3u/"), the file of the
+     * same name inside it, as ES-DE does; the folder itself when there is none (PS3 games).
+     */
+    private fun launchFile(f: File): File = if (f.isDirectory) File(f, f.name).takeIf { it.isFile } ?: f else f
+
     /** Builds the launch intent. Throws [IllegalStateException] with a user readable reason. */
     fun buildIntent(game: Game, opt: EmuOption): Intent {
-        val rom = game.file ?: throw IllegalStateException("No rom file")
+        val rom = game.file?.let(::launchFile) ?: throw IllegalStateException("No rom file")
         if (opt.isRetroArch) {
             val pkg = raPackage ?: throw IllegalStateException("RetroArch is not installed")
             return fill(retroarch, pkg, rom, opt.core, retroarch.components.first().second)
@@ -507,7 +523,8 @@ class EmulatorManager(
             if (def.mime != null) intent.setDataAndType(uri, def.mime) else intent.data = uri
             // Only MainUI's own files can be shared this way. Granting a storage (SAF) link MainUI
             // doesn't hold makes Android refuse to start the emulator; it has its own folder grant.
-            if (uri.scheme == "content" && uri.authority == "${ctx.packageName}.files")
+            // (Only the rom's own link: an edited recipe must not get MainUI's other files.)
+            if (uri.scheme == "content" && uri == providerUri(rom))
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         }
         for ((k, v) in def.extras) {

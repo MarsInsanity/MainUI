@@ -157,15 +157,17 @@ object Root {
     }
 
     /** True when `su` exists and granted us root. Cached after first success. */
-    fun available(): Boolean {
+    fun available(recheck: Boolean = false): Boolean {
         cached?.let { return it }
+        // KernelSU / APatch show su only once the user allowed MainUI: looked for again later.
+        if (!recheck && android.os.SystemClock.uptimeMillis() < noSuUntil) return false
         val hasBinary = testRootPort != null || listOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/debug_ramdisk/su")
             .any { File(it).exists() } || runCatching {
             Runtime.getRuntime().exec(arrayOf("sh", "-c", "command -v su")).inputStream
                 .bufferedReader().readText().isNotBlank()
         }.getOrDefault(false)
         if (!hasBinary) {
-            cached = false
+            noSuUntil = android.os.SystemClock.uptimeMillis() + 30_000
             remember(false)
             return false
         }
@@ -182,11 +184,7 @@ object Root {
     }
 
     private const val PREF_ROOT = "root_seen"
-
-    /** Root as the last run of MainUI found it (MainUI expects a rooted handheld). */
-    private val lastRun: Boolean by lazy {
-        runCatching { io.github.marsinsanity.mainui.MainUI.settings.prefs.getBoolean(PREF_ROOT, false) }.getOrDefault(false)
-    }
+    @Volatile private var noSuUntil = 0L
 
     private fun remember(ok: Boolean) {
         runCatching { io.github.marsinsanity.mainui.MainUI.settings.prefs.edit().putBoolean(PREF_ROOT, ok).apply() }
@@ -197,7 +195,8 @@ object Root {
      * one, the last run's. So a game started right after MainUI (re)starts gets the root
      * features (keyboard hotkeys, auto load, freezing) instead of quietly going without them.
      */
-    fun knownAvailable(): Boolean = cached ?: lastRun
+    fun knownAvailable(): Boolean = cached
+        ?: runCatching { io.github.marsinsanity.mainui.MainUI.settings.prefs.getBoolean(PREF_ROOT, false) }.getOrDefault(false)
 
 
     /** Makes sure the namespace is known before a root command runs. */

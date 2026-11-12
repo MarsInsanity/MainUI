@@ -733,7 +733,17 @@ class Gfx {
     /** Centered message panel; one line per '\n'. */
     fun infoPanel(message: String) {
         val style = theme.list
-        val lines = message.split('\n').filter { it.isNotEmpty() }.ifEmpty { listOf("") }
+        // Long lines wrap (an error's reason is at its end); past 5 lines the rest is cut with "...".
+        val wrapped = ArrayList<String>()
+        for (para in message.split('\n').filter { it.isNotEmpty() }) {
+            var line = ""
+            for (word in para.split(' ')) {
+                val t = if (line.isEmpty()) word else "$line $word"
+                if (line.isNotEmpty() && textWidth(t, style) > W - 110f) { wrapped += line; line = word } else line = t
+            }
+            wrapped += line
+        }
+        val lines = (if (wrapped.size > 5) wrapped.take(4) + wrapped.drop(4).joinToString(" ") else wrapped).ifEmpty { listOf("") }
         val lineH = style.size * 1.45f
         val tw = min(W - 80f, (lines.maxOf { textWidth(it, style) }) + 60f)
         val h = max(80f, lines.size * lineH + 40f)

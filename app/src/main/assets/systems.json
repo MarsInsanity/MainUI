@@ -1929,8 +1929,7 @@
    ],
    "emulators": [
     "sa:pico8",
-    "ra:retro8",
-    "ra:fake08"
+    "ra:retro8"
    ],
    "menu": [
     {
@@ -2123,9 +2122,7 @@
     "pz",
     "pzp"
    ],
-   "emulators": [
-    "ra:puzzlescript"
-   ],
+   "emulators": [],
    "screenscraper": null,
    "icons": [
     "puzzlescript"
@@ -2759,9 +2756,7 @@
     "dat",
     "txt"
    ],
-   "emulators": [
-    "ra:onscripter"
-   ],
+   "emulators": [],
    "screenscraper": null,
    "icons": [
     "onscripter"

@@ -34,11 +34,7 @@ object Launch {
     }
 
     private fun launchFresh(host: SceneHost, game: Game) {
-        if (game.isAndroid) {
-            val err = MainUI.sessions.launchApp(game.pkg!!, game.name, asGame = true)
-            if (err != null) host.toast(err)
-            return
-        }
+        if (game.isAndroid) { app(host, game.pkg!!, game.name, asGame = true); return }
         val def = systemDef(game.systemId)
         if (def == null) { host.toast("Unknown system ${game.systemId}"); return }
         def.menuItemFor(game.file)?.let { launchMenuItem(host, def, game, it); return }
@@ -84,6 +80,14 @@ object Launch {
                 }
             }
         }
+    }
+
+    /**
+     * Starts an Android app, off the UI thread: a game paused behind MainUI is resumed first,
+     * which can wait for the root shell.
+     */
+    fun app(host: SceneHost, pkg: String, label: String, asGame: Boolean) {
+        host.io({ MainUI.sessions.launchApp(pkg, label, asGame) }) { err -> if (err != null) host.toast(err) }
     }
 
     /** An Android app in the Ports system: started as the app its port file names. */

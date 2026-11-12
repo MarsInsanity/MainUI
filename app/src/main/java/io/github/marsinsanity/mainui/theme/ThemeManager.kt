@@ -93,6 +93,8 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     fun reload() {
         val old = current
         current = loadTheme(settings.themePath)
+        // (Glyphs are drawn in the theme's accent: a card mounted / ejected can change it.)
+        if (current.accent != old.accent) io.github.marsinsanity.mainui.ui.Glyphs.clear()
         old.release()
         reloadSounds()
         listeners.forEach { it(current) }
@@ -139,11 +141,15 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
 
     /** Preview for the theme switcher (preview.png, or background as fallback). */
     fun preview(entry: ThemeEntry, maxW: Int = 640): Bitmap? {
-        val opts = BitmapFactory.Options().apply { inSampleSize = 1 }
+        // At most [maxW] wide: a bigger one is too big for the image cache and was decoded again every frame.
+        fun scaled(w: Int, h: Int) = BitmapFactory.Options().apply { inSampleSize = sampleSize(w, h, maxW) }
         entry.dir?.let { d ->
             for (rel in listOf("preview.png", "skin/background.png")) {
                 val f = File(d, rel)
-                if (f.isFile) return BitmapFactory.decodeFile(f.absolutePath, opts)
+                if (!f.isFile) continue
+                val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(f.absolutePath, b)
+                return BitmapFactory.decodeFile(f.absolutePath, scaled(b.outWidth, b.outHeight))
             }
         }
         entry.zip?.let { z ->
@@ -151,7 +157,10 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
                 ZipFile(z).use { zf ->
                     val e = zf.entries().asSequence().firstOrNull { it.name.endsWith("preview.png", true) && it.name.count { c -> c == '/' } <= 1 }
                         ?: return null
-                    return zf.getInputStream(e).use { BitmapFactory.decodeStream(it) }
+                    val bytes = zf.getInputStream(e).use { it.readBytes() }
+                    val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, b)
+                    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, scaled(b.outWidth, b.outHeight))
                 }
             }
         }

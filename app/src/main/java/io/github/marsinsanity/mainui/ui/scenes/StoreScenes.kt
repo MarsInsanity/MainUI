@@ -85,7 +85,7 @@ class ThemeStoreScene(host: SceneHost) : ListScene(host, "Get themes") {
                         Glyphs.clear(); Images.clear(); host.toast("${e.title} applied")
                     }
                 } else host.toast("${e.title} installed. Apps > Theme Switcher to use it", 3000)
-                list.current?.sub = "installed  ${e.author}"
+                list.items.firstOrNull { it.data === e }?.sub = "installed  ${e.author}"
             }
         }
     }
@@ -130,6 +130,16 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
         }
     }
 
+    private data class Loaded(val apps: List<AppStore.App>, val total: Int, val versions: Map<String, Long>, val blocked: Set<String>)
+
+    /** A newer build of an installed app, signed by someone else: it can't update it. Off the UI thread. */
+    private fun otherSigner(a: AppStore.App, versions: Map<String, Long>): Boolean {
+        val apk = a.apk ?: return false
+        val v = versions[a.pkg] ?: return false
+        if (apk.versionCode <= v || apk.signer == null) return false
+        return AppStore.installedSigner(a.pkg)?.let { !apk.signer.equals(it, true) } == true
+    }
+
     private fun rebuild() {
         if (list.size == 0 && busy == null) busy = "Loading apps..."
         host.io({
@@ -137,12 +147,14 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
             val q = query.lowercase()
             // Installed versions in one go (not a package lookup per app on the UI thread).
             val versions = AppStore.installedVersions()
-            Triple(all.filter { a ->
+            // Newer builds signed by someone else than the installed app's: they can't update it.
+            val blocked = all.filter { a -> otherSigner(a, versions) }.map { it.pkg }.toSet()
+            Loaded(all.filter { a ->
                 (q.isEmpty() || a.name.lowercase().contains(q) || a.summary.lowercase().contains(q) || a.pkg.contains(q)) &&
                     (category == null || category in a.categories) &&
-                    (!updatesOnly || (versions[a.pkg]?.let { v -> (a.apk?.versionCode ?: 0) > v } == true))
-            }, all.size, versions)
-        }) { (apps, total, versions) ->
+                    (!updatesOnly || (a.pkg !in blocked && versions[a.pkg]?.let { v -> (a.apk?.versionCode ?: 0) > v } == true))
+            }, all.size, versions, blocked)
+        }) { (apps, total, versions, blocked) ->
             if (busy == "Loading apps...") busy = null
             val items = mutableListOf(
                 UiItem("Search...", icon = { Glyphs.get("search") }, sub = query.ifEmpty { null }, onSelect = { search() }),
@@ -156,6 +168,7 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
                 val installed = versions[a.pkg]
                 val status = when {
                     installed == null -> a.apk?.versionName ?: "incompatible"
+                    a.pkg in blocked -> "other signature"
                     (a.apk?.versionCode ?: 0) > installed -> "update"
                     else -> "installed"
                 }
@@ -212,6 +225,8 @@ class AppDetailScene(host: SceneHost, private val app: AppStore.App) : ListScene
         when {
             apk == null -> items += UiItem("No version for this device", disabled = true)
             installed == null -> items += UiItem("Install ${apk.versionName}", sub = sizeLabel(apk.size), preview = preview, onSelect = { install() })
+            apk.versionCode > installed && apk.signer != null && AppStore.installedSigner(app.pkg)?.let { !apk.signer.equals(it, true) } == true ->
+                items += UiItem("${apk.versionName}: other signature", sub = "uninstall first", disabled = true, preview = preview)
             apk.versionCode > installed -> items += UiItem("Update to ${apk.versionName}", sub = sizeLabel(apk.size), preview = preview, onSelect = { install() })
             else -> items += UiItem("Installed (${apk.versionName})", disabled = true, preview = preview)
         }
@@ -220,7 +235,7 @@ class AppDetailScene(host: SceneHost, private val app: AppStore.App) : ListScene
                 // A port starts as its Ports entry (session, recents, in-game menu); a game as a game.
                 host.io({ Ports.gameFor(app.pkg) }) { port ->
                     if (port != null) Launch.game(host, port)
-                    else MainUI.sessions.launchApp(app.pkg, app.name, asGame = MainUI.library.isAndroidGame(app.pkg))?.let { host.toast(it) }
+                    else Launch.app(host, app.pkg, app.name, asGame = MainUI.library.isAndroidGame(app.pkg))
                 }
             })
             items += UiItem("Uninstall", preview = preview, onSelect = {
@@ -381,8 +396,7 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
                 val v = runCatching { host.hostContext.packageManager.getPackageInfo(e.installed, 0).versionName }.getOrNull()
                 items += UiItem("Installed" + (v?.let { " ($it)" } ?: ""), sub = e.installed, preview = preview, disabled = true)
                 items += UiItem("Open", preview = preview, onSelect = {
-                    val err = MainUI.sessions.launchApp(e.installed, e.def.name, asGame = false)
-                    if (err != null) host.toast(err)
+                    Launch.app(host, e.installed, e.def.name, asGame = false)
                 })
             }
             e.mainui?.let { repo ->
@@ -399,8 +413,9 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
             e.fdroid?.let { app ->
                 val apk = app.apk ?: return@let
                 val repo = repoName(app.repo)
-                val have = e.installed?.takeIf { it == app.pkg }?.let { AppStore.installedVersion(it) }
-                val mySigner = e.installed?.takeIf { it == app.pkg }?.let { AppStore.installedSigner(it) }
+                // (Its own package's state: the MainUI build may be installed beside it.)
+                val have = AppStore.installedVersion(app.pkg)
+                val mySigner = if (have != null) AppStore.installedSigner(app.pkg) else null
                 when {
                     have == null -> items += UiItem("Install from $repo", sub = apk.versionName, preview = preview,
                         onSelect = { run("Downloading...") { AppStore.install(app) { busy = it; host.invalidate() } } })
@@ -423,11 +438,12 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
             e.github?.let { repo ->
                 // An update only for the package the repository publishes; with a fork / other build
                 // installed it is a download of the original beside it.
-                val updates = e.installed != null && e.installed == e.officialPackage
+                val official = e.officialPackage
+                val updates = official != null && AppStore.installedVersion(official) != null
                 items += UiItem((if (updates) "Update from" else "Download from") + " GitHub", sub = repo, preview = preview, onSelect = {
                     run("Checking GitHub...") {
                         val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestGithub(repo)
-                        io.github.marsinsanity.mainui.store.EmulatorStore.install("${e.def.name} ${r.version}", r, if (updates) e.installed else null) { busy = it; host.invalidate() }
+                        io.github.marsinsanity.mainui.store.EmulatorStore.install("${e.def.name} ${r.version}", r, if (updates) official else null) { busy = it; host.invalidate() }
                     }
                 })
             }

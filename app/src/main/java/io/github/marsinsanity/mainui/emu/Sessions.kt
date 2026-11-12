@@ -202,30 +202,46 @@ class SessionManager(
     // ---- the game paused while MainUI is in front --------------------------------------
     // Standalone emulators keep running behind MainUI's own screens (ARMSX2 plays on behind the
     // Game Switcher, sound and all): Android only tells them they're in the background. So while
-    // MainUI's screen is in front with a standalone emulator's game behind it, the emulator is
-    // frozen like for the in-game menu (root), and thawed before anything brings it back or
+    // MainUI's screen is in front with a standalone emulator's game behind it, the game is
+    // paused like for the in-game menu, and resumed before anything brings it back or
     // starts something else. RetroArch pauses itself (pause_nonactive); Android games are theirs.
 
     private val parkLock = Any()
     @Volatile private var parkWanted = false
-    /** (package, Freezer generation) of the game frozen while MainUI is in front. */
+    /** (package, Freezer generation) of the game paused while MainUI is in front; [API_PAUSED]: by the State API. */
     @Volatile private var parked: Pair<String, Int>? = null
+    /** Sends park's State API pause and resume, in order, off the caller's thread. */
+    private val apiParker = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "park-api").apply { isDaemon = true } }
+
+    /** A game is paused behind MainUI's screen. */
+    val isParked: Boolean get() = parked != null
 
     /**
-     * MainUI's screen came to the front: freeze the active standalone emulator's game after
+     * MainUI's screen came to the front: pause the active standalone emulator's game after
      * [delayMs] (time for the emulator to take in that it's in the background), unless
-     * [unpark] comes first.
+     * [unpark] comes first. A MainUI build pauses itself (frozen apps can come back without
+     * sound); others are frozen (root).
      */
     fun park(delayMs: Long = 800) {
         val s = active ?: return
-        if (s.emuRef?.startsWith("sa:") != true || !settings.freezeStandalone || !Root.knownAvailable()) return
+        if (s.emuRef?.startsWith("sa:") != true) return
         parkWanted = true
         Thread({
             Thread.sleep(delayMs)
+            val def = s.emuRef?.let { emulators.defFor(it) }
+            val api = def != null && StateApi.version(s.pkg) >= 2
+            if (!api && (!settings.freezeStandalone || !Root.knownAvailable())) return@Thread
             synchronized(parkLock) {
                 if (!parkWanted || parked != null || active !== s) return@Thread
-                val def = s.emuRef?.let { emulators.defFor(it) }
-                if (Freezer.freeze(s.pkg, def?.freezeOnly)) {
+                if (api) {
+                    // Counted as paused at once, so an unpark meanwhile resumes it (its resume is sent after).
+                    parked = s.pkg to API_PAUSED
+                    apiParker.execute {
+                        val r = StateApi.call(s.pkg, "pause", timeoutMs = 2000)
+                        if (r.ok) ApiPauses.paused(s.pkg)
+                        io.github.marsinsanity.mainui.core.SessionLog.log("paused ${s.name} (${s.pkg}) while MainUI is in front: ${r.error ?: "ok"}")
+                    }
+                } else if (Freezer.freeze(s.pkg, def?.freezeOnly)) {
                     parked = s.pkg to Freezer.generation
                     io.github.marsinsanity.mainui.core.SessionLog.log("paused ${s.name} (${s.pkg}) while MainUI is in front")
                 }
@@ -234,17 +250,25 @@ class SessionManager(
     }
 
     /**
-     * Thaws the game [park] froze (and stops a pending [park]). Called before the game comes
+     * Resumes the game [park] paused (and stops a pending [park]). Called before the game comes
      * back, before anything is launched, when the session ends and when MainUI's screen leaves.
+     * Off the UI thread it returns once the game runs again.
      */
     fun unpark() {
         parkWanted = false
-        synchronized(parkLock) {
+        val resumed = synchronized(parkLock) {
             val p = parked ?: return
             parked = null
-            Freezer.thaw(p.first, p.second)
             io.github.marsinsanity.mainui.core.SessionLog.log("resumed ${p.first}")
+            if (p.second != API_PAUSED) { Freezer.thaw(p.first, p.second); return }
+            // (Always sent: a pause that answered late still took effect.)
+            apiParker.submit {
+                StateApi.call(p.first, "resume", timeoutMs = 2000)
+                ApiPauses.resumed(p.first)
+            }
         }
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
+            runCatching { resumed.get(5, java.util.concurrent.TimeUnit.SECONDS) }
     }
 
     /** Ends the running session (play time accounting). Does not kill anything. */
@@ -253,6 +277,7 @@ class SessionManager(
         // Taken under the lock, so two callers at once (exit thread, onResume) count it once.
         val s = synchronized(this) { active.also { active = null } } ?: return
         loadPending = null
+        ApiPauses.resumed(s.pkg) // (stopped or left: nothing to resume after a restart)
         account(s)
         persist()
     }
@@ -442,8 +467,8 @@ class SessionManager(
         if (!settings.autoSaveOnExit) return
         val c = controllerFor(s) as? StandaloneController ?: return
         if (c.states == StateSupport.NONE) return // no save states at all (PICO-8, Switch)
+        if (c.states == StateSupport.DIRECT) { autoLoadDirect(s, c, hasSavedState(s.gameKey)); return }
         if (!hasSavedState(s.gameKey)) { log("auto load ${s.name}: skipped, MainUI never saved it"); return }
-        if (c.states == StateSupport.DIRECT) { autoLoadDirect(s, c); return }
         if (c.states != StateSupport.HOTKEY || c.loadSpec == null) {
             log("auto load ${s.name}: skipped, no load key MainUI can press (states ${c.states}, key ${c.loadSpec}, root ${Root.knownAvailable()})"); return
         }
@@ -495,19 +520,24 @@ class SessionManager(
      * Auto load through the State API (the emulator's MainUI-Android build): the emulator itself
      * waits until this game (started now, not one running before it) has booted and runs, then
      * loads MainUI's resume state. No keys, no guessing how long the game takes to start.
+     * Asked even without MainUI's [marked] (its data cleared, the rom moved or converted): the
+     * emulator knows whether it has the state. Automatic saves wait for it only when marked.
      */
-    private fun autoLoadDirect(s: Session, c: StandaloneController) {
+    private fun autoLoadDirect(s: Session, c: StandaloneController, marked: Boolean) {
         val log = io.github.marsinsanity.mainui.core.SessionLog::log
         if (c.loadDelayMs <= 0) { log("auto load ${s.name}: turned off for this emulator"); return }
         log("auto load ${s.name}: ${s.pkg} loads MainUI's resume state once the game runs (State API)")
-        loadPending = s
+        if (marked) loadPending = s
         Thread({
             val r = StateApi.call(s.pkg, "load", StateApi.RESUME_SLOT, waitMs = 180_000, settleMs = 2_000, notBefore = s.startedUptime)
             val mine = loadPending === s
-            if (mine) loadPending = null
+            // The load never ran (the game didn't come up in time): still a fresh start, so
+            // automatic saves stay off rather than overwrite the state that wasn't loaded.
+            val notTried = !r.ok && (r.extras == null || r.error == "the game wasn't ready" || r.error == "no game is running")
+            if (mine && !notTried) loadPending = null
             log("auto load ${s.name}: ${if (r.ok) "loaded" else "not loaded: ${r.error}"}")
             when {
-                r.ok -> if (mine && active === s) toast("Loaded your last save")
+                r.ok -> if ((mine || !marked) && active === s) toast("Loaded your last save")
                 // (No resume state: nothing was left to continue from.)
                 active === s && r.error?.contains("empty") != true -> toast("Your last save wasn't loaded: ${r.error}")
             }
@@ -534,6 +564,8 @@ class SessionManager(
 
     companion object {
         const val ADOPTED = "emulator:"
+        /** [parked]'s generation for a game paused through the State API (Freezer's start at 0). */
+        private const val API_PAUSED = -1
         /**
          * Writes [bmp] to [f] as PNG without ever leaving a half-written [f]: into a temporary file
          * first, then swapped in. A big screenshot takes about a second to write, and the Game

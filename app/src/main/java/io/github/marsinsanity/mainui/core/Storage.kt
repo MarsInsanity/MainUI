@@ -179,9 +179,12 @@ class Storage(private val ctx: Context, private val settings: Settings) {
     }
 
     fun hasAllFilesAccess(): Boolean =
-        if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
+        if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
+        // Android 10: legacy storage, once the storage permissions are granted.
+        else STORAGE_PERMISSIONS.all { ctx.checkSelfPermission(it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
 
     companion object {
+        val STORAGE_PERMISSIONS = arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE, android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
         private const val CACHE_MS = 5_000L
         private val CARD_NAME = Regex("[0-9A-F]{4}-[0-9A-F]{4}")
     }

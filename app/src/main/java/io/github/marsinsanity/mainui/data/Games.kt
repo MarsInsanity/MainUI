@@ -192,7 +192,9 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val gl = meta(systemRootFor(system, dir))
         val stamp = gl.stamp() * 7 + MainUIRef.metadataSource().hashCode()
         val cached = dirCache[dir.absolutePath]
-        if (cached != null && cached.mtime == dir.lastModified() && cached.metaStamp == stamp) return cached.games
+        // Read before listing: a file added while the list is made changes it again, so it's listed next time.
+        val mtime = dir.lastModified()
+        if (cached != null && cached.mtime == mtime && cached.metaStamp == stamp) return cached.games
         val files = dir.listFiles() ?: return emptyList()
         val hiddenByCue = discFilesToHide(system, files) + unpackedZips(system, files)
         val out = ArrayList<Game>(files.size)
@@ -221,7 +223,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             out += Game(system.id, f, entry?.name?.takeIf { it.isNotBlank() } ?: cleanName(f.nameWithoutExtension),
                 imagePath = entry?.image ?: entry?.thumbnail, desc = entry?.desc)
         }
-        dirCache[dir.absolutePath] = DirCache(dir.lastModified(), stamp, out)
+        dirCache[dir.absolutePath] = DirCache(mtime, stamp, out)
         return out
     }
 

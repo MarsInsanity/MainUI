@@ -2,7 +2,9 @@ package io.github.marsinsanity.mainui
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
@@ -68,10 +70,17 @@ class MainActivity : Activity() {
     }
 
     private fun immersive() {
-        window.setDecorFitsSystemWindows(false)
-        window.insetsController?.let {
-            it.hide(WindowInsets.Type.systemBars())
-            it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let {
+                it.hide(WindowInsets.Type.systemBars())
+                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         }
     }
 
@@ -129,7 +138,8 @@ class MainActivity : Activity() {
         resumed = true
         resumedAt = android.os.SystemClock.uptimeMillis()
         view.takeMovedControllers() // from now on: what the game behind misses
-        io.github.marsinsanity.mainui.emu.Freezer.thawAll()
+        // (Not the game this process paused on purpose: HOME inside MainUI pauses and resumes it.)
+        if (!MainUI.sessions.isParked) io.github.marsinsanity.mainui.emu.Freezer.thawAll()
         // Cores downloaded in RetroArch while MainUI was in the background.
         MainUI.worker.execute { runCatching { MainUI.emulators.refreshCoresIfStale(15_000) } }
         immersive()
@@ -157,7 +167,10 @@ class MainActivity : Activity() {
         super.onPause()
         resumed = false
         // Whatever comes next (the game, another app, the screen going off): never a frozen game.
-        Thread({ MainUI.sessions.unpark() }, "unpark").apply { isDaemon = true }.start()
+        // Once the lifecycle step is done: HOME inside MainUI pauses it only around onNewIntent.
+        window.decorView.post {
+            if (!resumed) Thread({ MainUI.sessions.unpark() }, "unpark").apply { isDaemon = true }.start()
+        }
         // Left for the game only when MainUI started or brought back the game during this visit;
         // the screen turning off or another app opened from MainUI must not end the session.
         leftForSession = MainUI.sessions.active != null && MainUI.sessions.shownAt >= resumedAt
