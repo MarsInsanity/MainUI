@@ -36,7 +36,9 @@ hakuX) carry it; MainUI's side is `app/src/main/java/.../emu/StateApi.kt`.
   release to build (upstream's newest release matching the fork's tag pattern, again when the
   patch's fingerprint in its notes is not the current one), the patch's net change applied onto
   it (or, for a release whose code it doesn't fit, the fork's `.github/mainui/stable/<tag>.patch`:
-  the patch outside `.github` with its conflicts resolved on that tag), version numbers, signing (organization secrets `MAINUI_KEYSTORE` (base64),
+  the patch outside `.github` with its conflicts resolved on that tag, first line
+  `MainUI patch <patch_id>` naming the patch it was made from: one made from an older patch is
+  refused, and a new one is built again), version numbers, signing (organization secrets `MAINUI_KEYSTORE` (base64),
   `MAINUI_KEYSTORE_PASSWORD`, `MAINUI_KEY_ALIAS`, `MAINUI_KEY_PASSWORD`) and publishing.
 
 ## Forks
