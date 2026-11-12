@@ -63,6 +63,8 @@ class OverlayService : AccessibilityService() {
     private var homeState: HomePress? = null
     /** HOME was held while the menu its press opened was still opening: run this instead. */
     private var pendingHold: String? = null
+    /** Pauses of dropped late opens, undone once the newer menu holding the game has resumed it. */
+    private val staleUnpauses = ArrayList<io.github.marsinsanity.mainui.emu.GameController>()
     private var openingSince = 0L
     /** The session the root shell and game controller were warmed up for. */
     private var warmed: Any? = null
@@ -143,7 +145,7 @@ class OverlayService : AccessibilityService() {
         updateHotkeyListener()
         runCatching {
             registerReceiver(wakeReceiver, android.content.IntentFilter().apply {
-                addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT)
+                addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT); addAction(Intent.ACTION_SCREEN_OFF)
             })
         }
         // Restarted (MainUI's process came back) with a game in front: it sends no window event
@@ -194,6 +196,11 @@ class OverlayService : AccessibilityService() {
      */
     private val wakeReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
+            // (The process popup stops apps: never left up for the lock screen.)
+            if (i.action == Intent.ACTION_SCREEN_OFF) {
+                if (overlay?.scenes()?.firstOrNull() is io.github.marsinsanity.mainui.ui.scenes.ProcessPopupScene) removeOverlay()
+                return
+            }
             for (delay in longArrayOf(700, 2500)) main.postDelayed({ recheckForeground("after ${i.action?.substringAfterLast('.')}") }, delay)
         }
     }
@@ -432,6 +439,8 @@ class OverlayService : AccessibilityService() {
                     // Its last save isn't loaded yet: saving the fresh start would overwrite it.
                     io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: ${s.name} not saved, its last save wasn't loaded yet")
                     MainUI.sessions.toast("${s.name} wasn't saved: its last save wasn't loaded yet (Load it from the menu first)")
+                } else if (MainUI.sessions.autoLoadAsking(s)) {
+                    io.github.marsinsanity.mainui.core.SessionLog.log("Game Switcher: ${s.name} not saved, its auto load is still waiting for the game")
                 } else if (c.savesToResume) {
                     if (settleMs > 0) Thread.sleep(settleMs)
                     val ok = c.saveToResume()
@@ -492,6 +501,8 @@ class OverlayService : AccessibilityService() {
                         Log.w(TAG, "late menu open $id dropped")
                         if (!opening && overlay?.scenes()?.firstOrNull() !is InGameMenuScene)
                             worker.execute { runCatching { controller.unpause() } }
+                        // (After it: a newer pause can be refused for a game already paused, Flycast's.)
+                        else staleUnpauses += controller
                         return@post
                     }
                     if (MainUI.sessions.active !== s || foregroundPackage != s.pkg) {
@@ -610,7 +621,14 @@ class OverlayService : AccessibilityService() {
         val moved = v.takeMovedControllers()
         io.github.marsinsanity.mainui.core.SessionLog.log("overlay closed" + if (moved.isEmpty()) "" else ", controller axes moved on $moved")
         runCatching { getSystemService(WindowManager::class.java).removeView(v) }
+        val menu = v.scenes().firstOrNull() as? InGameMenuScene
         v.destroy()
+        if (staleUnpauses.isNotEmpty()) {
+            val stale = staleUnpauses.toList()
+            staleUnpauses.clear()
+            // After the menu's own resume (a thaw first: a frozen app can't take a resume).
+            Thread({ menu?.awaitResumed(5000); stale.forEach { runCatching { it.unpause() } } }, "stale-unpause").apply { isDaemon = true }.start()
+        }
         handBackControllers(moved)
         // A popup over MainUI itself paused its music; MainUI stayed resumed, so nothing else restarts it.
         // (Only while MainUI's screen really is in front: not when the popup switched to another

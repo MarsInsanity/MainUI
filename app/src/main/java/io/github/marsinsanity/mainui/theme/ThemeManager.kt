@@ -141,8 +141,8 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
 
     /** Preview for the theme switcher (preview.png, or background as fallback). */
     fun preview(entry: ThemeEntry, maxW: Int = 640): Bitmap? {
-        // At most [maxW] wide: a bigger one is too big for the image cache and was decoded again every frame.
-        fun scaled(w: Int, h: Int) = BitmapFactory.Options().apply { inSampleSize = sampleSize(w, h, maxW) }
+        // Made smaller when it's big: one bigger than the image cache was decoded again every frame.
+        fun scaled(w: Int, h: Int) = BitmapFactory.Options().apply { inSampleSize = sampleSize(w, h, maxW, 16L shl 20) }
         entry.dir?.let { d ->
             for (rel in listOf("preview.png", "skin/background.png")) {
                 val f = File(d, rel)

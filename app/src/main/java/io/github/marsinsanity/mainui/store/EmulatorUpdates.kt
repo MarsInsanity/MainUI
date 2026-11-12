@@ -141,9 +141,14 @@ object EmulatorUpdates {
     }
 
     private fun find(e: EmulatorStore.Entry, pkg: String, installedName: String, code: Long, installedAt: Long): Update? {
-        // (Both installed: told apart.)
-        val name = if (pkg.endsWith(EmulatorStore.MAINUI_SUFFIX) && e.def.packages.any { it != pkg && runCatching { MainUI.app.packageManager.getPackageInfo(it, 0) }.isSuccess })
-            "${e.def.name} (MainUI)" else e.def.name
+        // (Several builds installed: told apart.)
+        fun has(p: String) = runCatching { MainUI.app.packageManager.getPackageInfo(p, 0) }.isSuccess
+        val mainui = pkg.endsWith(EmulatorStore.MAINUI_SUFFIX)
+        val name = when {
+            mainui && e.def.packages.any { it != pkg && has(it) } -> "${e.def.name} (MainUI)"
+            !mainui && e.def.packages.any { it != pkg && !it.endsWith(EmulatorStore.MAINUI_SUFFIX) && has(it) } -> "${e.def.name} ($pkg)"
+            else -> e.def.name
+        }
         // 1. A repository with the same package, signed the same way: exact build numbers.
         e.fdroid?.takeIf { it.pkg == pkg }?.let { app ->
             val apk = app.apk ?: return@let

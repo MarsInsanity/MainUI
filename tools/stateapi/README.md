@@ -31,7 +31,9 @@ hakuX) carry it; MainUI's side is `app/src/main/java/.../emu/StateApi.kt`.
 
 - `MainUIStateApi.java`: the emulator side, the same file in every fork
   (`io/github/mainui/stateapi/`); each fork adds an `Emulator` adapter (`isRunning`, `isReady`,
-  `slotCount`, `save`, `load`, `slotTime`, `pause`, `resume`) and attaches it while a game runs.
+  `slotCount`, `save`, `load`, `slotTime`, `pause`, `resume`, and where the emulator has a pause
+  of its own, `liftOwnPause` / `restoreOwnPause` around a save or load) and attaches it while a
+  game runs. `resume` lifts only a pause `pause` made: a game the user paused stays paused.
 - `ci.sh`: the forks' CI helper (`.github/mainui/ci.sh` in each): nightly upstream merge, the stable
   release to build (upstream's newest release matching the fork's tag pattern, again when the
   patch's fingerprint in its notes is not the current one), the patch's net change applied onto
