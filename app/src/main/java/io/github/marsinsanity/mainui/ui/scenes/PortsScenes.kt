@@ -198,7 +198,7 @@ class EmulatorAppsScene(host: SceneHost) : ListScene(host, "Emulators", large = 
 
     override fun activate() {
         val a = list.current?.data as? Apps.AppInfo ?: return
-        MainUI.sessions.launchApp(a.pkg, a.label, asGame = false)?.let { host.toast(it) }
+        Launch.app(host, a.pkg, a.label, asGame = false)
     }
 
     override fun onKey(b: io.github.marsinsanity.mainui.ui.Btn, repeat: Boolean): Boolean {

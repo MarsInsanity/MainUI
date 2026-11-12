@@ -30,13 +30,15 @@ object EmulatorUpdates {
         val id: String, val name: String, val pkg: String,
         val installed: String, val latest: String,
         val source: Source, val from: String,
+        /** When the installed app was last installed or updated (a rebuild keeps its version name). */
+        val at: Long = 0,
     ) {
         fun json() = JSONObject().put("id", id).put("name", name).put("pkg", pkg).put("installed", installed)
-            .put("latest", latest).put("source", source.name).put("from", from)
+            .put("latest", latest).put("source", source.name).put("from", from).put("at", at)
 
         companion object {
             fun of(o: JSONObject) = Update(o.getString("id"), o.getString("name"), o.getString("pkg"), o.optString("installed"),
-                o.optString("latest"), Source.valueOf(o.getString("source")), o.optString("from"))
+                o.optString("latest"), Source.valueOf(o.getString("source")), o.optString("from"), o.optLong("at"))
         }
     }
 
@@ -64,8 +66,12 @@ object EmulatorUpdates {
             val x = a.getOrElse(i) { 0 }; val y = b.getOrElse(i) { 0 }
             if (x != y) return x > y
         }
-        return false
+        return hotfix(latest) > hotfix(installed)
     }
+
+    /** A hotfix letter after a single number, Dolphin's: "2609" < "2609a" < "2609b". */
+    private fun hotfix(v: String) =
+        Regex("""^[vV]?\d+([a-zA-Z])(?![a-zA-Z0-9])""").find(v.trim())?.groupValues?.get(1)?.lowercase() ?: ""
 
     /**
      * A tag that is just a build number ("v12") against the installed app: its version code, or
@@ -106,7 +112,7 @@ object EmulatorUpdates {
 
     private fun checkLocked(progress: (String) -> Unit): List<Update> {
         val pm = MainUI.app.packageManager
-        val previous = known().associateBy { it.id }
+        val previous = known().associateBy { it.id + "/" + it.pkg }
         progress("Refreshing app repositories...")
         // A repository that couldn't be reached (offline at boot) makes it a failed check, retried soon.
         val repoErrors = runCatching { AppStore.refreshAll(AppStore.repos().filter { it.enabled }) {} }.getOrElse { listOf(it.message.orEmpty()) }
@@ -114,36 +120,41 @@ object EmulatorUpdates {
         var failed = if (repoErrors.isNotEmpty()) 1 else 0
         val entries = EmulatorStore.entries().filter { it.installed != null }
         for ((i, e) in entries.withIndex()) {
-            val pkg = e.installed ?: continue
             progress("Checking ${e.def.name} (${i + 1}/${entries.size})...")
-            val info = runCatching { pm.getPackageInfo(pkg, 0) }.getOrNull() ?: continue
-            val installedName = info.versionName ?: ""
-            if (installer(pkg) == "com.android.vending") continue   // Google Play updates it
-            runCatching { find(e, pkg, installedName, info.longVersionCode, info.lastUpdateTime) }
-                .onFailure {
-                    Log.w(TAG, "${e.def.name}: ${it.message}")
-                    // Releases without an APK for this device: nothing to offer, not a failed check.
-                    if (it.message?.startsWith("No APK") != true) failed++
-                    previous[e.def.id]?.let { p -> out += p }
-                }
-                .getOrNull()?.let { out += it }
+            // Each installed build: the MainUI build and the official app beside it are updated apart.
+            for (pkg in e.def.packages.distinct()) {
+                val info = runCatching { pm.getPackageInfo(pkg, 0) }.getOrNull() ?: continue
+                val installedName = info.versionName ?: ""
+                if (installer(pkg) == "com.android.vending") continue   // Google Play updates it
+                runCatching { find(e, pkg, installedName, info.longVersionCode, info.lastUpdateTime) }
+                    .onFailure {
+                        Log.w(TAG, "${e.def.name} ($pkg): ${it.message}")
+                        // Releases without an APK for this device: nothing to offer, not a failed check.
+                        if (it.message?.startsWith("No APK") != true) failed++
+                        previous[e.def.id + "/" + pkg]?.let { p -> out += p }
+                    }
+                    .getOrNull()?.let { out += it }
+            }
         }
         save(out, failed)
         return out
     }
 
     private fun find(e: EmulatorStore.Entry, pkg: String, installedName: String, code: Long, installedAt: Long): Update? {
+        // (Both installed: told apart.)
+        val name = if (pkg.endsWith(EmulatorStore.MAINUI_SUFFIX) && e.def.packages.any { it != pkg && runCatching { MainUI.app.packageManager.getPackageInfo(it, 0) }.isSuccess })
+            "${e.def.name} (MainUI)" else e.def.name
         // 1. A repository with the same package, signed the same way: exact build numbers.
         e.fdroid?.takeIf { it.pkg == pkg }?.let { app ->
             val apk = app.apk ?: return@let
             val mine = AppStore.installedSigner(pkg)
             if (apk.signer != null && mine != null && !apk.signer.equals(mine, true)) return@let
-            return if (apk.versionCode > code) Update(e.def.id, e.def.name, pkg, installedName, apk.versionName, Source.FDROID, app.repo) else null
+            return if (apk.versionCode > code) Update(e.def.id, name, pkg, installedName, apk.versionName, Source.FDROID, app.repo, installedAt) else null
         }
         // 2. RetroArch's own builds.
         if (e.buildbot && (pkg == "com.retroarch.aarch64" || pkg == "com.retroarch" || pkg == "com.retroarch.ra32")) {
             val r = EmulatorStore.latestRetroArch(pkg)
-            return if (isNewer(r.version, installedName) == true) Update(e.def.id, e.def.name, pkg, installedName, r.version, Source.RETROARCH, "retroarch.com") else null
+            return if (isNewer(r.version, installedName) == true) Update(e.def.id, name, pkg, installedName, r.version, Source.RETROARCH, "retroarch.com", installedAt) else null
         }
         // 3. GitHub releases: the MainUI build from MainUI-Android's fork, the official app from its
         // project. (Only for the package it publishes: another build listed beside it isn't updated by it.)
@@ -154,7 +165,7 @@ object EmulatorUpdates {
         val rebuilt = pkg.endsWith(EmulatorStore.MAINUI_SUFFIX) && r.version == installedName
         val newer = (if (rebuilt) null else isNewer(r.version, installedName) ?: buildNumberNewer(r.version, installedName, code))
             ?: (r.published > installedAt + 3_600_000L)
-        return if (newer) Update(e.def.id, e.def.name, pkg, installedName, r.version, Source.GITHUB, repo) else null
+        return if (newer) Update(e.def.id, name, pkg, installedName, r.version, Source.GITHUB, repo, installedAt) else null
     }
 
     private fun installer(pkg: String): String? = runCatching {
@@ -179,7 +190,7 @@ object EmulatorUpdates {
             if ((info.versionName ?: "") != u.installed || (before != null && info.lastUpdateTime != before)) synchronized(this) {
                 // Only the list: when the last check ran (and whether it failed) stays as it was.
                 MainUI.settings.prefs.edit().putString("emu_updates",
-                    JSONArray().apply { known().filter { it.id != u.id }.forEach { put(it.json()) } }.toString()).apply()
+                    JSONArray().apply { known().filter { !(it.id == u.id && it.pkg == u.pkg) }.forEach { put(it.json()) } }.toString()).apply()
             }
         }
         return msg
@@ -207,12 +218,14 @@ object EmulatorUpdates {
     /** Results from an older MainUI may have been judged by older rules: check again. */
     private fun sameBuild() = MainUI.settings.prefs.getInt("emu_updates_build", -1) == io.github.marsinsanity.mainui.BuildConfig.VERSION_CODE
 
-    /** Updates the last check found (still installed and still at the old version). */
+    /** Updates the last check found (still installed, as it was then). */
     fun known(): List<Update> = if (!sameBuild()) emptyList() else runCatching {
         val a = JSONArray(MainUI.settings.prefs.getString("emu_updates", "[]"))
         val pm = MainUI.app.packageManager
         (0 until a.length()).map { Update.of(a.getJSONObject(it)) }.filter { u ->
-            runCatching { pm.getPackageInfo(u.pkg, 0).versionName ?: "" }.getOrNull() == u.installed
+            // (Installed again since, a rebuild of the same version: done.)
+            runCatching { pm.getPackageInfo(u.pkg, 0) }.getOrNull()
+                ?.let { (it.versionName ?: "") == u.installed && (u.at == 0L || it.lastUpdateTime == u.at) } == true
         }
     }.getOrDefault(emptyList())
 

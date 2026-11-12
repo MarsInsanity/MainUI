@@ -82,7 +82,17 @@ object RomUnzip {
             if (a.isEncrypted) throw IOException("it is password protected")
             a.fileHeaders.filter { !it.isSplitBefore }
                 .map { h -> (h.fileName.replace('\\', '/') + if (h.isDirectory) "/" else "") to h.fullUnpackSize.coerceAtLeast(0) }
-        } else ZipFile(f).use { z -> z.entries().asSequence().map { it.name to it.size.coerceAtLeast(0) }.toList() }
+        } else openZip(f).use { z -> z.entries().asSequence().map { it.name to it.size.coerceAtLeast(0) }.toList() }
+
+    /** Windows' and 7-Zip's zips keep non-ASCII names in the DOS code page, without the UTF-8 flag. */
+    private fun openZip(f: File): ZipFile {
+        try {
+            val z = ZipFile(f)
+            try { z.entries().asSequence().forEach { it.name }; return z } catch (e: IllegalArgumentException) { z.close() }
+        } catch (e: java.util.zip.ZipException) {
+        }
+        return ZipFile(f, runCatching { java.nio.charset.Charset.forName("IBM437") }.getOrDefault(Charsets.ISO_8859_1))
+    }
 
     /** Whether an archive file [name] is unpacked at all (folders, Mac / hidden files and readmes aren't). */
     private fun keeps(name: String) = !name.endsWith("/") && !name.startsWith("__MACOSX/") &&
@@ -204,7 +214,7 @@ object RomUnzip {
     }
 
     private fun unpackZip(a: Archive, dir: File, t: Tally, cancelled: () -> Boolean) {
-        ZipFile(a.file).use { z ->
+        openZip(a.file).use { z ->
             // Names as listed ("\\" made "/"): some Windows tools store "Game\\Game.iso".
             val byName = z.entries().asSequence().associateBy { it.name.replace('\\', '/') }
             for (name in a.entries) {

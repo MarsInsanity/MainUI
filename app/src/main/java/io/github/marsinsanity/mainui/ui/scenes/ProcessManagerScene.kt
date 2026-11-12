@@ -70,8 +70,10 @@ class ProcessManagerScene(host: SceneHost, private val overlayMode: Boolean = fa
                             val launched = MainUI.sessions.launchedPackages.toSet()
                             val keep = io.github.marsinsanity.mainui.data.RunningApps.killable(host.hostContext, launched)
                             val game = MainUI.sessions.active?.pkg
+                            // Running ones only: stopping one that isn't drops its alarms and jobs.
+                            val running = Root.exec("ps -A -o NAME").out.lines().map { it.trim().substringBefore(':') }.toSet()
                             // (The game too when MainUI restarted since it launched it: it isn't in the list then.)
-                            (launched + listOfNotNull(game)).filter { keep(it) || it == game }.forEach { Root.forceStop(it) }
+                            (launched + listOfNotNull(game)).filter { it in running && (keep(it) || it == game) }.forEach { Root.forceStop(it) }
                             MainUI.sessions.endActive()
                         }
                     }) { reload() }

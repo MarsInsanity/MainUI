@@ -97,11 +97,11 @@ open class ListScene(
         val bottom = host.logicalHeight - Gfx.FOOTER
         val rows = maxOf(1, ((bottom - Gfx.HEADER) / itemH).toInt())
         val startY = Gfx.HEADER + ((bottom - Gfx.HEADER) - rows * itemH) / 2f
-        if (y < startY || y > bottom) {
-            if (y > bottom) { activate(); return true }
-            return false
-        }
-        val idx = list.scroll + ((y - startY) / itemH).toInt()
+        // (The footer's hints are taps of their own; the band below the last row is no row.)
+        if (y < startY || y > bottom) return false
+        val k = ((y - startY) / itemH).toInt()
+        if (k >= rows) return false
+        val idx = list.scroll + k
         if (idx !in 0 until list.size) return false
         if (idx == list.active) activate() else list.active = idx
         return true
@@ -211,7 +211,11 @@ class PopMenuScene(
     override fun onTap(x: Float, y: Float): Boolean {
         if (!panel.contains(x, y)) { close(); return true }
         val rows = minOf(list.size, 6)
-        val idx = list.scroll + ((y - panel.top - 5f) / ((panel.height() - 10f) / rows)).toInt()
+        // (The panel's own padding is no row: below the last one is a hidden item.)
+        val off = y - panel.top - 5f
+        val k = (off / ((panel.height() - 10f) / rows)).toInt()
+        if (off < 0f || k >= rows) return true
+        val idx = list.scroll + k
         if (idx !in 0 until list.size) return false
         list.active = idx
         return onKey(Btn.A, false)

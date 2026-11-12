@@ -46,9 +46,7 @@ class SettingsScene(host: SceneHost) : ListScene(host, "Settings") {
             action("Scraper", "box art & game info") { host.push(ScraperScene(host, null)) },
             action("Process manager") { host.push(ProcessManagerScene(host)) },
             action("Permissions & setup") { host.push(SetupScene(host)) },
-            action("Android settings") {
-                host.hostContext.startActivity(Intent(AndroidSettings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            },
+            action("Android settings") { openSystem(host, Intent(AndroidSettings.ACTION_SETTINGS)) },
             action("Updates", io.github.marsinsanity.mainui.store.Updater.knownAvailable().let {
                 if (it.isNotEmpty()) "$it available" else "v${BuildConfig.VERSION_NAME}"
             }) { host.push(UpdateScene(host)) },
@@ -134,8 +132,7 @@ class ControlSettingsScene(host: SceneHost) : ListScene(host, "Controls") {
         val HOME_ACTIONS = listOf("menu" to "In-game menu", "gs" to "Game Switcher", "home" to "Go to MainUI", "none" to "Nothing")
 
         fun openAccessibility(host: SceneHost) {
-            host.hostContext.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            host.toast("Enable \"MainUI in-game menu\"", 3000)
+            if (openSystem(host, Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))) host.toast("Enable \"MainUI in-game menu\"", 3000)
         }
     }
 }
@@ -250,7 +247,12 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
             host.push(DialogScene(host, "Configure RetroArch",
                 "Pause behind MainUI's menu, save every 10 s, save state on exit, keyboard hotkeys for Save / Load / Menu (F2 / F4 / F1). RetroArch will be closed.") {
                 host.toast("Configuring RetroArch...", 8000)
-                host.io({ em.configureRetroArch() }) { (ok, msg) ->
+                host.io({
+                    // (It closes RetroArch once root is there: a game running in it has ended.)
+                    em.configureRetroArch().also {
+                        if (io.github.marsinsanity.mainui.core.Root.knownAvailable() && MainUI.sessions.active?.pkg == em.raPackage) MainUI.sessions.endActive()
+                    }
+                }) { (ok, msg) ->
                     if (ok) host.toast(msg, 3000) else host.push(DialogScene(host, "Configure RetroArch", msg, "OK", null))
                 }
             })
@@ -397,30 +399,46 @@ class SetupScene(host: SceneHost) : ListScene(host, "Setup") {
         val rootKnown = Root.knownAvailable()
         val writeOk = AndroidSettings.System.canWrite(ctx)
         list.set(listOf(
-            UiItem("All files access", ItemType.ACTION, sub = if (storageOk) "OK" else "REQUIRED", onSelect = {
-                if (Build.VERSION.SDK_INT >= 30) ctx.startActivity(Intent(AndroidSettings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }),
+            UiItem("All files access", ItemType.ACTION, sub = if (storageOk) "OK" else "REQUIRED", onSelect = { requestStorage() }),
             UiItem("Set MainUI as home app", sub = if (launcherOk) "OK" else "recommended", onSelect = {
-                ctx.startActivity(Intent(AndroidSettings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                openSystem(host, Intent(AndroidSettings.ACTION_HOME_SETTINGS))
             }),
             UiItem("In-game menu overlay", sub = if (overlayOk) "OK" else "recommended", onSelect = { ControlSettingsScene.openAccessibility(host) }),
             UiItem("Root (Magisk)", sub = if (rootKnown) "OK" else "tap to request", onSelect = {
-                host.io({ Root.available() }) { ok ->
+                host.io({ Root.available(recheck = true) }) { ok ->
                     host.toast(if (ok) "Root granted" else "Root not available"); build()
                     if (ok) MainUI.worker.execute { MainUI.emulators.refresh() }
                 }
             }),
             UiItem("Brightness control", sub = if (writeOk || rootKnown) "OK" else "optional", onSelect = {
-                ctx.startActivity(Intent(AndroidSettings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                openSystem(host, Intent(AndroidSettings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${ctx.packageName}")),
+                    Intent(AndroidSettings.ACTION_MANAGE_WRITE_SETTINGS))
             }),
             UiItem("Notifications (scraper progress)", sub = "optional", onSelect = {
-                ctx.startActivity(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS)
-                    .putExtra(AndroidSettings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                openSystem(host, Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(AndroidSettings.EXTRA_APP_PACKAGE, ctx.packageName))
             }),
             UiItem("Continue", onSelect = { back() }),
         ))
+    }
+
+    private fun requestStorage() {
+        val ctx = host.hostContext
+        if (Build.VERSION.SDK_INT >= 30) {
+            openSystem(host, Intent(AndroidSettings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${ctx.packageName}")),
+                Intent(AndroidSettings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            return
+        }
+        // Android 10: the storage permissions. Refused for good ("don't ask again"): only App info can grant them.
+        val activity = ctx as? android.app.Activity ?: MainActivity.instance ?: return
+        val asked = MainUI.settings.prefs.getBoolean("storage_asked", false)
+        if (asked && io.github.marsinsanity.mainui.core.Storage.STORAGE_PERMISSIONS.none { activity.shouldShowRequestPermissionRationale(it) }) {
+            openSystem(host, Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")))
+            host.toast("Permissions > Storage: Allow", 3000)
+            return
+        }
+        MainUI.settings.prefs.edit().putBoolean("storage_asked", true).apply()
+        activity.requestPermissions(io.github.marsinsanity.mainui.core.Storage.STORAGE_PERMISSIONS, 1)
     }
 
     private fun isDefaultLauncher(): Boolean {
@@ -437,4 +455,11 @@ class SetupScene(host: SceneHost) : ListScene(host, "Setup") {
         MainUI.reloadStorage()
         close()
     }
+}
+
+/** Opens the first of [intents] the device has (firmwares lack some settings screens), else says so. */
+internal fun openSystem(host: SceneHost, vararg intents: Intent): Boolean {
+    for (i in intents) if (runCatching { host.hostContext.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return true
+    host.toast("Not available on this device")
+    return false
 }

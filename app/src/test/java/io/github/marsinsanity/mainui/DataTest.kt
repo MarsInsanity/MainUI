@@ -594,6 +594,23 @@ class EmulatorUpdatesTest {
         assertEquals(true, u.isNewer("2125.0", "2124.1"))
     }
 
+    @Test fun dolphinHotfixLetters() {
+        assertEquals(true, u.isNewer("2609b-mainui", "2609a-mainui"))
+        assertEquals(true, u.isNewer("2609a-mainui", "2609-mainui"))
+        assertEquals(false, u.isNewer("2609-mainui", "2609a-mainui"))
+        assertEquals(false, u.isNewer("2609b", "2609b"))
+        assertEquals(true, u.isNewer("2612", "2609b"))
+        assertEquals(false, u.isNewer("v1.20.4", "1.20.4-beta"))
+    }
+
+    @Test fun imagesAreDecodedSmallEnough() {
+        val s: (Int, Int, Int, Long) -> Int = { w, h, m, b -> io.github.marsinsanity.mainui.theme.sampleSize(w, h, m, b) }
+        assertEquals(1, s(640, 480, 0, 64L shl 20))
+        assertEquals(2, s(8160, 6120, 0, 64L shl 20))  // a 50 MP photo: 190 MB -> 48 MB
+        assertEquals(8, s(4096, 3072, 640, 64L shl 20))
+        assertEquals(1, s(-1, -1, 640, 64L shl 20))      // bounds unknown
+    }
+
     @Test fun ignoresGitHashesButNotBuildNumbers() {
         assertEquals(listOf(0L, 2, 0, 3600), u.numbers("0.2.0-3600-g1f2e3d4"))
         assertEquals(true, u.isNewer("v0.2.0-3611", "0.2.0-3600-g1f2e3d4"))

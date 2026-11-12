@@ -191,7 +191,7 @@ object Scraper {
                         try {
                             val r = scrapeGame(if (ssOff.get()) null else ssApi, freeArt, sys, game, gamelists, dats, limiter, breaker)
                             when (r) {
-                                Result.FOUND -> st.found.incrementAndGet()
+                                Result.FOUND, Result.INFO_ONLY -> st.found.incrementAndGet()
                                 Result.NOT_FOUND -> { st.missing.incrementAndGet(); st.addLog("Not found: ${game.name}") }
                                 Result.SKIPPED -> st.skipped.incrementAndGet()
                             }
@@ -272,12 +272,14 @@ object Scraper {
         }
     }
 
-    enum class Result { FOUND, NOT_FOUND, SKIPPED }
+    /** [INFO_ONLY]: game info written, no image. */
+    enum class Result { FOUND, INFO_ONLY, NOT_FOUND, SKIPPED }
 
     private fun scrapeGame(api: ScreenScraper?, freeArt: FreeArt.Session, sys: GameSystem, game: Game,
                            gamelists: ConcurrentHashMap<String, GameListXml>, dats: ConcurrentHashMap<String, LogiqxDat>,
                            limiter: RateLimiter, breaker: SsBreaker): Result {
         val file = game.file ?: return Result.SKIPPED
+        if (!file.exists()) return Result.SKIPPED // deleted while queued
         val ssId = sys.def.screenscraperId
         val hashes = if (api != null && ssId != null) runCatching { Hashes.of(file) }.getOrNull() else null
         var info: ScreenScraper.GameInfo? = null
@@ -375,7 +377,11 @@ object Scraper {
             }
         }
         // (Metadata only counts when some is written: not with "Images only".)
-        return if (imageRel != null || (info?.name != null && format != "none")) Result.FOUND else Result.NOT_FOUND
+        return when {
+            imageRel != null -> Result.FOUND
+            info?.name != null && format != "none" -> Result.INFO_ONLY
+            else -> Result.NOT_FOUND
+        }
     }
 
     /** "1991-07-23" / "1991" -> "19910723T000000" (EmulationStation format). */
@@ -419,7 +425,11 @@ object Scraper {
             )
             val note = (if (r != Result.FOUND && notYet.isNotEmpty()) " (${notYet.joinToString(" / ")} not downloaded yet: scrape the system once)" else "") +
                 if (unsaved.isEmpty()) "" else " (${unsaved.size} metadata file${if (unsaved.size > 1) "s" else ""} left unchanged: couldn't be read)"
-            if (r == Result.FOUND) "Artwork updated$note" else "No box art found for this game$note"
+            when (r) {
+                Result.FOUND -> "Artwork updated$note"
+                Result.INFO_ONLY -> "Game info updated, no box art found$note"
+                else -> "No box art found for this game$note"
+            }
         } catch (e: ScreenScraper.ApiException) {
             "ScreenScraper: ${describe(e)}"
         } catch (e: Exception) {

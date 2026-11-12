@@ -66,8 +66,7 @@ object HomeScenes {
     fun openRetroArch(host: SceneHost) {
         val pkg = MainUI.emulators.raPackage
         if (pkg == null) { host.toast("RetroArch is not installed"); return }
-        val err = MainUI.sessions.launchApp(pkg, "RetroArch", asGame = false)
-        if (err != null) host.toast(err)
+        Launch.app(host, pkg, "RetroArch", asGame = false)
     }
 
     /** Tiles for the systems grid / row: Search, Android, then every system with games. */
@@ -176,7 +175,7 @@ object HomeScenes {
         host.io({
             if (MainUI.settings.showAndroidSystem) androidCount = runCatching { MainUI.apps.androidGames().size }.getOrDefault(androidCount)
             val list = MainUI.games.systems(MainUI.settings.showUnknownFolders, refresh)
-            list.filter { it.gameCount < 0 || refresh }.forEach { MainUI.games.countGames(it) }
+            list.filter { it.gameCount < 0 || refresh }.forEach { runCatching { MainUI.games.countGames(it) } } // (one unreadable system never blanks the others)
             list
         }, done)
     }
@@ -507,7 +506,7 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
         if (c !in 0 until cols || r !in 0 until rows) return false
         val idx = (index / (cols * rows)) * cols * rows + r * cols + c
         if (idx >= tiles.size) return false
-        if (idx == index) tiles[idx].open() else index = idx
+        if (idx == index) tiles[idx].open() else { index = idx; MainUI.settings.systemsIndex = index }
         return true
     }
 }
@@ -610,7 +609,7 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
         if (tiles.isEmpty()) { if (b == Btn.B && !home) { close(); return true }; return false }
-        if (early) movedEarly = true
+        val before = index
         val vis = visible(host.logicalWidth)
         when (b) {
             Btn.LEFT -> if (index > 0) index-- else if (!repeat) index = tiles.size - 1 else return false
@@ -625,6 +624,8 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
             Btn.START -> if (!repeat) { host.toast("Rescanning..."); reload(true) }
             else -> return false
         }
+        // (Only a real move: MENU, Y... while systems load keep the remembered tile.)
+        if (early && index != before) movedEarly = true
         if (!early) { if (home) MainUI.settings.mainMenuIndex = index else MainUI.settings.systemsIndex = index }
         return true
     }
@@ -634,11 +635,12 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
     /** Dragging the row moves the selection a cell at a time. */
     override fun onDrag(dx: Float, dy: Float): Boolean {
         if (dragAcc == 0f && kotlin.math.abs(dy) > kotlin.math.abs(dx)) return false
-        if (early) movedEarly = true
+        val before = index
         val step = (if (strip != null) TileStrip.TILE_W else HomeScenes.CELL_W) / 2
         dragAcc += dx
         while (dragAcc <= -step) { if (index < tiles.size - 1) index++; dragAcc += step }
         while (dragAcc >= step) { if (index > 0) index--; dragAcc -= step }
+        if (early && index != before) movedEarly = true
         return true
     }
 
@@ -647,12 +649,11 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
 
     override fun onTap(x: Float, y: Float): Boolean {
         if (tiles.isEmpty()) return false
-        if (early) movedEarly = true
         // (The window as it is for the current tiles: they may have changed since the last frame.)
         if (strip != null) {
             strip.follow(index, tiles.size)
             val idx = strip.hit(x, y, host.logicalWidth, host.logicalHeight, tiles.size) ?: return false
-            if (idx == index) tiles[idx].open() else { index = idx; MainUI.settings.systemsIndex = index }
+            if (idx == index) tiles[idx].open() else { index = idx; if (early) movedEarly = true; MainUI.settings.systemsIndex = index }
             return true
         }
         val vis = visible(host.logicalWidth)
@@ -665,7 +666,7 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
         if (c !in 0 until count) return false
         val idx = first + c
         if (idx !in tiles.indices) return false
-        if (idx == index) tiles[idx].open() else index = idx
+        if (idx == index) tiles[idx].open() else { index = idx; if (early) movedEarly = true }
         if (!early) { if (home) MainUI.settings.mainMenuIndex = index else MainUI.settings.systemsIndex = index }
         return true
     }

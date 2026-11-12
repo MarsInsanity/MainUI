@@ -343,7 +343,8 @@ the ROMs folder (`roms`), so give the emulator that one.
 
 1. An accessibility service watches which app is in front. Only while a game MainUI launched is
    in front does it consume the Home key. Everywhere else Home behaves normally.
-2. **The game is paused first**: standalone emulators by freezing their process with `SIGSTOP`
+2. **The game is paused first**: MainUI builds of emulators with their own pause (State API 2,
+   no root), other standalone emulators by freezing their process with `SIGSTOP`
    (root). RetroArch is never frozen (a frozen RetroArch could be left without sound): it pauses itself
    when MainUI's menu takes focus (`pause_nonactive`), and builds with network commands get
    `PAUSE_TOGGLE`. Then the paused frame is captured and the menu is
@@ -358,14 +359,15 @@ the ROMs folder (`roms`), so give the emulator that one.
    service stopping) resumes the game. **Behind MainUI's own screen** (the Game Switcher, MainUI's
    menus) a standalone emulator's game is paused the same way: emulators like ARMSX2 keep playing
    in the background, sound and all, since Android only tells them they're not in front. It is
-   frozen 0.8 s after MainUI's screen appears (once the emulator has taken in that it's in the
-   background, and after the Game Switcher's save) and thawed before it is brought back, before
+   paused 0.8 s after MainUI's screen appears (once the emulator has taken in that it's in the
+   background, and after the Game Switcher's save) and resumed before it is brought back, before
    any other game or app is started, when the session ends, and whenever MainUI's screen goes
    (another app, the screen turning off). RetroArch pauses itself; Android games are left alone.
-   Follows the *Freeze standalone emulators (root)* setting like the menu does. The frozen package is also remembered on disk and thawed when
-   MainUI or the service starts, so a crash can't leave a game frozen.
+   Freezing follows the *Freeze standalone emulators (root)* setting like the menu does. The paused package is also remembered on disk and resumed when
+   MainUI or the service starts, so a crash can't leave a game paused.
 4. *Native Menu* opens the emulator's own menu (Back, or `MENU_TOGGLE` where RetroArch has commands).
-   *Exit Game* force stops the emulator with root (RetroArch flushes SRAM saves every 10 s once
+   *Exit Game* force stops the emulator with root (without root, Android 14 and later don't let
+   MainUI stop it: it says so, and the emulator is closed from Recents) (RetroArch flushes SRAM saves every 10 s once
    configured), after an auto save via its hotkey if it has one (the menu closes first so the key
    reaches the running game).
 

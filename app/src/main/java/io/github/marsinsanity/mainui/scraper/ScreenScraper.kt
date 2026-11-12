@@ -140,7 +140,7 @@ class ScreenScraper(
     }
 
     fun download(media: Media, dest: File, maxWidth: Int) {
-        val url = media.url + if (maxWidth > 0) "&maxwidth=$maxWidth&maxheight=$maxWidth" else ""
+        val url = media.url + if (maxWidth > 0) "&maxwidth=$maxWidth" else ""
         val c = (URL(url).openConnection() as HttpURLConnection).apply { connectTimeout = 15000; readTimeout = 60000 }
         try {
             if (c.responseCode !in 200..299) throw ApiException(c.responseCode, "media HTTP ${c.responseCode}")

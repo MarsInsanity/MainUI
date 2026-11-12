@@ -69,6 +69,7 @@ class App : Application() {
         MainUI.themes.reloadSounds() // (music starts when MainActivity resumes, not behind a game)
 
         io.github.marsinsanity.mainui.emu.Freezer.thawAll()
+        io.github.marsinsanity.mainui.emu.ApiPauses.resumeLeftover()
         // Root first (MainUI is made for rooted handhelds): the root shell and the virtual
         // keyboard are ready before the first game, so its first Save / Load doesn't wait ~1 s
         // for them, and RetroArch can see the keyboard from the start.

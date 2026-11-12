@@ -376,7 +376,7 @@ class OverlayService : AccessibilityService() {
         when (event.action) {
             KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) {
                 main.removeCallbacks(backHold)
-                if (MainUI.settings.backHold == "processes" && overlay == null && !opening)
+                if (MainUI.settings.backHold == "processes" && overlay == null && !opening && !locked())
                     main.postDelayed(backHold, MainUI.settings.homeHoldMs.toLong().coerceIn(200, 3000))
             }
             else -> main.removeCallbacks(backHold)
@@ -487,9 +487,11 @@ class OverlayService : AccessibilityService() {
                 main.post {
                     if (id != openId) {
                         // Given up on (too slow) and opened again since: this open shows nothing,
-                        // and its pause is undone (a stale thaw is ignored if the newer one froze).
+                        // and its pause is undone unless a newer menu holds the game paused (a
+                        // stale thaw is ignored if the newer one froze; a resume isn't).
                         Log.w(TAG, "late menu open $id dropped")
-                        worker.execute { runCatching { controller.unpause() } }
+                        if (!opening && overlay?.scenes()?.firstOrNull() !is InGameMenuScene)
+                            worker.execute { runCatching { controller.unpause() } }
                         return@post
                     }
                     if (MainUI.sessions.active !== s || foregroundPackage != s.pkg) {
@@ -506,6 +508,8 @@ class OverlayService : AccessibilityService() {
                     if (hold != null) {
                         // HOME was held while the menu opened: the hold action instead of the menu.
                         Log.d(TAG, "menu replaced by $hold")
+                        // (HOME again before the Game Switcher's save is done must not open the menu.)
+                        if (hold == "gs") markLeaving()
                         worker.execute {
                             if (bmp != null) runCatching { MainUI.sessions.saveScreenshot(s.gameKey, bmp) }
                             runCatching { controller.unpause() }
@@ -637,7 +641,8 @@ class OverlayService : AccessibilityService() {
 
     /** The process manager as a popup over whatever is in front (Back held). */
     fun showProcesses() {
-        if (overlay != null || opening) return
+        // (Never over the lock screen: it stops apps.)
+        if (overlay != null || opening || locked()) return
         addOverlay(translucent = true) { view -> io.github.marsinsanity.mainui.ui.scenes.ProcessPopupScene(view) }
     }
 

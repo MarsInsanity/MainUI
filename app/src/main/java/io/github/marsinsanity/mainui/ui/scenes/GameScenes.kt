@@ -56,7 +56,8 @@ internal object GameItems {
     fun options(host: SceneHost, g: Game, extra: List<UiItem> = emptyList(), onChanged: () -> Unit = {}) {
         // A port whose app isn't known yet (from Recents after a restart): its file read off the UI thread first.
         if (AndroidPorts.isPort(g.file) && AndroidPorts.knownPackage(g.file) == null) {
-            host.io({ runCatching { AndroidPorts.packageOf(g.file!!) } }) { optionsNow(host, g, extra, onChanged) }
+            val caller = host.top()
+            host.io({ runCatching { AndroidPorts.packageOf(g.file!!) } }) { if (host.top() === caller) optionsNow(host, g, extra, onChanged) }
             return
         }
         optionsNow(host, g, extra, onChanged)
@@ -116,8 +117,12 @@ internal object GameItems {
     private fun confirmDelete(host: SceneHost, g: Game, onChanged: () -> Unit) {
         val file = g.file ?: return
         if (MainUI.sessions.active?.gameKey == g.key) { host.toast("${g.name} is running: exit it first", 2500); return }
+        // A running scrape keeps its own copy of the gamelists and would write the entry back.
+        if (io.github.marsinsanity.mainui.scraper.ScrapeState.running) { host.toast("The scraper is running: delete ${g.name} when it is done", 2500); return }
         val sys = Launch.gameSystem(g.systemId)
+        val caller = host.top()
         host.io({ RomFiles.related(file, sys?.def?.unzip.orEmpty()) }) { files ->
+            if (host.top() !== caller) return@io // left the list meanwhile
             // Also when the running game is one of its files (the image a zip was unpacked to, a disc of an .m3u).
             val running = MainUI.sessions.active?.path
             if (running != null && files.any { it.absolutePath == running || running.startsWith(it.absolutePath + "/") }) {
@@ -150,8 +155,10 @@ internal object GameItems {
         val failed = RomFiles.delete(files)
         if (file.exists()) return failed
         // Kept while another rom of the same name still uses it (Game.chd beside the deleted Game.cue).
-        val stillUsed = file.parentFile?.listFiles()?.any { it.isFile && it.nameWithoutExtension.equals(file.nameWithoutExtension, true) &&
-            sys?.def?.accepts(it) == true } == true
+        // (On every volume: the art is found in the same folder of the other one too.)
+        val stillUsed = file.parentFile?.let { MainUI.storage.mirrors(it) }.orEmpty().any { d ->
+            d.listFiles()?.any { it.isFile && it.nameWithoutExtension.equals(file.nameWithoutExtension, true) && sys?.def?.accepts(it) == true } == true
+        }
         if (!stillUsed) art?.delete()
         if (sys != null) runCatching {
             val gl = GameListXml(MainUI.games.systemRootFor(sys, file.parentFile ?: file)).load()
@@ -258,7 +265,8 @@ class GameListScene(host: SceneHost, private var sys: GameSystem, private val di
                 if (repeat || game == null || game.isFolder) return true
                 val now = MainUI.library.toggleFavorite(game)
                 host.toast(if (now) "Added to favorites" else "Removed from favorites")
-                list.current?.icon = GameItems.icon(game)
+                // (A menu entry like Splore has its emulator's icon when it isn't a favorite.)
+                if (game.key in menuKeys) reload() else list.current?.icon = GameItems.icon(game)
                 return true
             }
             Btn.SELECT -> { if (!repeat && game != null && !game.isFolder && game.key !in menuKeys) GameItems.options(host, game) { reload() }; return true }
@@ -446,10 +454,12 @@ class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val g
     override fun onEnter() {
         build()
         // Pick up cores added in RetroArch since the last scan.
-        host.io({ MainUI.emulators.refreshCoresIfStale(3000) }) { build() }
+        host.io({ MainUI.emulators.refreshCoresIfStale(3000) }) { build(keep = true) }
     }
 
-    private fun build() {
+    /** [keep]: the highlighted row stays (a rescan finishing, back from a dialog). */
+    private fun build(keep: Boolean = false) {
+        val was = list.current?.data.let { if (it === DEFAULT) DEFAULT else (it as? io.github.marsinsanity.mainui.emu.EmuOption)?.ref }
         val current = if (game != null) MainUI.library.coreForGame(game.key) else MainUI.library.coreForSystem(def.id)
         // "Default": a game follows its system's core, a system the recommended (dArkOS) one.
         val auto = if (game != null) MainUI.emulators.choose(def, game, gameOverride = false)
@@ -465,10 +475,11 @@ class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val g
                 disabled = o.installed == false && !canGet, data = o)
         }
         list.set(items, false)
-        list.active = list.items.indexOfFirst { it.value == 1 }.coerceAtLeast(0)
+        val kept = if (keep && was != null) list.items.indexOfFirst { it.data === was || (it.data as? io.github.marsinsanity.mainui.emu.EmuOption)?.ref == was } else -1
+        list.active = if (kept >= 0) kept else list.items.indexOfFirst { it.value == 1 }.coerceAtLeast(0)
     }
 
-    override fun onResume() = build()
+    override fun onResume() = build(keep = true)
 
     override fun activate() {
         if (list.current?.data === DEFAULT) { reset(); return }

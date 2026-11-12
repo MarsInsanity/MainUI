@@ -189,6 +189,32 @@ object Freezer {
 }
 
 /**
+ * The game MainUI paused through the State API, kept like [Freezer]'s freeze: a MainUI process
+ * that dies with its menu open resumes it when it starts again.
+ */
+object ApiPauses {
+    private const val PREF = "api_paused_pkg"
+
+    fun paused(pkg: String) {
+        MainUI.settings.prefs.edit().putString(PREF, pkg).putLong("${PREF}_at", System.currentTimeMillis()).apply()
+    }
+
+    fun resumed(pkg: String) {
+        if (MainUI.settings.prefs.getString(PREF, null) == pkg) MainUI.settings.prefs.edit().remove(PREF).apply()
+    }
+
+    /** At MainUI's start: resumes what a previous MainUI process left paused in this boot. */
+    fun resumeLeftover() {
+        val p = MainUI.settings.prefs
+        val pkg = p.getString(PREF, null) ?: return
+        p.edit().remove(PREF).apply()
+        val boot = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()
+        if (p.getLong("${PREF}_at", 0) < boot) return
+        Thread({ StateApi.call(pkg, "resume", timeoutMs = 5000) }, "api-resume").apply { isDaemon = true }.start()
+    }
+}
+
+/**
  * RetroArch. Official Android builds of RetroArch do **not** include the
  * network command interface (verified on 1.22.2: no PAUSE_TOGGLE / GET_STATUS
  * handlers compiled in), and keyboard hotkeys injected from outside did not
@@ -598,13 +624,21 @@ class StandaloneController(
 
     /** Paused through the State API (version 2): the emulator's own pause, not a freeze. */
     @Volatile private var apiPaused = false
+    /** A pause that didn't answer in time: it still takes effect once the emulator gets to it. */
+    @Volatile private var resumeOwed = false
 
     override fun pause(): Boolean {
         // A MainUI build pauses the way its own menu does: frozen apps can come back without sound.
-        if (apiVersion >= 2 && StateApi.call(pkg, "pause", timeoutMs = 2000).ok) {
-            apiPaused = true
-            frozen = false
-            return true
+        if (apiVersion >= 2) {
+            val r = StateApi.call(pkg, "pause", timeoutMs = 2000)
+            if (r.ok) {
+                apiPaused = true
+                frozen = false
+                ApiPauses.paused(pkg)
+                return true
+            }
+            // Not frozen with the broadcast still on its way: Android would count it as not responding.
+            if (r.extras == null) { resumeOwed = true; frozen = false; return false }
         }
         frozen = MainUI.settings.freezeStandalone && Freezer.freeze(pkg, def?.freezeOnly)
         frozenGen = Freezer.generation
@@ -614,13 +648,20 @@ class StandaloneController(
     override fun settle() { if (frozen) Freezer.settle(pkg, frozenGen) }
 
     override fun unpause() {
-        if (apiPaused) {
-            apiPaused = false
-            StateApi.call(pkg, "resume", timeoutMs = 2000)
-        }
+        // Thawed first: a frozen app can't take the resume.
         if (frozen) Freezer.thaw(pkg, frozenGen)
         frozen = false
+        if (apiPaused || resumeOwed) {
+            apiPaused = false
+            resumeOwed = false
+            StateApi.call(pkg, "resume", timeoutMs = 2000)
+            ApiPauses.resumed(pkg)
+        }
     }
+
+    /** The State API says no game is running (the emulator at its own game list): nothing to save. */
+    private fun noGame(): Boolean =
+        StateApi.call(pkg, "status", timeoutMs = 3000).let { it.ok && it.extras?.getBoolean("running", true) == false }
 
     override fun save(slot: Int): Boolean {
         if (direct) {
@@ -645,7 +686,10 @@ class StandaloneController(
     }
 
     /** State API: MainUI's own resume state, apart from the user's slots. */
-    override fun saveToResume(): Boolean = save(if (direct) StateApi.RESUME_SLOT else 0)
+    override fun saveToResume(): Boolean {
+        if (direct && noGame()) { saveProblem = null; return true }
+        return save(if (direct) StateApi.RESUME_SLOT else 0)
+    }
 
     override fun openNativeMenu(): Boolean {
         val m = def?.menu ?: "back"
@@ -667,7 +711,7 @@ class StandaloneController(
             unpause()
             // Not stopped without its save: false with saveProblem set, the game keeps running.
             // (The answer comes once the state is written: nothing to wait for after.)
-            if (!save(StateApi.RESUME_SLOT)) return false
+            if (!noGame() && !save(StateApi.RESUME_SLOT)) return false
             return Root.forceStop(pkg)
         }
         if (autoSave && states == StateSupport.HOTKEY && saveSpec != null) {

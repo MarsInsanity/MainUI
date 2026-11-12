@@ -435,13 +435,8 @@ class InGameMenuScene(
                 main.post { ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 if (!ok) {
                     Log.w("MainUI.InGame", "exit: could not stop ${session.pkg}")
-                    // No root (a MainUI build saves without it): once MainUI is in front the
-                    // emulator is a background process, which the normal permission may kill.
-                    val kill = Runnable {
-                        runCatching { ctx.getSystemService(ActivityManager::class.java).killBackgroundProcesses(session.pkg) }
-                    }
-                    main.postDelayed(kill, 800)
-                    main.postDelayed(kill, 3000)
+                    // No root (a MainUI build saves without it).
+                    killInBackground(ctx)
                 }
             }
             return
@@ -461,15 +456,27 @@ class InGameMenuScene(
                 host.finishHost()
             } else close()
             if (!ok) {
-                // No root: thaw if needed; once MainUI is in front the emulator is a
-                // background process that may be killed with the normal permission.
+                // No root: thaw if needed.
                 Thread { runCatching { controller.unpause() } }.start()
-                val kill = Runnable {
-                    runCatching { ctx.getSystemService(ActivityManager::class.java).killBackgroundProcesses(session.pkg) }
-                }
-                main.postDelayed(kill, 800)
-                main.postDelayed(kill, 3000)
+                killInBackground(ctx)
             }
         }
+    }
+
+    /**
+     * The emulator couldn't be stopped (no root). Once MainUI is in front it is a background
+     * process, which the normal permission may kill; not on Android 14+, which lets an app stop
+     * only its own processes: the user hears that it still runs.
+     */
+    private fun killInBackground(ctx: android.content.Context) {
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            MainUI.sessions.toast("${session.name} is still running: without root, Android doesn't let MainUI close it (close it from Recents)")
+            return
+        }
+        val kill = Runnable {
+            runCatching { ctx.getSystemService(ActivityManager::class.java).killBackgroundProcesses(session.pkg) }
+        }
+        main.postDelayed(kill, 800)
+        main.postDelayed(kill, 3000)
     }
 }

@@ -179,6 +179,10 @@ class LogiqxDat(val file: File) : MetaLookup {
         } catch (e: Exception) {
             parseError = e.message ?: e.javaClass.simpleName
             runCatching { android.util.Log.w("MainUI.Logiqx", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
+        } catch (e: OutOfMemoryError) {
+            // A full arcade set's DAT: unreadable, and remembered as such (not read again for every game).
+            games.clear(); byFile.clear(); byName.clear(); byCrc.clear()
+            parseError = "too big to read"
         }
         return this
     }

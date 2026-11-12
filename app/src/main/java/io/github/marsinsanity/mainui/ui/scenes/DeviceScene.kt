@@ -40,7 +40,10 @@ class DeviceScene(host: SceneHost) : ListScene(host, "Device") {
         val auto = runCatching { AndroidSettings.System.getInt(cr, AndroidSettings.System.SCREEN_BRIGHTNESS_MODE) == 1 }.getOrDefault(false)
         val autoItem = toggle("Auto brightness", { auto }) { on -> putSystem(AndroidSettings.System.SCREEN_BRIGHTNESS_MODE, if (on) 1 else 0) }
         // (Setting a level turns auto brightness off: the toggle says so at once.)
-        items += multi("Brightness", levels, { Brightness.get(ctx).coerceAtLeast(1).toString() }) { Brightness.set(ctx, it.toInt()); autoItem.value = 0 }
+        items += multi("Brightness", levels, { Brightness.get(ctx).coerceAtLeast(1).toString() }) {
+            if (canWrite() || root()) { Brightness.set(ctx, it.toInt()); autoItem.value = 0 }
+            else { host.toast("Allow MainUI to change system settings first (last row)"); build() }
+        }
             .apply { wrap = false } // scales stop at their ends: never 10% -> 100% (or Muted -> full) in one press
         items += autoItem
 

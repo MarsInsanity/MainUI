@@ -53,8 +53,7 @@ class AppsScene(host: SceneHost) : ListScene(host, "Apps", large = true) {
     }
 
     private fun appItem(a: Apps.AppInfo) = UiItem(a.label, icon = { MainUI.apps.icon(a.pkg, 96) }, data = a, onSelect = {
-        val err = MainUI.sessions.launchApp(a.pkg, a.label, asGame = false)
-        if (err != null) host.toast(err)
+        Launch.app(host, a.pkg, a.label, asGame = false)
     })
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
@@ -74,9 +73,13 @@ class AppsScene(host: SceneHost) : ListScene(host, "Apps", large = true) {
             val hidden = MainUI.library.isHidden(a.pkg)
             val isGame = MainUI.library.isAndroidGame(a.pkg)
             host.push(PopMenuScene(host, a.label, listOf(
-                UiItem(if (hidden) "Unhide" else "Hide", onSelect = { MainUI.library.setHidden(a.pkg, !hidden); changed() }),
+                // (Hidden and Android game exclude each other, like the Android list's own Hide.)
+                UiItem(if (hidden) "Unhide" else "Hide", onSelect = {
+                    MainUI.library.setHidden(a.pkg, !hidden); if (!hidden) MainUI.library.setAndroidGame(a.pkg, false); changed()
+                }),
                 UiItem(if (isGame) "Remove from Android games" else "Move to Android games", onSelect = {
                     MainUI.library.setAndroidGame(a.pkg, !isGame)
+                    if (!isGame) MainUI.library.setHidden(a.pkg, false)
                     host.toast(if (isGame) "Moved to Apps" else "Moved to Games > Android"); changed()
                 }),
                 // An unofficial port (an Android build of a PC game): Games > Ports, a file in the ports folder.
@@ -87,13 +90,9 @@ class AppsScene(host: SceneHost) : ListScene(host, "Apps", large = true) {
                     host.toast("${a.label} moved to Emulators"); changed()
                 }),
                 UiItem("App info", onSelect = {
-                    host.hostContext.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${a.pkg}"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    openSystem(host, Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${a.pkg}")))
                 }),
-                UiItem("Uninstall", onSelect = {
-                    host.hostContext.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${a.pkg}"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }),
+                UiItem("Uninstall", onSelect = { openSystem(host, Intent(Intent.ACTION_DELETE, Uri.parse("package:${a.pkg}"))) }),
             )))
         }
     }
@@ -120,8 +119,7 @@ class HiddenAppsScene(host: SceneHost) : ListScene(host, "Hidden apps", large = 
             if (apps.isEmpty()) items += UiItem("No hidden apps. Press Y on an app in Apps to hide it.", disabled = true)
             items += apps.map { a ->
                 UiItem(a.label, icon = { MainUI.apps.icon(a.pkg, 96) }, data = a, onSelect = {
-                    val err = MainUI.sessions.launchApp(a.pkg, a.label, asGame = false)
-                    if (err != null) host.toast(err)
+                    Launch.app(host, a.pkg, a.label, asGame = false)
                 })
             }
             list.set(items)
@@ -149,7 +147,11 @@ class AppVisibilityScene(host: SceneHost) : ListScene(host, "Edit hidden apps", 
                 UiItem(a.label, io.github.marsinsanity.mainui.ui.ItemType.TOGGLE, icon = { MainUI.apps.icon(a.pkg, 96) },
                     value = if (MainUI.library.isHidden(a.pkg)) 0 else 1, data = a,
                     sub = if (a.pkg in ports) "port" else if (MainUI.library.isAndroidGame(a.pkg)) "game" else null,
-                    onChange = { item -> MainUI.library.setHidden(a.pkg, item.value == 0) })
+                    onChange = { item ->
+                        val hide = item.value == 0
+                        MainUI.library.setHidden(a.pkg, hide)
+                        if (hide) MainUI.library.setAndroidGame(a.pkg, false)
+                    })
             })
         }
     }
