@@ -607,7 +607,9 @@ class EmulatorUpdatesTest {
         val s: (Int, Int, Int, Long) -> Int = { w, h, m, b -> io.github.marsinsanity.mainui.theme.sampleSize(w, h, m, b) }
         assertEquals(1, s(640, 480, 0, 64L shl 20))
         assertEquals(2, s(8160, 6120, 0, 64L shl 20))  // a 50 MP photo: 190 MB -> 48 MB
-        assertEquals(8, s(4096, 3072, 640, 64L shl 20))
+        assertEquals(4, s(4096, 3072, 640, 64L shl 20))   // 1024x768, never below 640
+        assertEquals(1, s(1920, 1080, 640, 16L shl 20))   // HD previews stay sharp
+        assertEquals(1, s(752, 560, 640, 64L shl 20))
         assertEquals(1, s(-1, -1, 640, 64L shl 20))      // bounds unknown
     }
 

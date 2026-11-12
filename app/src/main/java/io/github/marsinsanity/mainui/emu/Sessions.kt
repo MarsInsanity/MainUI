@@ -149,6 +149,7 @@ class SessionManager(
         unpark()
         val sw = synchronized(this) { Swapped(active, shownAt, loadPending).also { active = s } }
         loadPending = null
+        loadAsking = null
         shownAt = android.os.SystemClock.uptimeMillis()
         launchedPackages += s.pkg
         persist()
@@ -235,10 +236,15 @@ class SessionManager(
                 if (!parkWanted || parked != null || active !== s) return@Thread
                 if (api) {
                     // Counted as paused at once, so an unpark meanwhile resumes it (its resume is sent after).
-                    parked = s.pkg to API_PAUSED
+                    val mark = s.pkg to API_PAUSED
+                    parked = mark
                     apiParker.execute {
                         val r = StateApi.call(s.pkg, "pause", timeoutMs = 2000)
                         if (r.ok) ApiPauses.paused(s.pkg)
+                        // Answered but refused (no game yet, can't pause): frozen like emulators without the API.
+                        else if (r.extras != null && settings.freezeStandalone && Root.knownAvailable()) synchronized(parkLock) {
+                            if (parked === mark && Freezer.freeze(s.pkg, def?.freezeOnly)) parked = s.pkg to Freezer.generation
+                        }
                         io.github.marsinsanity.mainui.core.SessionLog.log("paused ${s.name} (${s.pkg}) while MainUI is in front: ${r.error ?: "ok"}")
                     }
                 } else if (Freezer.freeze(s.pkg, def?.freezeOnly)) {
@@ -263,7 +269,9 @@ class SessionManager(
             if (p.second != API_PAUSED) { Freezer.thaw(p.first, p.second); return }
             // (Always sent: a pause that answered late still took effect.)
             apiParker.submit {
-                StateApi.call(p.first, "resume", timeoutMs = 2000)
+                // Not to an emulator just force-stopped: the broadcast would start it again.
+                if (!Root.knownAvailable() || Root.exec("pidof ${Root.q(p.first)}").out.isNotBlank())
+                    StateApi.call(p.first, "resume", timeoutMs = 2000)
                 ApiPauses.resumed(p.first)
             }
         }
@@ -277,6 +285,7 @@ class SessionManager(
         // Taken under the lock, so two callers at once (exit thread, onResume) count it once.
         val s = synchronized(this) { active.also { active = null } } ?: return
         loadPending = null
+        loadAsking = null
         ApiPauses.resumed(s.pkg) // (stopped or left: nothing to resume after a restart)
         account(s)
         persist()
@@ -457,6 +466,14 @@ class SessionManager(
     fun autoLoadPending(s: Session?) = s != null && loadPending === s
 
     /**
+     * A game MainUI never saved whose emulator is still asked for a resume state: automatic saves
+     * wait quietly (they would queue behind the load, and could overwrite the state it finds).
+     */
+    @Volatile private var loadAsking: Session? = null
+
+    fun autoLoadAsking(s: Session?) = s != null && loadAsking === s
+
+    /**
      * [s] was loaded (or saved) by hand from the menu: what runs now is what the user wants kept,
      * so automatic saves are made again (and a pending auto load doesn't load over it).
      */
@@ -527,9 +544,10 @@ class SessionManager(
         val log = io.github.marsinsanity.mainui.core.SessionLog::log
         if (c.loadDelayMs <= 0) { log("auto load ${s.name}: turned off for this emulator"); return }
         log("auto load ${s.name}: ${s.pkg} loads MainUI's resume state once the game runs (State API)")
-        if (marked) loadPending = s
+        if (marked) loadPending = s else loadAsking = s
         Thread({
             val r = StateApi.call(s.pkg, "load", StateApi.RESUME_SLOT, waitMs = 180_000, settleMs = 2_000, notBefore = s.startedUptime)
+            if (loadAsking === s) loadAsking = null
             val mine = loadPending === s
             // The load never ran (the game didn't come up in time): still a fresh start, so
             // automatic saves stay off rather than overwrite the state that wasn't loaded.
@@ -539,7 +557,8 @@ class SessionManager(
             when {
                 r.ok -> if ((mine || !marked) && active === s) toast("Loaded your last save")
                 // (No resume state: nothing was left to continue from.)
-                active === s && r.error?.contains("empty") != true -> toast("Your last save wasn't loaded: ${r.error}")
+                // (A game MainUI never saved, whose load never ran: nothing to say.)
+                active === s && r.error?.contains("empty") != true && (marked || !notTried) -> toast("Your last save wasn't loaded: ${r.error}")
             }
         }, "auto-load").apply { isDaemon = true }.start()
     }

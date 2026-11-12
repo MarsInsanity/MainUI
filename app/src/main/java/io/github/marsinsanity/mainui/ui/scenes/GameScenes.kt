@@ -457,9 +457,13 @@ class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val g
         host.io({ MainUI.emulators.refreshCoresIfStale(3000) }) { build(keep = true) }
     }
 
-    /** [keep]: the highlighted row stays (a rescan finishing, back from a dialog). */
+    /** The row the last build put the cursor on itself (not one the user moved to). */
+    private var autoIndex = -1
+
+    /** [keep]: the row the user moved to stays (a rescan finishing, back from a dialog). */
     private fun build(keep: Boolean = false) {
         val was = list.current?.data.let { if (it === DEFAULT) DEFAULT else (it as? io.github.marsinsanity.mainui.emu.EmuOption)?.ref }
+        val moved = list.active != autoIndex
         val current = if (game != null) MainUI.library.coreForGame(game.key) else MainUI.library.coreForSystem(def.id)
         // "Default": a game follows its system's core, a system the recommended (dArkOS) one.
         val auto = if (game != null) MainUI.emulators.choose(def, game, gameOverride = false)
@@ -475,8 +479,9 @@ class CoreSelectScene(host: SceneHost, private val def: SystemDef, private val g
                 disabled = o.installed == false && !canGet, data = o)
         }
         list.set(items, false)
-        val kept = if (keep && was != null) list.items.indexOfFirst { it.data === was || (it.data as? io.github.marsinsanity.mainui.emu.EmuOption)?.ref == was } else -1
-        list.active = if (kept >= 0) kept else list.items.indexOfFirst { it.value == 1 }.coerceAtLeast(0)
+        val kept = if (keep && moved && was != null) list.items.indexOfFirst { it.data === was || (it.data as? io.github.marsinsanity.mainui.emu.EmuOption)?.ref == was } else -1
+        if (kept >= 0) { list.active = kept; autoIndex = -1 }
+        else { list.active = list.items.indexOfFirst { it.value == 1 }.coerceAtLeast(0); autoIndex = list.active }
     }
 
     override fun onResume() = build(keep = true)

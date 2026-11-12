@@ -252,11 +252,11 @@ class Theme private constructor(
 }
 
 /**
- * The power of two to decode a [w] x [h] image at so it is at most [maxW] wide (0: any width)
- * and at most [maxBytes] in memory.
+ * The power of two to decode a [w] x [h] image at: halved while it stays at least [maxW] on both
+ * sides (0: never for size), as Images.decode does, and until it is at most [maxBytes] in memory.
  */
 fun sampleSize(w: Int, h: Int, maxW: Int = 0, maxBytes: Long = 64L shl 20): Int {
     var s = 1
-    while ((maxW > 0 && w / s > maxW) || (w.toLong() / s) * (h.toLong() / s) * 4 > maxBytes) s *= 2
+    while ((maxW > 0 && w / (s * 2) >= maxW && h / (s * 2) >= maxW) || (w.toLong() / s) * (h.toLong() / s) * 4 > maxBytes) s *= 2
     return s
 }

@@ -366,6 +366,9 @@ class InGameMenuScene(
     /** The thread unpausing (thawing) the game, see [leaveThen]. */
     @Volatile private var unpausing: Thread? = null
 
+    /** Waits (at most [ms]) until this menu's resume of the game is done. */
+    fun awaitResumed(ms: Long) { unpausing?.join(ms) }
+
     private fun resumeOnce() {
         if (resumed) return
         resumed = true
@@ -406,7 +409,7 @@ class InGameMenuScene(
     private val saveByKey get() = autoSave && (controller.states == StateSupport.HOTKEY || controller.states == StateSupport.DIRECT)
     private val autoSave get() = MainUI.settings.autoSaveOnExit && !MainUI.sessions.autoLoadPending(session).also {
         if (it) io.github.marsinsanity.mainui.core.SessionLog.log("${session.name}: not saved on leaving, its last save wasn't loaded yet")
-    }
+    } && !MainUI.sessions.autoLoadAsking(session)
 
     /** Auto save is on but this game isn't saved on leaving (its last save wasn't loaded yet): said. */
     private fun sayNotSaved() {
@@ -435,7 +438,10 @@ class InGameMenuScene(
                 main.post { ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 if (!ok) {
                     Log.w("MainUI.InGame", "exit: could not stop ${session.pkg}")
-                    // No root (a MainUI build saves without it).
+                    // No root (a MainUI build saves without it). Left running where it can't be
+                    // stopped: paused, not playing on behind MainUI.
+                    if (android.os.Build.VERSION.SDK_INT >= 34 && (controller as? io.github.marsinsanity.mainui.emu.StandaloneController)?.direct == true)
+                        runCatching { io.github.marsinsanity.mainui.emu.StateApi.call(session.pkg, "pause", timeoutMs = 2000) }
                     killInBackground(ctx)
                 }
             }
@@ -456,8 +462,8 @@ class InGameMenuScene(
                 host.finishHost()
             } else close()
             if (!ok) {
-                // No root: thaw if needed.
-                Thread { runCatching { controller.unpause() } }.start()
+                // No root: thaw if needed (where it can't be stopped, it stays paused instead).
+                if (android.os.Build.VERSION.SDK_INT < 34) Thread { runCatching { controller.unpause() } }.start()
                 killInBackground(ctx)
             }
         }

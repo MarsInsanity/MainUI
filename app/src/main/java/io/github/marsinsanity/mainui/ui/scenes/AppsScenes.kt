@@ -144,13 +144,15 @@ class AppVisibilityScene(host: SceneHost) : ListScene(host, "Edit hidden apps", 
     override fun onEnter() {
         host.io({ MainUI.apps.all() to MainUI.games.portPackages() }) { (apps, ports) ->
             list.set(apps.map { a ->
+                val wasGame = MainUI.library.isAndroidGame(a.pkg)
                 UiItem(a.label, io.github.marsinsanity.mainui.ui.ItemType.TOGGLE, icon = { MainUI.apps.icon(a.pkg, 96) },
                     value = if (MainUI.library.isHidden(a.pkg)) 0 else 1, data = a,
-                    sub = if (a.pkg in ports) "port" else if (MainUI.library.isAndroidGame(a.pkg)) "game" else null,
+                    sub = if (a.pkg in ports) "port" else if (wasGame) "game" else null,
                     onChange = { item ->
+                        // (Hidden and Android game exclude each other; switched back on, a game is one again.)
                         val hide = item.value == 0
                         MainUI.library.setHidden(a.pkg, hide)
-                        if (hide) MainUI.library.setAndroidGame(a.pkg, false)
+                        if (wasGame) MainUI.library.setAndroidGame(a.pkg, !hide)
                     })
             })
         }

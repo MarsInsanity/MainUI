@@ -157,7 +157,9 @@ class EmulatorManager(
      */
     private fun apply(root: JSONObject, standalone: MutableMap<String, EmuDef>, trusted: Boolean) {
         root.optJSONObject("retroarch")?.let { r ->
-            retroarch = parseDef("retroarch", r)
+            val d = parseDef("retroarch", r)
+            retroarch = if (trusted || !d.rootLaunch ||
+                (retroarch.rootLaunch && d.components.all { it in retroarch.components })) d else d.copy(rootLaunch = false)
             raCommandPort = r.optInt("commandPort", raCommandPort)
         }
         root.optJSONArray("standalone")?.let { arr ->
@@ -230,10 +232,12 @@ class EmulatorManager(
         val listed = HashSet<String>().apply { standalone.values.forEach { d -> d.components.forEach { add(it.first) } }; addAll(retroarch.packages) }
         // First recipe component whose package is installed and whose activity exists.
         val exact = standalone.mapValues { (_, d) -> d.components.firstOrNull { (pkg, act) -> installed(pkg) && (act == null || hasActivity(pkg, act)) } }
+        // The installed packages each recipe's own activities are in.
+        val claimed = standalone.mapValues { (_, d) -> d.components.filter { (p, a) -> a != null && installed(p) && hasActivity(p, a) }.map { it.first }.toSet() }
         for ((id, d) in standalone) {
             val c = exact[id]
                 // (Not a package another recipe's activity is in: Lime3DS has the id Azahar's Play build keeps.)
-                ?: d.components.firstOrNull { (p, _) -> installed(p) && exact.none { (o, oc) -> o != id && oc?.first == p } }?.let { (pkg, _) ->
+                ?: d.components.firstOrNull { (p, _) -> installed(p) && claimed.none { (o, ps) -> o != id && p in ps } }?.let { (pkg, _) ->
                     // Package installed but the recipe's activity was renamed: use its launcher activity.
                     pkg to launcherOf(pkg)
                 }
