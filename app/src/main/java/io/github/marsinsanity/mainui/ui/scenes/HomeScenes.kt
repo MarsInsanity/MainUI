@@ -195,6 +195,7 @@ object HomeScenes {
         val cellW = CELL_W; val cellH = CELL_H
         val gs = g.theme.grid
         val bg = g.skin(if (sel) "bg-game-item-f" else "bg-game-item-n")
+        if (g.theme.onionLayout && drawOnionCell(g, t, x, y, sel, bg)) return
         if (bg != null) g.bmp(bg, x, y, cellW, cellH)
         else if (sel) g.fillRect(x + 4, y + 4, cellW - 8, cellH - 8, Color.argb(70, 255, 255, 255), 14f)
         val iconBoxH = if (g.theme.hideIconLabels) cellH - 20 else cellH - 46
@@ -212,6 +213,47 @@ object HomeScenes {
                 color = if (sel) gs.selectedColor else gs.color, marquee = sel)
         }
     }
+}
+
+/**
+ * A games grid cell the way the Miyoo's MainUI draws it (its 4x2 console grid): the theme's
+ * pictures at their own size, the icon centred 10 px above the middle, the name in the grid1x4
+ * font centred 134 px down. False: no icon in the theme (the caller draws MainUI's).
+ */
+private fun drawOnionCell(g: Gfx, t: Tile, x: Float, y: Float, sel: Boolean, bg: Bitmap?): Boolean {
+    val cellW = HomeScenes.CELL_W; val cellH = HomeScenes.CELL_H
+    val icon = HomeScenes.tileIcon(g, t, sel) ?: return false
+    if (bg != null) g.bmp(bg, x + (cellW - bg.width) / 2 + 2, y + (cellH - bg.height) / 2 + 2)
+    val labels = !g.theme.hideIconLabels
+    if (icon.width <= cellW && icon.height <= cellH) {
+        val top = y + (cellH - icon.height) / 2 - 10
+        // OnionOS icons end above the name; one that runs into it (MainUI's own, with its badge) is made smaller.
+        val bottom = contentBottom(icon)
+        val s = if (labels && top + bottom > y + 118f) ((y + 118f - top) / bottom).coerceAtLeast(0.5f) else 1f
+        g.bmp(icon, x + (cellW - icon.width * s) / 2, top, icon.width * s, icon.height * s)
+    } else g.bmpFit(icon, x, y, cellW, cellH - 20)
+    if (labels) {
+        val gs = g.theme.grid
+        val maxW = cellW - 6f
+        // (OnionOS's names are short; a longer one is made smaller before it scrolls)
+        var size = gs.size1x4
+        val style = io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, size, gs.color)
+        while (size > gs.size3x4 && g.textWidth(t.label, style, size) > maxW) size -= 1f
+        g.text(t.label, style, x + cellW / 2, y + 134f, Align.CENTER, maxW = maxW,
+            color = if (sel) gs.selectedColor else gs.color, size = size, marquee = sel)
+    }
+    return true
+}
+
+private val contentBottoms = java.util.WeakHashMap<Bitmap, Int>()
+
+/** The bottom of [b]'s visible pixels. */
+private fun contentBottom(b: Bitmap): Int = contentBottoms.getOrPut(b) {
+    val px = IntArray(b.width * b.height)
+    b.getPixels(px, 0, b.width, 0, 0, b.width, b.height)
+    var y = b.height
+    while (y > 0 && (0 until b.width).none { (px[(y - 1) * b.width + it] ushr 24) >= 64 }) y--
+    y
 }
 
 /**
@@ -283,11 +325,10 @@ class TileStrip {
             val img = t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
             if (img != null) g.bmp(img, x, y, w, h)
             else {
-                // The theme's blank main menu tile (MainUI's own theme has one), else the same box drawn.
-                val blank = g.skin(if (sel) "bg-home-tile-f" else "bg-home-tile-n")
-                if (blank != null) g.bmp(blank, x, y, w, h) else g.menuTileBox(x, y, w, h, sel)
-                val cx = x + w / 2; val cy = y + h * 0.36f
-                val box = w * 0.66f
+                val art = g.blankTile(x, y, w, h, sel)
+                val at = art?.let { g.tilePictureBox(it, x, y, w, h) }
+                val cx = at?.centerX() ?: (x + w / 2); val cy = at?.centerY() ?: (y + h * 0.36f)
+                val box = at?.width()?.coerceAtLeast(w * 0.56f) ?: (w * 0.66f)
                 val icon = HomeScenes.tileIcon(g, t, sel)
                 when {
                     // Selected: with the soft glow the main menu's selected glyph has.
@@ -295,10 +336,10 @@ class TileStrip {
                         io.github.marsinsanity.mainui.ui.withAlpha(io.github.marsinsanity.mainui.ui.tileHighlight(g.theme.accent), 150))
                     icon != null -> g.bmpFit(icon, cx - box / 2, cy - box / 2, box, box)
                     t.glyph == "game" -> g.systemTile(t.short, cx - box / 2, cy - box * 0.38f, box, box * 0.76f, sel)
-                    else -> g.glyph(t.glyph, cx, cy, w * 0.26f, if (sel) Color.WHITE else Color.argb(200, 255, 255, 255))
+                    else -> g.glyph(t.glyph, cx, cy, w * 0.26f, art?.ink ?: if (sel) Color.WHITE else Color.argb(200, 255, 255, 255))
                 }
             }
-            if (g.theme.hideIconLabels) return
+            if (g.theme.hideIconLabels && img != null) return
             val gs = g.theme.grid
             val color = if (sel) gs.selectedColor else gs.color
             val maxW = w - 14f
@@ -376,7 +417,8 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
             val t = tiles[idx]
             val img = t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
             if (img != null) g.bmp(img, x, y, tileW, tileH) else g.menuTile(t.glyph, x, y, tileW, tileH, sel)
-            if (!g.theme.hideIconLabels) {
+            // (a theme with its labels in its pictures has none for MainUI's own tiles)
+            if (!g.theme.hideIconLabels || img == null) {
                 val gs = g.theme.grid
                 g.text(t.label, io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size1x4, gs.color),
                     x + tileW / 2, y + 195f, Align.CENTER, maxW = tileW - 8f,

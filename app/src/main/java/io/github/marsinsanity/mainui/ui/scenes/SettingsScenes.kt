@@ -74,6 +74,7 @@ class UiSettingsScene(host: SceneHost) : ListScene(host, "User interface") {
             toggle("Show Ports system", { s.showPortsSystem }) { s.showPortsSystem = it; MainUI.games.invalidate() },
             toggle("Show empty systems", { s.showEmptySystems }) { s.showEmptySystems = it },
             toggle("Show game art in lists", { s.showGameArt }) { s.showGameArt = it },
+            toggle("OnionOS icons for missing systems", { s.onionIcons }) { s.onionIcons = it; io.github.marsinsanity.mainui.theme.Theme.onionIcons = it },
             multi("Background fit", listOf("cover" to "Crop", "stretch" to "Stretch", "fit" to "Fit"), { s.backgroundFit }) { s.backgroundFit = it },
             toggle("Smooth scaling", { s.smoothScaling }) { s.smoothScaling = it },
             toggle("Show clock", { s.showClock }) { s.showClock = it },

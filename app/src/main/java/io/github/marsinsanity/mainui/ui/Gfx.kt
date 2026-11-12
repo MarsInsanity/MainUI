@@ -302,11 +302,14 @@ class Gfx {
     fun background() {
         val b = skin("background")
         if (b != null) {
+            // OnionOS shows background.png turned 180 degrees (themes store it upside down).
+            c.save(); c.rotate(180f, W / 2, H / 2)
             when (MainUI.settings.backgroundFit) {
                 "stretch" -> bmp(b, 0f, 0f, W, H)
                 "fit" -> { c.drawColor(Color.BLACK); bmpFit(b, 0f, 0f, W, H) }
                 else -> bmpCover(b, 0f, 0f, W, H)
             }
+            c.restore()
             return
         }
         // Built-in background: dark vertical gradient
@@ -435,11 +438,13 @@ class Gfx {
         }
         if (bg != null) bar(bg, y, FOOTER) else fillRect(0f, y, W, FOOTER, darken(theme.bgColor, 0.45f))
         val cy = H - 30f
-        val hideLabels = theme.hideHintLabels
+        // (a theme whose footer picture has its hints: only its own A / B, as OnionOS draws it)
+        val inArt = theme.hintsInArt
+        val hideLabels = inArt
         val hints = buildList {
             aLabel?.let { add("A" to it) }
             bLabel?.let { add("B" to it) }
-            addAll(extra)
+            if (!inArt) addAll(extra)
         }
         val left = 20f
         fun widthOf(n: Int, gap: Float, scale: Float): Float = hints.take(n).sumOf { (b, l) ->
@@ -503,12 +508,41 @@ class Gfx {
             if (draw) bmp(b, x, cy - sz / 2, b.width * s, sz)
             return b.width * s
         }
+        theme.buttonArt()?.let { return themedButton(it, btn, x, cy, scale, draw) }
         val w = if (btn.length > 1) textWidth(btn, theme.hint, sz * 0.5f) + 20f * scale else sz
         if (draw) {
             fillRect(x, cy - sz / 2, w, sz, theme.accent, 8f * scale)
             text(btn, theme.hint, x + w / 2, cy, Align.CENTER, color = Color.WHITE, size = if (btn.length > 1) sz * 0.5f else sz * 0.8f)
         }
         return w
+    }
+
+    private val buttonLetter = FontStyle(android.graphics.Typeface.DEFAULT_BOLD, 20f, Color.WHITE)
+
+    /**
+     * A button OnionOS has no picture for (X, Y, START...) made from the theme's A button: its
+     * picture without the letter and this one's letter in, or for a word, a pill in its colours.
+     */
+    private fun themedButton(art: Theme.ButtonArt, btn: String, x: Float, cy: Float,
+                             scale: Float, draw: Boolean): Float {
+        val w = art.blank.width * scale; val h = art.blank.height * scale
+        if (btn.length == 1) {
+            if (draw) {
+                bmp(art.blank, x, cy - h / 2, w, h)
+                text(btn, buttonLetter, x + art.cx * w, cy - h / 2 + art.cy * h, Align.CENTER, color = art.ink,
+                    size = (art.inkH * h / 0.72f).coerceIn(h * 0.3f, h * 0.7f))
+            }
+            return w
+        }
+        val ph = h * 0.74f
+        val size = ph * 0.52f
+        val pw = textWidth(btn, buttonLetter, size) + ph * 0.8f
+        if (draw) {
+            if (art.ring) strokeRect(x, cy - ph / 2, pw, ph, art.fill, max(1.5f, ph * 0.08f), ph / 2)
+            else fillRect(x, cy - ph / 2, pw, ph, art.fill, ph / 2)
+            text(btn, buttonLetter, x + pw / 2, cy, Align.CENTER, color = if (art.ring) art.fill else art.ink, size = size)
+        }
+        return pw
     }
 
     /** Width footerStatus needs for "current/total". */
@@ -533,7 +567,7 @@ class Gfx {
     fun dots(itemCount: Int, activeItem: Int, cy: Float, maxW: Float = W - 40f) {
         val a = skin("dot-a"); val n = skin("dot-n")
         val dw = (a?.width ?: 14).toFloat()
-        val gap = 10f
+        val gap = if (a != null) 5f else 10f // (OnionOS: dot-a's width + 5 apart)
         val per = dotsPerGroup(itemCount, dw + gap, maxW + gap)
         val count = (itemCount + per - 1) / per
         val active = activeItem / per
@@ -758,9 +792,40 @@ class Gfx {
 
     /** Main menu tile replacement for ic-<name>-n/f (156x278). */
     fun menuTile(kind: String, x: Float, y: Float, w: Float, h: Float, selected: Boolean) {
-        menuTileBox(x, y, w, h, selected)
-        val cx = x + w / 2; val cy = y + h * 0.36f
-        glyph(kind, cx, cy, w * 0.26f, if (selected) Color.WHITE else Color.argb(200, 255, 255, 255))
+        val art = blankTile(x, y, w, h, selected)
+        if (art == null) {
+            glyph(kind, x + w / 2, y + h * 0.36f, w * 0.26f, if (selected) Color.WHITE else Color.argb(200, 255, 255, 255))
+            return
+        }
+        val box = tilePictureBox(art, x, y, w, h)
+        glyph(kind, box.centerX(), box.centerY(), min(box.width(), box.height()) * 0.42f, art.ink)
+    }
+
+    /**
+     * An empty main menu tile in the theme's style: MainUI's own theme's bg-home-tile, an OnionOS
+     * theme's own Games tile with its picture taken out, else one drawn in the accent. Returns
+     * where the picture goes in an OnionOS theme's tile (null: the usual place).
+     */
+    fun blankTile(x: Float, y: Float, w: Float, h: Float, selected: Boolean): Theme.TileArt? {
+        skin(if (selected) "bg-home-tile-f" else "bg-home-tile-n")?.let { bmp(it, x, y, w, h); return null }
+        val art = theme.tileArt(selected)
+        if (art == null) { menuTileBox(x, y, w, h, selected); return null }
+        art.card?.let { bmp(it, x, y, w, h) }
+        return art
+    }
+
+    private val pictureBox = RectF()
+
+    /** Where [art]'s picture was, kept above the label (195 of the tile's 278) and not too small or big. */
+    fun tilePictureBox(art: Theme.TileArt, x: Float, y: Float, w: Float, h: Float): RectF {
+        var l = x + art.left * w; var r = x + art.right * w
+        var t = y + art.top * h; var b = min(y + art.bottom * h, y + h * (170f / 278f))
+        if (b - t < w * 0.4f) { val c = (t + b) / 2; t = c - w * 0.2f; b = c + w * 0.2f }
+        val side = min(min(r - l, b - t), w * 0.7f).coerceAtLeast(w * 0.4f)
+        val cx = (l + r) / 2; val cy = (t + b) / 2
+        l = cx - side / 2; r = cx + side / 2
+        pictureBox.set(l, cy - side / 2, r, cy + side / 2)
+        return pictureBox
     }
 
     private val tileFill = Paint(Paint.ANTI_ALIAS_FLAG)

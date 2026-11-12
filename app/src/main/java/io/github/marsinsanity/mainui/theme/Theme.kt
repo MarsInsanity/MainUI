@@ -38,6 +38,8 @@ class Theme private constructor(
     var author = "MainUI"; private set
     var description = ""; private set
     var hideIconLabels = false; private set
+    /** No "mainui" block: a theme made for OnionOS, drawn with its exact layout where MainUI's differs. */
+    var onionLayout = true; private set
     var hideHintLabels = false; private set
     var frameLeft = 0; private set
     var frameRight = 0; private set
@@ -77,6 +79,7 @@ class Theme private constructor(
         val overrides = overrideDir?.let { File(it, "config.json") }?.takeIf { it.isFile }
         if (overrides != null) runCatching { configs += JSONObject(overrides.readText()) }
 
+        var ownPalette = 0 // MainUI colours the configs set: 1 accent, 2 panel, 4 background
         configs.forEachIndexed { idx, c ->
             val useFallbacks = idx == 0
             c.optString("name").takeIf { it.isNotEmpty() }?.let { name = it }
@@ -123,12 +126,109 @@ class Theme private constructor(
             }
             // MainUI-for-Android extension: colours for procedurally drawn elements.
             c.optJSONObject("mainui")?.let { m ->
-                color(m, "accent")?.let { accent = it }
-                color(m, "panel")?.let { panel = it }
-                color(m, "background")?.let { bgColor = it }
+                onionLayout = false
+                color(m, "accent")?.let { accent = it; ownPalette = ownPalette or 1 }
+                color(m, "panel")?.let { panel = it; ownPalette = ownPalette or 2 }
+                color(m, "background")?.let { bgColor = it; ownPalette = ownPalette or 4 }
             }
         }
+        // (OnionOS always draws its list font bold)
+        l = l.copy(typeface = Typeface.create(l.typeface, Typeface.BOLD))
         title = t; hint = h; currentPage = cp; total = tot; list = l; grid = g; battery = b
+        if (dir != null && ownPalette != 7) runCatching { paletteFromArt(ownPalette) }
+    }
+
+    /**
+     * An OnionOS theme has no colours for what MainUI draws itself (toggles, panels, its own
+     * tiles): they are taken from its pictures, so they match it instead of a fixed red.
+     */
+    private fun paletteFromArt(own: Int) {
+        fun px(name: String) = skin(name)?.let { pixels(it) }
+        if (own and 4 == 0) px("background")?.let { ThemeArt.dominant(it) }?.let { bgColor = it }
+        if (own and 1 == 0) {
+            val found = sequenceOf("bg-list-s", "dot-a", "ic-game-f", "icon-A-54", "bg-pop-menu-1", "pop-bg", "background")
+                .mapNotNull { n -> px(n)?.let { ThemeArt.dominant(it, colourful = true) } }.firstOrNull()
+            accent = when {
+                found == null -> if (ThemeArt.luma(bgColor) < 128) Color.rgb(110, 110, 110) else Color.rgb(80, 80, 80)
+                // (a selection the colour of the background would not show)
+                ThemeArt.dist(found, bgColor) < 90 -> ThemeArt.usableAccent(lighten(found, 0.45f))
+                else -> ThemeArt.usableAccent(found)
+            }
+        }
+        if (own and 2 == 0) (px("bg-pop-menu-1") ?: px("pop-bg"))?.let { ThemeArt.dominant(it) }?.let {
+            panel = Color.argb(240, Color.red(it), Color.green(it), Color.blue(it))
+        }
+    }
+
+    private fun lighten(c: Int, f: Float) = Color.rgb((Color.red(c) + (255 - Color.red(c)) * f).toInt(),
+        (Color.green(c) + (255 - Color.green(c)) * f).toInt(), (Color.blue(c) + (255 - Color.blue(c)) * f).toInt())
+
+    /** [b]'s pixels, from a copy at most [limit] wide when it is bigger. */
+    private fun pixels(b: Bitmap, limit: Int = Int.MAX_VALUE): IntArray {
+        val s = if (b.width > limit) Bitmap.createScaledBitmap(b, limit, maxOf(1, b.height * limit / b.width), true) else b
+        val px = IntArray(s.width * s.height)
+        s.getPixels(px, 0, s.width, 0, 0, s.width, s.height)
+        if (s !== b) s.recycle()
+        return px
+    }
+
+    /** A main menu tile with the picture taken out, and where the picture was: see [tileArt]. */
+    class TileArt(val card: Bitmap?, val left: Float, val top: Float, val right: Float, val bottom: Float, val ink: Int)
+
+    private val tileArts = arrayOfNulls<Any>(2)
+
+    /**
+     * The theme's own Games tile (or another main menu tile) as a blank card in the same style,
+     * for tiles OnionOS has no picture for (Emulators, systems in the row view). Null: the theme
+     * has no main menu tiles.
+     */
+    fun tileArt(selected: Boolean): TileArt? {
+        val i = if (selected) 1 else 0
+        tileArts[i]?.let { return it as? TileArt }
+        val st = if (selected) "f" else "n"
+        val src = listOf("game", "app", "setting", "favorite", "recent", "retroarch").firstNotNullOfOrNull { skin("ic-$it-$st") }
+        val art = src?.let { b ->
+            val small = if (b.width > 640) Bitmap.createScaledBitmap(b, 640, maxOf(1, b.height * 640 / b.width), true) else b
+            val t = ThemeArt.tile(pixels(small), small.width, small.height)
+            if (small !== b) small.recycle()
+            t?.let {
+                // (a picture without a card stands on the background: it has to show there)
+                val ink = if (it.card == null && ThemeArt.dist(it.ink, bgColor) < 90)
+                    (if (ThemeArt.luma(bgColor) < 128) Color.WHITE else Color.rgb(32, 32, 32)) else it.ink
+                TileArt(it.card?.let { c -> Bitmap.createBitmap(c, it.w, it.h, Bitmap.Config.ARGB_8888) },
+                    it.left, it.top, it.right, it.bottom, ink)
+            }
+        }
+        tileArts[i] = art ?: MISSING
+        return art
+    }
+
+    /** The A button picture with its letter taken out, for the buttons OnionOS has no picture for. */
+    class ButtonArt(val blank: Bitmap, val fill: Int, val ink: Int, val cx: Float, val cy: Float, val inkH: Float, val ring: Boolean)
+
+    private var buttonArtCache: Any? = null
+
+    fun buttonArt(): ButtonArt? {
+        buttonArtCache?.let { return it as? ButtonArt }
+        val a = skin("icon-A-54")
+        val art = a?.takeIf { it.width <= 256 && it.height <= 256 }?.let { b ->
+            ThemeArt.button(pixels(b), b.width, b.height)?.let {
+                ButtonArt(Bitmap.createBitmap(it.blank, it.w, it.h, Bitmap.Config.ARGB_8888), it.fill, it.ink, it.cx, it.cy, it.inkH, it.ring)
+            }
+        }
+        buttonArtCache = art ?: MISSING
+        return art
+    }
+
+    /**
+     * The theme's hints are part of its footer picture (OnionOS hideLabels.hints, or a see-through
+     * A button that pushes the labels off screen): only its own A / B buttons are drawn there.
+     */
+    val hintsInArt: Boolean by lazy {
+        hideHintLabels || skin("icon-A-54")?.let { b ->
+            val px = pixels(b, 160)
+            px.none { (it ushr 24) >= 32 }
+        } == true
     }
 
     private fun fontStyle(o: JSONObject?, cur: FontStyle, fallback: FontStyle?): FontStyle {
@@ -180,9 +280,12 @@ class Theme private constructor(
             if (selected) image("icons/sel/$n.png")?.let { return it }
             image("icons/$n.png")?.let { return it }
         }
-        // Not in this theme: the bundled MainUI theme has an icon for every system.
-        val fb = iconFallbackDir ?: return null
-        if (dir != null && fb.parentFile?.absolutePath == dir.absolutePath) return null
+        // Not in this theme: OnionOS's own default icons first (what a Miyoo shows for a theme
+        // without icons), then the bundled MainUI theme's, which has one for every system.
+        val fb = iconFallbackDir
+        val mainUiTheme = dir == null || (fb != null && fb.parentFile?.absolutePath == dir.absolutePath)
+        if (!mainUiTheme && onionIcons) onionDefaultIcon(names)?.let { return it }
+        if (fb == null || (dir != null && fb.parentFile?.absolutePath == dir.absolutePath)) return null
         for (n in names) {
             for (rel in if (selected) listOf("sel/$n.png", "$n.png") else listOf("$n.png")) {
                 val key = "fallback:$rel"
@@ -193,6 +296,19 @@ class Theme private constructor(
                 bitmaps[key] = bmp ?: MISSING
                 if (bmp != null) return bmp
             }
+        }
+        return null
+    }
+
+    /** OnionOS's default icon for the first of [names] it has (app assets onion_icons/). */
+    private fun onionDefaultIcon(names: List<String>): Bitmap? {
+        for (n in names) {
+            val key = "onion:$n"
+            val cached = bitmaps[key]
+            if (cached != null) { if (cached is Bitmap) return cached; continue }
+            val bmp = runCatching { ctx.assets.open("onion_icons/$n.png").use { BitmapFactory.decodeStream(it) } }.getOrNull()
+            bitmaps[key] = bmp ?: MISSING
+            if (bmp != null) return bmp
         }
         return null
     }
@@ -225,13 +341,16 @@ class Theme private constructor(
     val soundBgm: File? get() = file("sound/bgm.mp3")
 
     /** Drops cached images. Bitmaps are not recycled: the UI thread may still be drawing them. */
-    fun release() = bitmaps.clear()
+    fun release() { bitmaps.clear(); tileArts.fill(null); buttonArtCache = null }
 
     companion object {
         private val MISSING = Any()
 
         /** icons/ of the bundled MainUI theme, used for systems a theme has no icon for. */
         @Volatile var iconFallbackDir: File? = null
+
+        /** Settings > User interface: OnionOS's default icons before MainUI's for systems a theme lacks. */
+        @Volatile var onionIcons = true
 
         /** Onion bundled font names -> fonts shipped with this app ("" = system bold). */
         private val BUNDLED_ALIASES = mapOf(

@@ -544,7 +544,7 @@ APPS = {"themes": g_palette, "pacman": g_bag, "gameswitcher": g_switcher, "searc
 
 def preview(skin):
     """A main menu screenshot, composed from the generated parts."""
-    im = skin["background"].copy()
+    im = skin["background"].rotate(180)
     im.alpha_composite(skin["bg-title"], (0, 0))
     im.alpha_composite(skin["miyoo-topbar"], (16, 9))
     im.alpha_composite(skin["power-full-icon"], (580, 6))
@@ -576,7 +576,7 @@ def main():
         skin[name] = im
         save(im, skin_dir / f"{name}.png")
 
-    put("background", background())
+    put("background", background().rotate(180))  # OnionOS shows background.png turned 180 degrees
     put("bg-title", bar(60, line_at_top=False))
     put("tips-bar-bg", bar(60, line_at_top=True))
     put("bg-list-s", selection(56))
