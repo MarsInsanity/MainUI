@@ -64,7 +64,13 @@ class OverlayService : AccessibilityService() {
     /** HOME was held while the menu its press opened was still opening: run this instead. */
     private var pendingHold: String? = null
     /** Pauses of dropped late opens, undone once the newer menu holding the game has resumed it. */
-    private val staleUnpauses = ArrayList<io.github.marsinsanity.mainui.emu.GameController>()
+    private val staleUnpauses = ArrayList<Pair<io.github.marsinsanity.mainui.emu.Session, io.github.marsinsanity.mainui.emu.GameController>>()
+
+    /** Takes the stale pauses to undo (main thread): only those of the session still running. */
+    private fun takeStaleUnpauses(): List<io.github.marsinsanity.mainui.emu.GameController> {
+        val active = MainUI.sessions.active
+        return staleUnpauses.filter { it.first === active }.map { it.second }.also { staleUnpauses.clear() }
+    }
     private var openingSince = 0L
     /** The session the root shell and game controller were warmed up for. */
     private var warmed: Any? = null
@@ -502,7 +508,7 @@ class OverlayService : AccessibilityService() {
                         if (!opening && overlay?.scenes()?.firstOrNull() !is InGameMenuScene)
                             worker.execute { runCatching { controller.unpause() } }
                         // (After it: a newer pause can be refused for a game already paused, Flycast's.)
-                        else staleUnpauses += controller
+                        else staleUnpauses += s to controller
                         return@post
                     }
                     if (MainUI.sessions.active !== s || foregroundPackage != s.pkg) {
@@ -510,7 +516,8 @@ class OverlayService : AccessibilityService() {
                         Log.w(TAG, "menu open dropped, ${s.pkg} is no longer in front (${foregroundPackage})")
                         opening = false
                         pendingHold = null
-                        worker.execute { runCatching { controller.unpause() } }
+                        val stale = takeStaleUnpauses()
+                        worker.execute { runCatching { controller.unpause() }; stale.forEach { runCatching { it.unpause() } } }
                         return@post
                     }
                     opening = false
@@ -521,15 +528,21 @@ class OverlayService : AccessibilityService() {
                         Log.d(TAG, "menu replaced by $hold")
                         // (HOME again before the Game Switcher's save is done must not open the menu.)
                         if (hold == "gs") markLeaving()
+                        val stale = takeStaleUnpauses()
                         worker.execute {
                             if (bmp != null) runCatching { MainUI.sessions.saveScreenshot(s.gameKey, bmp) }
                             runCatching { controller.unpause() }
+                            stale.forEach { runCatching { it.unpause() } }
                             main.post { performHold(hold) }
                         }
                         return@post
                     }
                     val v = addOverlay { view -> InGameMenuScene(view, s, bmp, overlayMode = true, controller = controller, paused = paused) }
-                    if (v == null) worker.execute { controller.unpause() } // could not show: never leave it paused
+                    if (v == null) {
+                        // Could not show: never leave it paused.
+                        val stale = takeStaleUnpauses()
+                        worker.execute { runCatching { controller.unpause() }; stale.forEach { runCatching { it.unpause() } } }
+                    }
                     else if (paused) {
                         // The game lost focus to the overlay while frozen: let it acknowledge that
                         // (see GameController.settle). Fallback timer in case no focus callback comes.
@@ -623,9 +636,8 @@ class OverlayService : AccessibilityService() {
         runCatching { getSystemService(WindowManager::class.java).removeView(v) }
         val menu = v.scenes().firstOrNull() as? InGameMenuScene
         v.destroy()
-        if (staleUnpauses.isNotEmpty()) {
-            val stale = staleUnpauses.toList()
-            staleUnpauses.clear()
+        val stale = takeStaleUnpauses()
+        if (stale.isNotEmpty()) {
             // After the menu's own resume (a thaw first: a frozen app can't take a resume).
             Thread({ menu?.awaitResumed(5000); stale.forEach { runCatching { it.unpause() } } }, "stale-unpause").apply { isDaemon = true }.start()
         }

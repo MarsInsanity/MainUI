@@ -149,7 +149,6 @@ class SessionManager(
         unpark()
         val sw = synchronized(this) { Swapped(active, shownAt, loadPending).also { active = s } }
         loadPending = null
-        loadAsking = null
         shownAt = android.os.SystemClock.uptimeMillis()
         launchedPackages += s.pkg
         persist()
