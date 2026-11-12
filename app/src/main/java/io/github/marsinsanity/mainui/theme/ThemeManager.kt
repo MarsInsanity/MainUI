@@ -27,6 +27,35 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     /** The bundled default theme (assets/themes/MainUI), unpacked to app storage. */
     val builtinDir: File = File(ctx.filesDir, "themes/MainUI").also { extractBuiltin(it) }
 
+    /** The other themes that come with MainUI (assets/themes/<name>), unpacked next to it. */
+    private val bundled: List<String> =
+        runCatching { ctx.assets.list("themes")?.filter { it != "MainUI" }?.sorted() }.getOrNull().orEmpty()
+
+    private fun bundledDir(name: String) = File(ctx.filesDir, "themes/$name")
+
+    init {
+        // Unpacked (or brought up to date after an update) in the background; one that is needed
+        // before that is unpacked there and then (see [ensureBundled]).
+        if (bundled.isNotEmpty()) Thread {
+            for (n in bundled) {
+                val dir = bundledDir(n)
+                if (runCatching { ensureBundled(dir) }.getOrDefault(false))
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { if (settings.themePath == dir.absolutePath) reload() }
+            }
+        }.start()
+    }
+
+    /** Unpacks bundled theme [dir] if it isn't, or is older than the APK's; true when it did. */
+    @Synchronized private fun ensureBundled(dir: File): Boolean {
+        val asset = "themes/${dir.name}"
+        val bundledCfg = runCatching { ctx.assets.open("$asset/config.json").bufferedReader().use { it.readText() } }.getOrNull() ?: return false
+        if (runCatching { File(dir, "config.json").readText() }.getOrNull() == bundledCfg) return false
+        copyFresh(dir, asset)
+        return true
+    }
+
+    private fun isBundled(dir: File?) = dir != null && dir.parentFile == builtinDir.parentFile && dir.name in bundled
+
     @Volatile var current: Theme = loadTheme(settings.themePath)
         private set
     private val listeners = mutableListOf<(Theme) -> Unit>()
@@ -44,6 +73,8 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         val dir = when {
             path == CLASSIC -> null
             path.isBlank() -> builtinDir.takeIf { it.isDirectory }
+            isBundled(File(path)) -> File(path).also { runCatching { ensureBundled(it) } }.takeIf { File(it, "config.json").isFile }
+                ?: builtinDir.takeIf { it.isDirectory }
             else -> File(path).takeIf { File(it, "config.json").isFile || File(it, "skin").isDirectory } ?: builtinDir.takeIf { it.isDirectory }
         }
         return Theme.load(ctx, dir, storage.themeOverrideDir.takeIf { it.isDirectory }, listOf(dir ?: storage.fontDir, storage.fontDir))
@@ -60,19 +91,19 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         val cfg = File(dir, "config.json")
         val current = runCatching { cfg.readText() }.getOrNull()
         if (current == bundled) return
-        if (current == null) { runCatching { copyFresh(dir) }; return }
+        if (current == null) { runCatching { copyFresh(dir, "themes/MainUI") }; return }
         Thread {
-            if (runCatching { copyFresh(dir) }.isSuccess) {
+            if (runCatching { copyFresh(dir, "themes/MainUI") }.isSuccess) {
                 android.os.Handler(android.os.Looper.getMainLooper()).post { if (settings.themePath.isBlank()) reload() }
             }
         }.start()
     }
 
-    /** Unpacks into a temporary folder, then swaps it in. */
-    private fun copyFresh(dir: File) {
+    /** Unpacks [asset] into a temporary folder, then swaps it in as [dir]. */
+    private fun copyFresh(dir: File, asset: String) {
         val tmp = File(dir.parentFile, dir.name + ".new")
         tmp.deleteRecursively()
-        copyAsset("themes/MainUI", tmp)
+        copyAsset(asset, tmp)
         val old = File(dir.parentFile, dir.name + ".old")
         old.deleteRecursively()
         if (dir.exists() && !dir.renameTo(old)) dir.deleteRecursively()
@@ -102,6 +133,7 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     }
 
     fun apply(entry: ThemeEntry): String? {
+        if (isBundled(entry.dir)) runCatching { ensureBundled(entry.dir!!) }.onFailure { return "Could not unpack ${entry.name}" }
         settings.themePath = if (entry.zip != null) {
             (install(entry.zip) ?: return "Could not extract ${entry.zip.name}").absolutePath
         } else entry.key
@@ -120,6 +152,11 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
             ThemeEntry(builtinDir, null, "MainUI", "MainUI", "Built-in blue theme with an icon for every system", key = ""),
             ThemeEntry(null, null, "MainUI Classic", "MainUI", "The original flat theme, drawn in code", key = CLASSIC),
         )
+        for (n in bundled) {
+            val o = runCatching { JSONObject(ctx.assets.open("themes/$n/config.json").bufferedReader().use { it.readText() }) }.getOrNull()
+            out += ThemeEntry(bundledDir(n), null, o?.optString("name")?.ifEmpty { null } ?: n, o?.optString("author") ?: "MainUI",
+                o?.optString("description") ?: "")
+        }
         val seen = HashSet<String>()
         for (root in storage.themeDirs()) {
             val children = root.listFiles()?.sortedBy { it.name.lowercase() } ?: continue
@@ -151,6 +188,10 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
                 val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(f.absolutePath, b)
                 return BitmapFactory.decodeFile(f.absolutePath, scaled(b.outWidth, b.outHeight))
+            }
+            // A bundled theme not unpacked yet: its picture straight from the APK.
+            if (isBundled(d)) runCatching {
+                return ctx.assets.open("themes/${d.name}/preview.png").use { BitmapFactory.decodeStream(it) }
             }
         }
         entry.zip?.let { z ->
