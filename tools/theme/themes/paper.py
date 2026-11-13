@@ -114,7 +114,7 @@ class Sketch:
             pts.append((cx + rx * k * math.cos(a), cy + ry * k * math.sin(a)))
         self.path(pts, c, w, wob=0.3)
 
-    def box(self, x0, y0, x1, y1, r, c, w, over=8):
+    def box(self, x0, y0, x1, y1, r, c, w, over=8, wob=0.45):
         """A rounded box drawn in one stroke, its end running a little past its start."""
         pts = []
 
@@ -130,7 +130,7 @@ class Sketch:
         corner(x0 + r, y1 - r, 90)
         corner(x0 + r, y0 + r, 180)
         pts.append((x0 + r + 2 + over, y0 + 0.8))
-        self.path(pts, c, w, wob=0.45)
+        self.path(pts, c, w, wob=wob)
 
     def blob(self, cx, cy, r, c, lumpy=0.06):
         """A filled, slightly lumpy disc (an ink dot or a dab of marker)."""
@@ -233,6 +233,21 @@ def tape(w, h, cx, cy, tw, th, angle, seed, color=TAPE, a=200):
     return out
 
 
+INVADER = ["..X.....X..", "...X...X...", "..XXXXXXX..", ".XX.XXX.XX.", "XXXXXXXXXXX",
+           "X.XXXXXXX.X", "X.X.....X.X", "...XX.XX..."]
+
+
+def invader(d, cx, cy, s, c):
+    """The Expert invader as one solid ink silhouette: exact, touching cells."""
+    px = s * 2 / 11
+    x0, y0 = cx - px * 5.5, cy - px * 4
+    for j, row in enumerate(INVADER):
+        for i, ch in enumerate(row):
+            if ch == "X":  # PIL includes both ends, so neighbours overlap by a sub-pixel: no seams
+                d.rectangle([round(S(x0 + i * px)), round(S(y0 + j * px)),
+                             round(S(x0 + (i + 1) * px)), round(S(y0 + (j + 1) * px))], fill=c)
+
+
 class InkPen(Pen):
     """Pen with every stroke a little heavier, like a felt-tip fineliner."""
     k = 1.22
@@ -276,8 +291,8 @@ class Theme(Style):
         lay = canvas(w, h)
         d = ImageDraw.Draw(lay)
         for y in range(72, h, 30):
-            d.line((0, S(y), S(w), S(y)), fill=rgba(RULE, 120), width=int(S(1.1)))
-        d.line((S(13), 0, S(13), S(h)), fill=rgba(MARGIN, 150), width=int(S(1.3)))
+            d.line((0, S(y), S(w), S(y)), fill=rgba(RULE, 95), width=int(S(1.1)))
+        d.line((S(13), 0, S(13), S(h)), fill=rgba(MARGIN, 130), width=int(S(1.3)))
         for _ in range(140):  # stray fibres
             x, y = rnd.uniform(0, w), rnd.uniform(0, h)
             a, ln = rnd.uniform(0, math.tau), rnd.uniform(3, 9)
@@ -417,8 +432,8 @@ class Theme(Style):
                 for dy in (-1, 1):
                     x, y = cx + dx * s * 0.52, cy + dy * s * 0.52
                     d.rounded_rectangle([S(x - h), S(y - h), S(x + h), S(y + h)], radius=S(h * (1 if (dx, dy) == (1, -1) else 0.35)), fill=c)
-        elif key == "retroarch":
-            d.ellipse([S(cx - s * 0.95), S(cy - s * 0.78), S(cx + s * 0.95), S(cy + s * 0.78)], fill=c)
+        elif key == "retroarch":  # small: shows through the eyes, the silhouette's edge stays sharp
+            d.ellipse([S(cx - s * 0.7), S(cy - s * 0.5), S(cx + s * 0.7), S(cy + s * 0.5)], fill=c)
         else:  # recent, setting: round
             d.ellipse([S(cx - s * 0.9), S(cy - s * 0.9), S(cx + s * 0.9), S(cy + s * 0.9)], fill=c)
 
@@ -427,9 +442,13 @@ class Theme(Style):
         wash = canvas(156, 278)
         self._tile_wash(ImageDraw.Draw(wash), key, cx + 3, cy + 3, s)
         im = canvas(156, 278)
-        TILES[key](ImageDraw.Draw(im), cx, cy, s, rgba(INK), 6.2)
-        im = Image.alpha_composite(wobble(wash, S(1.2), S(40), seed_of("wash", key)), wobble(im, S(0.9), S(30), seed_of("tile", key)))
-        return finish(im)
+        if key == "retroarch":
+            invader(ImageDraw.Draw(im), cx, cy, s, rgba(INK))
+            im = wobble(im, S(0.5), S(40), seed_of("tile", key))
+        else:
+            TILES[key](ImageDraw.Draw(im), cx, cy, s, rgba(INK), 6.2)
+            im = wobble(im, S(0.9), S(30), seed_of("tile", key))
+        return finish(Image.alpha_composite(wobble(wash, S(1.2), S(40), seed_of("wash", key)), im))
 
     # ---- buttons and small parts -----------------------------------------------------------
     def button(self, label, primary):
@@ -463,8 +482,13 @@ class Theme(Style):
         w, h = 92, 44
         im = canvas(w, h)
         sk = Sketch(im, seed_of("toggle", on))
-        if on:
-            im.alpha_composite(highlighter(w, h, [(10, 82, 11, 33)], 4, 0.95).resize((w * SS, h * SS), Image.LANCZOS))
+        if on:  # the marker stays inside the track
+            hl = highlighter(w, h, [(10, 82, 11, 33)], 4, 0.95)
+            track = Image.new("L", (w * SS, h * SS), 0)
+            ImageDraw.Draw(track).rounded_rectangle([S(10), S(11), S(82), S(33)], radius=S(11), fill=255)
+            track = track.resize((w, h), Image.LANCZOS).filter(ImageFilter.MaxFilter(3))
+            hl.putalpha(ImageChops.multiply(hl.getchannel("A"), track))
+            im.alpha_composite(hl.resize((w * SS, h * SS), Image.LANCZOS))
         sk.box(10, 11, 82, 33, 11, rgba(INK), 2.2, over=10)
         if on:
             sk.blob(70, 22, 8.2, rgba(INK))
@@ -489,17 +513,17 @@ class Theme(Style):
             return finish(im)
         sk.path(pts, rgba(INK), size * 0.14, wob=0.3)
         ink = finish(im)
-        rim = tint(ink, rgba(CARD, 235)).filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(0.6))
+        rim = tint(ink, rgba(CARD, 200)).filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.GaussianBlur(0.6))
         return Image.alpha_composite(rim, ink)
 
     def panel_image(self, w, h):
-        if w == 400:  # pop-up menu: MainUI puts its title bar right on top, so the card is full width
-            box = (1, 0, w - 1, h - 6)
-            im = card_layer(w, h, box, 2, 1.0, fill=self.panel)
-            ys = [5 + 60 * i + 45.5 for i in range(max(1, (h - 10) // 60))]
-            im = Image.alpha_composite(im, rules(w, h, ys, box[0] + 1, box[2] - 1, a=120))
+        if w == 400:
+            # Pop-up menus: flush under MainUI's title bar. No ruled lines: MainUI stretches
+            # bg-pop-menu-4 to 5 and 6 rows and the in-game menu, where they would strike words out.
+            box = (0, -4, w, h - 6)  # square top corners
+            im = card_layer(w, h, box, 2, 1.0, fill=CARD)
             ln = canvas(w, h)
-            ImageDraw.Draw(ln).line((S(13), S(box[1]), S(13), S(box[3])), fill=rgba(MARGIN, 150), width=int(S(1.2)))
+            ImageDraw.Draw(ln).line((S(13), 0, S(13), S(box[3])), fill=rgba(MARGIN, 150), width=int(S(1.2)))
             return Image.alpha_composite(im, finish(ln))
         box = (16, 14, w - 16, h - 12)
         im = card_layer(w, h, box, 3, 1.6, fill=self.panel)
@@ -544,7 +568,10 @@ class Theme(Style):
         sk.path([(42.5, 20.5), (42.5, 27.5)], rgba(INK), 2.6, taper=False)
         if charging:
             bolt = [(26, 9), (16, 26), (23, 26), (19, 39), (32, 20), (25, 20), (29, 9)]
-            ImageDraw.Draw(im).polygon([(S(x), S(y)) for x, y in bolt], fill=rgba(HL))
+            d = ImageDraw.Draw(im)
+            pts = [(S(x), S(y)) for x, y in bolt]
+            d.line(pts + pts[:2], fill=rgba(CARD), width=int(S(3.5)), joint="curve")  # clear of the hatching
+            d.polygon(pts, fill=rgba(HL))
             sk.path(bolt + [bolt[0]], rgba(INK), 1.6, wob=0.1, taper=False)
         return finish(im)
 
@@ -553,21 +580,21 @@ class Theme(Style):
         w, h = 250, 360
         im = card_layer(w, h, (1, 1, w - 2, h - 3), 2, crisp=True)
         e = canvas(w, h)
-        Sketch(e, 4).box(1.5, 1.5, w - 2.5, h - 3.5, 2, rgba(INK, 150), 1.2, over=14)
+        Sketch(e, 4).box(2.5, 2.5, w - 3.5, h - 4.5, 2, rgba(INK, 150), 1.2, over=14, wob=0.3)
         return Image.alpha_composite(im, finish(e))
 
     def key(self, focused):
-        """Typewriter keys: MainUI writes key labels in white, so the keys are inked."""
-        w, h = 64, 52
+        """Typewriter keys: MainUI writes key labels in white, so the keys are inked. Made at
+        MainUI's letter-key size (52x38); the long keys stretch it up to 3.5x wide, so no warp."""
+        w, h = 52, 38
         im = canvas(w, h)
         d = ImageDraw.Draw(im)
-        box = (5, 4, w - 5, h - 7)
-        d.rounded_rectangle([S(v + (1 if i % 2 == 0 else 2.5)) for i, v in enumerate(box)], radius=S(9), fill=rgba(SHADE, 70))
-        d.rounded_rectangle([S(v) for v in box], radius=S(9), fill=rgba(RED_INK if focused else INK))
-        d.rounded_rectangle([S(v) for v in (8, 7, w - 8, h - 10)], radius=S(6.5), outline=(255, 255, 255, 46), width=int(S(1.2)))
-        if focused:
-            d.rounded_rectangle([S(v) for v in (2, 1, w - 2, h - 4)], radius=S(11), outline=rgba(HL), width=int(S(2.6)))
-        return finish(wobble(im, S(0.5), S(18), seed_of("key", focused)))
+        box = (4.5, 4, w - 4.5, h - 5.5)
+        d.rounded_rectangle([S(v + 1.5) for v in box], radius=S(6), fill=rgba(SHADE, 80))
+        d.rounded_rectangle([S(v) for v in box], radius=S(6), fill=rgba(RED_INK if focused else INK))
+        if focused:  # highlighter ring, clear of every edge
+            d.rounded_rectangle([S(v) for v in (1.5, 1.5, w - 1.5, h - 1.5)], radius=S(8), outline=rgba(HL), width=int(S(2)))
+        return finish(im)
 
     def input_box(self):
         w, h = 560, 60
@@ -599,6 +626,16 @@ class Theme(Style):
         ink = finish(wobble(ink, S(0.7), S(26), sd))
         m = finish(wobble(wash, S(0.7), S(26), sd)).getchannel("A")
         m = m.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(5))  # close where outlines cut it
+        if sid == "android":  # the only solid silhouette: redrawn as outline, wash and ink eyes
+            a = ink.getchannel("A")
+            m = a.filter(ImageFilter.MinFilter(7))
+            ink = Image.new("RGBA", ink.size, rgba(INK, 0))
+            ink.putalpha(ImageChops.subtract(a, m))
+            eyes = canvas(120, 130)
+            sk = Sketch(eyes, sd)
+            for ex in (-13, 13):
+                sk.blob(60 + ex * k, cy - 8 * k, 4.5 * k, rgba(INK))
+            ink = Image.alpha_composite(ink, finish(eyes))
         fill = Image.new("RGBA", ink.size, rgba(WASH, 0))
         fill.putalpha(m)
         out = Image.new("RGBA", ink.size, (0, 0, 0, 0))
@@ -616,8 +653,12 @@ class Theme(Style):
         col = cols[seed_of("appc", key) % len(cols)]
         im = Image.alpha_composite(im, tape(n, n, n / 2, 10, 40, 13, -4 + seed_of("ta", key) % 9, seed_of("apptape", key), col, 210))
         g = canvas(n, n)
-        APPS[key](ImageDraw.Draw(g), n / 2, n / 2 + 3, n * 0.24, rgba(INK), 4.4)
-        g = finish(wobble(g, S(0.6), S(22), seed_of("appg", key)))
+        if key == "retroarch":
+            invader(ImageDraw.Draw(g), n / 2, n / 2 + 3, n * 0.24, rgba(INK))
+            g = finish(wobble(g, S(0.5), S(40), seed_of("appg", key)))
+        else:
+            APPS[key](ImageDraw.Draw(g), n / 2, n / 2 + 3, n * 0.24, rgba(INK), 4.4)
+            g = finish(wobble(g, S(0.6), S(22), seed_of("appg", key)))
         # wash inside the drawing's closed shapes
         m = g.getchannel("A").point(lambda v: 255 if v > 60 else 0)
         ImageDraw.floodfill(m, (0, 0), 128)
@@ -650,4 +691,9 @@ class Theme(Style):
     def config(self):
         cfg = super().config()
         cfg["currentpage"] = {"color": hexc(RED_INK)}
+        # MainUI's own drawing: the row view's selected-icon glow is tileHighlight(accent)
+        # (x1.48, x1.47, x1), so this blue pencil glows as WASH; the pop-up title bar is
+        # darken(panel, 0.2), a manila tab, and toasts become sticky notes.
+        cfg["mainui"]["accent"] = "#8391EE"
+        cfg["mainui"]["panel"] = "#F8FFF4CF"
         return cfg
