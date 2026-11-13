@@ -108,6 +108,52 @@ class LayoutTest {
         assertEquals(4, Gfx.wifiBars(-30))
     }
 
+    @Test fun tallerCanvasPartsPicturesClearOfLines() {
+        // Plain: at the header's and footer's edges.
+        assertEquals(60 to 419, Gfx.splitRows { _, _ -> true })
+        // A 5 px line under the header (rows 60..64) and a 3 px one over the footer (417..419) stay with them.
+        fun kind(r: Int) = when (r) { in 60..64 -> 1; in 417..419 -> 2; else -> 0 }
+        assertEquals(65 to 416, Gfx.splitRows { a, b -> kind(a) == kind(b) })
+        // Nothing alike nearby (a busy picture): the edges.
+        assertEquals(60 to 419, Gfx.splitRows { a, b -> a == b })
+        // A grid every 8 columns, with a line at the right edge: the column before that line.
+        fun grid(x: Int) = x % 8 == 7 || x == 639
+        assertEquals(0 to 638, Gfx.splitRows(0, 639) { a, b -> grid(a) == grid(b) })
+    }
+
+    @Test fun picturesSpreadOverATallerCanvas() {
+        fun List<Gfx.Companion.Run>.flat() =
+            map { r -> listOf(r.s0.toFloat(), r.s1.toFloat(), r.d0, r.d1).map { kotlin.math.round(it * 10) / 10 } }
+        // The background on 640x557 (the screen 39 px down): header rows at the top, footer rows at
+        // the bottom, rows 60 and 419 stretched over the gaps and the content's own edge rows.
+        assertEquals(listOf(listOf(0f, 60f, 0f, 60f), listOf(60f, 61f, 60f, 100f), listOf(61f, 419f, 100f, 458f),
+            listOf(419f, 420f, 458f, 497.4f), listOf(420f, 480f, 497.4f, 557.4f)),
+            Gfx.runs(0, 480, 60, 419, 39f, 557.4f, 480).flat())
+        // A 500 px tall tile from row -20: the same rows of the screen, in its own rows.
+        assertEquals(listOf(listOf(0f, 80f, -20f, 60f), listOf(80f, 81f, 60f, 100f), listOf(81f, 439f, 100f, 458f),
+            listOf(439f, 440f, 458f, 497.4f), listOf(440f, 500f, 497.4f, 557.4f)),
+            Gfx.runs(-20, 500, 60, 419, 39f, 557.4f, 480).flat())
+        // A screen-sized canvas: as it is.
+        assertEquals(listOf(listOf(0f, 500f, -20f, 480f)), Gfx.runs(-20, 500, 60, 419, 0f, 480f, 480).flat())
+        // A bar on 853 px with its edge columns 0..2 and 637..639 kept at the screen's edges.
+        assertEquals(listOf(listOf(0f, 3f, 0f, 3f), listOf(3f, 4f, 3f, 111f), listOf(4f, 636f, 111f, 743f),
+            listOf(636f, 637f, 743f, 850.3f), listOf(637f, 640f, 850.3f, 853.3f)),
+            Gfx.runs(0, 640, 3, 636, 107f, 853.3f, 640).flat())
+    }
+
+    @Test fun rowsAlikeAllowsGradientsNotEdges() {
+        val mint = IntArray(640) { 0xFFCFFFDE.toInt() }
+        val mintish = IntArray(640) { 0xFFC8F8D8.toInt() }
+        val black = IntArray(640) { 0xFF000000.toInt() }
+        assertEquals(true, Gfx.rowsAlike(mint, mintish))
+        assertEquals(false, Gfx.rowsAlike(mint, black))
+        // An icon 4 samples wide in one of them still counts as different; a speck does not.
+        val icon = mint.copyOf().also { for (x in 100 until 116) it[x] = 0xFF000000.toInt() }
+        assertEquals(false, Gfx.rowsAlike(mint, icon))
+        val speck = mint.copyOf().also { it[100] = 0xFF000000.toInt() }
+        assertEquals(true, Gfx.rowsAlike(mint, speck))
+    }
+
     @Test fun drawnTilesUseTheThemeGeneratorsColours() {
         // MainUI's accent #3A96FF gives the generator's tile colours (within rounding).
         val a = 0xFF3A96FF.toInt()

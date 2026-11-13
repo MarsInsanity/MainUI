@@ -157,6 +157,65 @@ class Gfx {
 
         /** The top of OnionOS's main menu icon [h] px tall (centred 10 px above the middle of rows 60..420). */
         fun slotIconY(h: Int): Int = 50 + (360 - h) / 2
+
+        /**
+         * Where a taller canvas parts a screen-sized picture (rows of the 640x480 screen, [same]
+         * compares two): the first row from [first] (60) down, and the last from [last] (419) up, that
+         * looks like the 8 rows after (before) it, so stretched across the gap it leaves no seam and
+         * a line under the header (over the footer) stays with it; failing that (a fine pattern) the
+         * first that looks like the next one; else [first] and [last]. Columns on a wider canvas
+         * likewise, from 0 and 639.
+         */
+        fun splitRows(first: Int = 60, last: Int = 419, same: (Int, Int) -> Boolean): Pair<Int, Int> {
+            fun pick(from: Int, step: Int): Int {
+                val near = (0 until 24).map { from + it * step }
+                return near.firstOrNull { r -> (1..8).all { same(r, r + it * step) } }
+                    ?: near.firstOrNull { r -> same(r, r + step) } ?: from
+            }
+            return pick(first, 1) to pick(last, -1)
+        }
+
+        /** Lines (columns or rows) [s0] until [s1] of a picture drawn from [d0] to [d1]: stretched when that is longer. */
+        class Run(val s0: Int, val s1: Int, val d0: Float, val d1: Float)
+
+        /**
+         * How the [size] lines of a picture whose first sits at line [start] of the 640x480 screen
+         * ([screen]: 640 or 480 long) spread over a canvas [full] long with the screen [off] in: up to
+         * [lo] they go with the start, past [hi] with the end, between them with the centred screen, and
+         * lines [lo] and [hi] are stretched across the gaps (also over the middle's own edge lines, which
+         * filtering would blend with their neighbours).
+         */
+        fun runs(start: Int, size: Int, lo: Int, hi: Int, off: Float, full: Float, screen: Int): List<Run> {
+            val out = ArrayList<Run>(5)
+            // (screen lines s0 until s1 at d0 past their place, or the first of them stretched from d0 to d1)
+            fun add(s0: Int, s1: Int, d0: Float, d1: Float? = null) {
+                val p0 = max(s0 - start, 0); val p1 = min(s1 - start, size)
+                if (p1 <= p0) return
+                if (d1 == null) out += Run(p0, p1, d0 + start + p0, d0 + start + p1)
+                else if (d1 > d0) out += Run(p0, p0 + 1, d0, d1)
+            }
+            if (off <= 0f) { add(start, start + size, 0f); return out }
+            val end = full - screen
+            add(start, lo, 0f)
+            add(lo, lo + 1, lo.toFloat(), off + lo + 1)
+            add(lo + 1, hi, off)
+            add(hi, hi + 1, off + hi, end + hi + 1)
+            add(hi + 1, start + size, end)
+            return out
+        }
+
+        /** Two rows (columns) of ARGB pixels look alike: at most 1 in 50 (every 4th sampled) differs by over 24 in a channel. */
+        fun rowsAlike(a: IntArray, b: IntArray): Boolean {
+            var n = 0; var off = 0
+            for (i in 0 until min(a.size, b.size) step 4) {
+                n++
+                val p = a[i]; val q = b[i]
+                for (sh in 0..24 step 8) {
+                    if (kotlin.math.abs(((p ushr sh) and 255) - ((q ushr sh) and 255)) > 24) { off++; break }
+                }
+            }
+            return off * 50 <= n
+        }
     }
 
     fun begin(canvas: Canvas, screenW: Int, screenH: Int) {
@@ -168,6 +227,7 @@ class Gfx {
         wantsFrame = false
         redrawIn = 0L
         hintsEndX = 0f
+        footerBattery = null
         pendingHints.clear()
         // Scrolling labels not drawn last frame start from their beginning when they come back.
         marqueeStart.keys.retainAll(marqueeSeen)
@@ -383,46 +443,88 @@ class Gfx {
         fill.shader = null
     }
 
-    private val turnSrc = android.graphics.Rect()
+    private val pieceSrc = android.graphics.Rect()
 
-    /** Part [sx], [sy], [sw] x [sh] of [b] turned 180 degrees (coordinates in the turned picture), into the box. */
-    private fun turned(b: Bitmap, sx: Int, sy: Int, sw: Int, sh: Int, dx: Float, dy: Float, dw: Float, dh: Float) {
-        if (sw <= 0 || sh <= 0 || dw <= 0f || dh <= 0f) return
-        turnSrc.set(b.width - sx - sw, b.height - sy - sh, b.width - sx, b.height - sy)
-        rect.set(dx, dy, dx + dw, dy + dh)
-        c.save(); c.rotate(180f, rect.centerX(), rect.centerY())
-        c.drawBitmap(b, turnSrc, rect, bmpPaint)
-        c.restore()
+    /** [b] drawn in pieces, [xs] across and [ys] down; [turned]: as the picture turned 180 degrees. */
+    private fun pieces(b: Bitmap, xs: List<Run>, ys: List<Run>, turned: Boolean = false) {
+        for (y in ys) for (x in xs) {
+            if (turned) pieceSrc.set(b.width - x.s1, b.height - y.s1, b.width - x.s0, b.height - y.s0)
+            else pieceSrc.set(x.s0, y.s0, x.s1, y.s1)
+            rect.set(x.d0, y.d0, x.d1, y.d1)
+            val stretched = (x.s1 - x.s0 == 1 && x.d1 - x.d0 != 1f) || (y.s1 - y.s0 == 1 && y.d1 - y.d0 != 1f)
+            val piece = if (stretched) slice(b, pieceSrc.left, pieceSrc.top, pieceSrc.width(), pieceSrc.height()) else null
+            if (turned) { c.save(); c.rotate(180f, rect.centerX(), rect.centerY()) }
+            if (piece != null) c.drawBitmap(piece, null, rect, bmpPaint) else c.drawBitmap(b, pieceSrc, rect, bmpPaint)
+            if (turned) c.restore()
+        }
+    }
+
+    private val slices = java.util.WeakHashMap<Bitmap, HashMap<Long, Bitmap>>()
+
+    /**
+     * The [w] x [h] part of [b] at [x], [y] as a picture of its own (cached): a stretched one-pixel
+     * row or column drawn straight from [b] takes in its neighbours' colours.
+     */
+    private fun slice(b: Bitmap, x: Int, y: Int, w: Int, h: Int): Bitmap? = synchronized(slices) {
+        val key = (x.toLong() shl 48) or (y.toLong() shl 32) or (w.toLong() shl 16) or h.toLong()
+        val made = slices.getOrPut(b) { HashMap() }
+        made[key] ?: runCatching { Bitmap.createBitmap(b, x, y, w, h) }.getOrNull()?.also { made[key] = it }
+    }
+
+    private val rowSplits = java.util.WeakHashMap<Bitmap, Pair<Int, Int>>()
+    private val columnSplits = java.util.WeakHashMap<Bitmap, Pair<Int, Int>>()
+
+    /**
+     * [splitRows] of [b]'s rows (its first at screen row [top]), or with [columns] of the
+     * background's columns; [turned]: the background, upside down, whose screen is its top left. Cached.
+     */
+    private fun splitOf(b: Bitmap, columns: Boolean, turned: Boolean = false, top: Int = 0): Pair<Int, Int> {
+        val cache = if (columns) columnSplits else rowSplits
+        return synchronized(cache) {
+            cache.getOrPut(b) {
+                val lines = HashMap<Int, IntArray>()
+                fun line(s: Int) = lines.getOrPut(s) {
+                    runCatching {
+                        if (columns) {
+                            val h = min(b.height, 480)
+                            val x = b.width - 1 - s
+                            IntArray(h).also { if (x in 0 until b.width) b.getPixels(it, 0, 1, x, b.height - h, 1, h) }
+                        } else {
+                            val w = if (turned) min(b.width, 640) else b.width
+                            val y = if (turned) b.height - 1 - s else s - top
+                            IntArray(w).also { if (y in 0 until b.height) b.getPixels(it, 0, w, b.width - w, y, w, 1) }
+                        }
+                    }.getOrDefault(IntArray(0))
+                }
+                if (columns) splitRows(0, 639) { a, z -> rowsAlike(line(a), line(z)) }
+                else splitRows { a, z -> rowsAlike(line(a), line(z)) }
+            }
+        }
     }
 
     /**
-     * The background as a Miyoo shows it: turned 180 degrees and 1:1. On a bigger canvas its rows
-     * 0-60, 60-420 and 420-480 go with the header, the centred content and the footer, and the room
-     * between and beside them gets its edge rows and columns stretched.
+     * Screen-sized OnionOS art (a full-screen main menu tile) at [x], its top at row [top] of the
+     * 640x480 screen: on a taller canvas, like the background, its header and footer rows go with
+     * the bars and the rows between are stretched across the gaps.
+     */
+    fun screenArt(b: Bitmap, x: Float, top: Int) {
+        val y0 = cy0
+        if (y0 <= 0f) { bmp(b, x, top.toFloat()); return }
+        val (a, z) = splitOf(b, columns = false, top = top)
+        pieces(b, listOf(Run(0, b.width, x, x + b.width)), runs(top, b.height, a, z, y0, H, 480))
+    }
+
+    /**
+     * The background as a Miyoo shows it: turned 180 degrees and 1:1. On a bigger canvas its header,
+     * content and footer rows go with the header, the centred content and the footer, its sides with
+     * the screen's edges, and the room between gets rows and columns stretched ([splitRows]).
      */
     private fun backgroundNative(b: Bitmap) {
         val bw = min(b.width, 640); val bh = min(b.height, 480)
         if (bw < 640 || bh < 480) c.drawColor(Color.BLACK)
-        val x0 = cx0
-        // (dy1 null: 1:1 rows; else one row stretched from dy0 to dy1)
-        fun band(sy0: Int, sy1: Int, dy0: Float, dy1: Float? = null) {
-            val y0 = if (dy1 == null) sy0 else min(sy0, bh - 1)
-            val rows = min(sy1, bh) - y0
-            val dh = dy1?.let { it - dy0 } ?: rows.toFloat()
-            if (rows <= 0 || dh <= 0f) return
-            turned(b, 0, y0, bw, rows, x0, dy0, bw.toFloat(), dh)
-            if (x0 > 0f) {
-                turned(b, 0, y0, 1, rows, 0f, dy0, x0, dh)
-                turned(b, bw - 1, y0, 1, rows, x0 + bw, dy0, W - x0 - bw, dh)
-            }
-        }
-        val y0 = cy0
-        if (y0 <= 0f) { band(0, 480, 0f); return }
-        band(0, 60, 0f)
-        band(60, 61, 60f, y0 + 60f)
-        band(60, 420, y0 + 60f)
-        band(419, 420, y0 + 420f, H - FOOTER)
-        band(420, 480, H - FOOTER)
+        val (l, r) = if (cx0 > 0f) splitOf(b, columns = true, turned = true) else 0 to 639
+        val (a, z) = if (cy0 > 0f) splitOf(b, columns = false, turned = true) else 60 to 419
+        pieces(b, runs(0, bw, l, r, cx0, W, 640), runs(0, bh, a, z, cy0, H, 480), turned = true)
     }
 
     /**
@@ -431,13 +533,8 @@ class Gfx {
      */
     private fun onionBar(b: Bitmap, y: Float) {
         val x0 = cx0
-        bmp(b, x0, y)
-        if (x0 <= 0f || b.width != 640) return
-        val h = b.height.toFloat()
-        sliceSrc.set(0, 0, 1, b.height); sliceDst.set(0f, y, x0, y + h)
-        c.drawBitmap(b, sliceSrc, sliceDst, bmpPaint)
-        sliceSrc.set(639, 0, 640, b.height); sliceDst.set(x0 + 640f, y, W, y + h)
-        c.drawBitmap(b, sliceSrc, sliceDst, bmpPaint)
+        if (x0 <= 0f || b.width != 640) { bmp(b, x0, y); return }
+        pieces(b, runs(0, 640, 0, 639, x0, W, 640), listOf(Run(0, b.height, y, y + b.height)))
     }
 
     fun header(title: String?, logo: Boolean = false, showBattery: Boolean = true) {
@@ -476,17 +573,18 @@ class Gfx {
 
     /**
      * The battery, an OnionOS theme's Wi-Fi icon left of it, and the clock left of those (it is
-     * MainUI's, off by default). Returns their left edge.
+     * MainUI's, off by default). Returns their left edge. [boxes]: over what was drawn there (the
+     * main menu's tiles), the icons' boxes show the background and bg-title, as on a Miyoo.
      */
-    fun headerStatus(showBattery: Boolean = true): Float {
+    fun headerStatus(showBattery: Boolean = true, boxes: Boolean = false): Float {
         val onion = theme.onionLayout
         val batteryLeft = when {
             !showBattery -> W - BATTERY_MARGIN
-            onion -> battery(cx0 + 596f, 30f)
+            onion -> { if (boxes) statusBox(cx0 + 572f); battery(cx0 + 596f, 30f) }
             else -> battery(W - 44f, 30f)
         }
         var left = batteryLeft
-        if (onion) wifi()?.let { left = min(left, it) }
+        if (onion) wifi(boxes)?.let { left = min(left, it) }
         if (MainUI.settings.showClock) {
             val h24 = when (MainUI.settings.clockFormat) {
                 "12" -> false
@@ -514,12 +612,14 @@ class Gfx {
 
     /**
      * OnionOS's Wi-Fi icon (icon-wifi-signal-01..04) while connected, centred in the 48 px box at
-     * (504, 6) left of the battery's. Returns the box's left edge, null when not connected.
+     * (504, 6) left of the battery's ([box]: see [headerStatus]). Returns the box's left edge, null
+     * when not connected.
      */
-    private fun wifi(): Float? {
+    private fun wifi(box: Boolean): Float? {
         val n = WifiState.bars.coerceAtMost(4)
         if (n <= 0) return null
         val boxX = cx0 + 504f
+        if (box) statusBox(boxX)
         val b = skin("icon-wifi-signal-0$n")
         if (b != null) {
             val x = boxX + (48 - b.width) / 2
@@ -528,6 +628,14 @@ class Gfx {
         }
         drawWifiIcon(boxX + 24f, 30f, n)
         return boxX
+    }
+
+    /** The top bar's 48 px box at [x], 6 painted again with the background and bg-title, as a Miyoo does under its status icons. */
+    private fun statusBox(x: Float) {
+        c.save(); c.clipRect(x, 6f, x + 48f, 54f)
+        background()
+        skin("bg-title")?.let { onionBar(it, 0f) }
+        c.restore()
     }
 
     /** A Wi-Fi fan with [bars] of its 4 parts lit, for a theme without the icons. */
@@ -622,6 +730,7 @@ class Gfx {
             alphaBounds(icon)?.let { r ->
                 val top = 30 - box.h / 2 + box.iconY
                 y = batteryAnchorY(top + r.top, top + r.bottom, H) + (cy - 30f)
+                if (top + r.top >= 420) footerBattery = cx to cy
             }
         }
         val left = cx - box.w / 2
@@ -762,7 +871,12 @@ class Gfx {
         }
         if (clip) c.restore()
         hintsEndX = x - gap
+        // (OnionOS draws the battery last: one in the footer's band goes over it)
+        footerBattery?.let { (bx, by) -> battery(bx, by) }
     }
+
+    /** Where this frame's battery was drawn when its picture shows in the footer's band (win98: in its taskbar). */
+    private var footerBattery: Pair<Float, Float>? = null
 
     /** Right edge of the footer hints drawn this frame (footerStatus avoids overlapping them). */
     private var hintsEndX = 0f

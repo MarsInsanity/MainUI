@@ -492,6 +492,7 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
             when {
                 img == null -> g.menuTile(t.glyph, x, y, tileW, tileH, sel)
                 // At its own size, centred on its slot 10 px above the middle (it may fill the screen).
+                onion && img.width >= 640 && img.height >= 480 -> g.screenArt(img, Gfx.slotIconX(x, img.width), Gfx.slotIconY(img.height))
                 onion -> g.bmp(img, Gfx.slotIconX(x, img.width), g.cy0 + Gfx.slotIconY(img.height))
                 else -> g.bmp(img, x, y, tileW, tileH)
             }
@@ -504,7 +505,7 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
                 else g.text(t.label, style, x + tileW / 2, y + 195f, Align.CENTER, maxW = tileW - 8f, color = color)
             }
         }
-        if (onion) g.headerStatus() else g.footer("SELECT", null)
+        if (onion) g.headerStatus(boxes = true) else g.footer("SELECT", null)
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
