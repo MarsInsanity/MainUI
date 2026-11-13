@@ -198,9 +198,12 @@ tile is the theme's Games tile with its picture swapped for a handheld in the pi
 START buttons are its A button with another letter, and toggles, panels and progress bars take the
 colour of its selection bar. Themes whose footer picture carries the hints (GBOnion, Onion Boy, win98...)
 show only their own A / B there, as OnionOS does. Like OnionOS, MainUI shows `background.png` turned
-180 degrees: themes store it upside down. The Games grid of a theme without a `"mainui"` block is laid
-out like the Miyoo's (pictures at their own size, names in the grid1x4 font), and list text is bold
-whatever the font, as OnionOS draws it.
+180 degrees: themes store it upside down. The main menu and Games grid of a theme without a
+`"mainui"` block are laid out like the Miyoo's: tile pictures at their own size on its 155 px slots
+(full-screen ones too), one dot per entry, bars and hints under the tiles, the battery (composed as
+OnionOS composes it) and the Wi-Fi signal (`icon-wifi-signal-01..04`) over them, the grid's names in
+the grid1x4 font and its page number in the footer. List text is bold whatever the font, as OnionOS
+draws it.
 
 Differences from a Miyoo Mini, due to the screen:
 
@@ -233,7 +236,10 @@ Differences from a Miyoo Mini, due to the screen:
   own setting (*Clock format*).
 - Backgrounds (Settings > User interface > Background fit: Auto / Crop / Stretch / Fit): on Auto an
   OnionOS theme's is shown 1:1 as on a Miyoo, its header and footer rows behind the bars on a taller
-  screen and its edges stretched on a wider one; MainUI's own themes' are cropped to fill the screen.
+  screen (full-screen main menu pictures likewise) and its edges at the sides of a wider one, with a
+  row or column stretched across the gaps; MainUI's own themes' are cropped to fill the screen. On a
+  wider screen an OnionOS theme's header and footer stay in the centred 640 px column, their bars'
+  end columns stretched to the edges.
 - Fonts that Onion ships (`/mnt/SDCARD/miyoo/app/...`) are matched by file name. BPreplay, Exo 2 and
   Adobe Blank are bundled. Helvetica and Microsoft YaHei are not, because of their licences, so the
   system font is used instead (regular, or bold for `HENB.TTF`). A font a theme names but doesn't
