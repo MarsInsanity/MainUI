@@ -75,7 +75,7 @@ class UiSettingsScene(host: SceneHost) : ListScene(host, "User interface") {
             toggle("Show empty systems", { s.showEmptySystems }) { s.showEmptySystems = it },
             toggle("Show game art in lists", { s.showGameArt }) { s.showGameArt = it },
             toggle("OnionOS icons for missing systems", { s.onionIcons }) { s.onionIcons = it; io.github.marsinsanity.mainui.theme.Theme.onionIcons = it },
-            multi("Background fit", listOf("cover" to "Crop", "stretch" to "Stretch", "fit" to "Fit"), { s.backgroundFit }) { s.backgroundFit = it },
+            multi("Background fit", listOf("auto" to "Auto", "cover" to "Crop", "stretch" to "Stretch", "fit" to "Fit"), { s.backgroundFit }) { s.backgroundFit = it },
             toggle("Smooth scaling", { s.smoothScaling }) { s.smoothScaling = it },
             toggle("Show clock", { s.showClock }) { s.showClock = it },
             multi("Clock format", listOf("24" to "24-hour", "12" to "12-hour", "system" to "Like Android"),

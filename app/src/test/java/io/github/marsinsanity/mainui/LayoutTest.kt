@@ -50,6 +50,64 @@ class LayoutTest {
         assertEquals(listOf("Supercalifragilistic") to 20f, fit("Supercalifragilistic", 28f, 20f, fits))
     }
 
+    @Test fun contentOffsetsAreWholePixels() {
+        assertEquals(107f, Gfx.centred(853.33f, 640f), 0f)
+        assertEquals(39f, Gfx.centred(557.4f, 480f), 0f)
+        assertEquals(0f, Gfx.centred(640f, 640f), 0f)
+    }
+
+    @Test fun batteryBoxIsOnionsComposite() {
+        // 48x48 icon, "100%" 50 px wide, text on the right: 2*(50+5)+48 = 158, the icon at 0, the text after it.
+        val left = Gfx.batteryBox(48, 48, 50, 30, visible = true, fixed = false, align = "left", offsetX = 0)
+        assertEquals(158, left.w); assertEquals(48, left.h)
+        assertEquals(0, left.iconX); assertEquals(53, left.textX); assertEquals(0, left.iconY)
+        // onleft: the text first, the icon still centred in the box.
+        val right = Gfx.batteryBox(48, 48, 50, 30, visible = true, fixed = false, align = "right", offsetX = 0)
+        assertEquals(55, right.iconX); assertEquals(0, right.textX)
+        assertEquals(158 / 2, right.iconX + 48 / 2 + 0)
+        // Silky: 88x48 fixed with offsetX 26: as wide as the icon.
+        val silky = Gfx.batteryBox(88, 48, 40, 30, visible = true, fixed = true, align = "left", offsetX = 26)
+        assertEquals(88, silky.w); assertEquals(26, silky.textX)
+        // Small icons sit left in a 48 px box, odd sizes are made even.
+        val small = Gfx.batteryBox(32, 32, 50, 30, visible = false, fixed = false, align = "left", offsetX = 0)
+        assertEquals(48, small.w); assertEquals(48, small.h); assertEquals(0, small.iconX); assertEquals(8, small.iconY)
+        assertEquals(94, Gfx.batteryBox(93, 47, 0, 0, visible = false, fixed = false, align = "left", offsetX = 0).w)
+        // Text taller than the icon: its height; else (OnionOS's slip) the icon's width.
+        assertEquals(58, Gfx.batteryBox(129, 30, 40, 57, visible = true, fixed = true, align = "left", offsetX = 0).h)
+        assertEquals(130, Gfx.batteryBox(129, 64, 40, 30, visible = true, fixed = true, align = "left", offsetX = 0).h)
+        // Centred text with a negative odd difference truncates towards zero, as in C.
+        assertEquals(-1, Gfx.batteryBox(48, 48, 51, 30, visible = true, fixed = true, align = "center", offsetX = 0).textX)
+    }
+
+    @Test fun screenSizedBatteryGoesWithItsBand() {
+        // win98's taskbar battery (rows 444..470 of 480) stays at the bottom of a 557 px canvas.
+        assertEquals(107f, Gfx.batteryAnchorY(444, 470, 557f), 0.01f)
+        assertEquals(30f, Gfx.batteryAnchorY(444, 470, 480f), 0.01f)
+        assertEquals(30f, Gfx.batteryAnchorY(6, 54, 557f), 0f)
+        // System 9's spans the screen: it goes with the content.
+        assertEquals(69f, Gfx.batteryAnchorY(0, 480, 557.4f), 0f)
+    }
+
+    @Test fun onionMainMenuGeometry() {
+        // 24x14 dots, 4 items: x 262, 29 apart (Silky, Blueprint); 10x10 and 6 items: 275, 15 apart.
+        assertEquals(262, Gfx.menuDotX(0, 4, 29)); assertEquals(291, Gfx.menuDotX(1, 4, 29))
+        assertEquals(275, Gfx.menuDotX(0, 6, 15))
+        // 156x278 in slot 0 at (10, 91); 156x328 at (10, 66); 120 wide centred (27); 794 wide at -309.
+        assertEquals(10f, Gfx.slotIconX(10f, 156), 0f); assertEquals(91, Gfx.slotIconY(278))
+        assertEquals(66, Gfx.slotIconY(328)); assertEquals(27f, Gfx.slotIconX(10f, 120), 0f)
+        assertEquals(10f - 319f, Gfx.slotIconX(10f, 794), 0f); assertEquals(-20, Gfx.slotIconY(500))
+    }
+
+    @Test fun wifiSignalBars() {
+        assertEquals(0, Gfx.wifiBars(-127))
+        assertEquals(1, Gfx.wifiBars(-100))
+        assertEquals(1, Gfx.wifiBars(-90))
+        assertEquals(2, Gfx.wifiBars(-80))
+        assertEquals(3, Gfx.wifiBars(-65))
+        assertEquals(4, Gfx.wifiBars(-55))
+        assertEquals(4, Gfx.wifiBars(-30))
+    }
+
     @Test fun drawnTilesUseTheThemeGeneratorsColours() {
         // MainUI's accent #3A96FF gives the generator's tile colours (within rounding).
         val a = 0xFF3A96FF.toInt()

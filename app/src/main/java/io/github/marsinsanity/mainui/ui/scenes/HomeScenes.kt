@@ -6,6 +6,8 @@ import android.graphics.Color
 import io.github.marsinsanity.mainui.MainUI
 import io.github.marsinsanity.mainui.data.GameSystem
 import io.github.marsinsanity.mainui.data.SystemDef
+import io.github.marsinsanity.mainui.theme.ArtSource
+import io.github.marsinsanity.mainui.theme.FontStyle
 import io.github.marsinsanity.mainui.ui.Align
 import io.github.marsinsanity.mainui.ui.Btn
 import io.github.marsinsanity.mainui.ui.Gfx
@@ -195,10 +197,13 @@ object HomeScenes {
         val cellW = CELL_W; val cellH = CELL_H
         val gs = g.theme.grid
         val bg = g.skin(if (sel) "bg-game-item-f" else "bg-game-item-n")
-        if (g.theme.onionLayout && drawOnionCell(g, t, x, y, sel, bg)) return
-        if (bg != null) g.bmp(bg, x, y, cellW, cellH)
+        val onion = g.theme.onionLayout
+        if (onion && (drawOnionCell(g, t, x, y, sel, bg) || drawOnionMenuCell(g, t, x, y, sel, bg))) return
+        if (bg != null) { if (onion) onionCellBg(g, bg, x, y) else g.bmp(bg, x, y, cellW, cellH) }
         else if (sel) g.fillRect(x + 4, y + 4, cellW - 8, cellH - 8, Color.argb(70, 255, 255, 255), 14f)
-        val iconBoxH = if (g.theme.hideIconLabels) cellH - 20 else cellH - 46
+        // (OnionOS's hideLabels.icons blanks only its main menu entries' names)
+        val labels = !(g.theme.hideIconLabels && t.skin != null)
+        val iconBoxH = if (!labels) cellH - 20 else cellH - 46
         // System icon, or for main menu entries the theme's ic-*-n/f tile scaled down
         val icon = tileIcon(g, t, sel) ?: t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
         if (icon != null) g.bmpFit(icon, x + 10, y + 8, cellW - 20, iconBoxH)
@@ -207,12 +212,55 @@ object HomeScenes {
             g.systemTile("", x + 22, y + 18, cellW - 44, iconBoxH - 20, sel)
             g.glyph(t.glyph, x + cellW / 2, y + 18 + (iconBoxH - 20) / 2, 30f, Color.WHITE)
         }
-        if (!g.theme.hideIconLabels) {
-            val style = io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size3x4, gs.color)
+        if (labels && onion) onionCellLabel(g, t.label, x, y, sel)
+        else if (labels) {
+            val style = FontStyle(gs.typeface, gs.size3x4, gs.color)
             g.text(t.label, style, x + cellW / 2, y + cellH - 22f, Align.CENTER, maxW = cellW - 8f,
                 color = if (sel) gs.selectedColor else gs.color, marquee = sel)
         }
     }
+}
+
+/** bg-game-item-f/n as the Miyoo's grid draws it: at its own size, centred in the cell and 2 px down and right. */
+private fun onionCellBg(g: Gfx, bg: Bitmap, x: Float, y: Float) =
+    g.bmp(bg, x + (155 - bg.width) / 2 + 2, y + (170 - bg.height) / 2 + 2)
+
+/**
+ * A games grid cell's name as the Miyoo draws it: grid1x4, centred 134 px down, past the cell if
+ * longer. One much longer than the cell is made smaller, then scrolled.
+ */
+private fun onionCellLabel(g: Gfx, label: String, x: Float, y: Float, sel: Boolean) {
+    val gs = g.theme.grid
+    val cellW = HomeScenes.CELL_W
+    val style = FontStyle(gs.typeface, gs.size1x4, gs.color)
+    val color = if (sel) gs.selectedColor else gs.color
+    if (g.textWidth(label, style) <= cellW * 1.3f) {
+        g.text(label, style, x + cellW / 2, y + 134f, Align.CENTER, color = color)
+        return
+    }
+    val maxW = cellW - 6f
+    var size = gs.size1x4
+    while (size > gs.size3x4 && g.textWidth(label, style, size) > maxW) size -= 1f
+    g.text(label, style, x + cellW / 2, y + 134f, Align.CENTER, maxW = maxW, color = color, size = size, marquee = sel)
+}
+
+/**
+ * A main menu entry in an OnionOS theme's grid cell (the home row view): its ic-* picture cut to
+ * what shows of it, fitted above the name like the systems beside it. A theme whose unselected
+ * pictures are hidden (1x1) gets the selected one, fainter. False: the theme has no picture for it.
+ */
+private fun drawOnionMenuCell(g: Gfx, t: Tile, x: Float, y: Float, sel: Boolean, bg: Bitmap?): Boolean {
+    val skin = t.skin ?: return false
+    fun hidden(b: Bitmap?) = b == null || b.width <= 2 || b.height <= 2
+    var img = g.skin("ic-$skin-${if (sel) "f" else "n"}")
+    var alpha = 255
+    if (!sel && hidden(img)) { img = g.skin("ic-$skin-f"); alpha = 140 }
+    if (img == null || hidden(img)) return false
+    val src = g.alphaBounds(img) ?: return false
+    if (bg != null) onionCellBg(g, bg, x, y)
+    g.bmpFit(img, src, x + 12f, y + 12f, HomeScenes.CELL_W - 24f, 104f, alpha, upscale = false)
+    if (!g.theme.hideIconLabels) onionCellLabel(g, t.label, x, y, sel)
+    return true
 }
 
 /**
@@ -223,25 +271,18 @@ object HomeScenes {
 private fun drawOnionCell(g: Gfx, t: Tile, x: Float, y: Float, sel: Boolean, bg: Bitmap?): Boolean {
     val cellW = HomeScenes.CELL_W; val cellH = HomeScenes.CELL_H
     val icon = HomeScenes.tileIcon(g, t, sel) ?: return false
-    if (bg != null) g.bmp(bg, x + (cellW - bg.width) / 2 + 2, y + (cellH - bg.height) / 2 + 2)
-    val labels = !g.theme.hideIconLabels
-    if (icon.width <= cellW && icon.height <= cellH) {
+    if (bg != null) onionCellBg(g, bg, x, y)
+    if (g.theme.artSource(icon) != ArtSource.MAINUI) {
+        // (as on the device: at its own size, even over the name or past the cell)
+        g.bmp(icon, x + (155 - icon.width) / 2, y + (170 - icon.height) / 2 - 10)
+    } else if (icon.width <= cellW && icon.height <= cellH) {
         val top = y + (cellH - icon.height) / 2 - 10
-        // OnionOS icons end above the name; one that runs into it (MainUI's own, with its badge) is made smaller.
+        // MainUI's own icons (with their badge) run into the name: made smaller.
         val bottom = contentBottom(icon)
-        val s = if (labels && top + bottom > y + 118f) ((y + 118f - top) / bottom).coerceAtLeast(0.5f) else 1f
+        val s = if (top + bottom > y + 118f) ((y + 118f - top) / bottom).coerceAtLeast(0.5f) else 1f
         g.bmp(icon, x + (cellW - icon.width * s) / 2, top, icon.width * s, icon.height * s)
     } else g.bmpFit(icon, x, y, cellW, cellH - 20)
-    if (labels) {
-        val gs = g.theme.grid
-        val maxW = cellW - 6f
-        // (OnionOS's names are short; a longer one is made smaller before it scrolls)
-        var size = gs.size1x4
-        val style = io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, size, gs.color)
-        while (size > gs.size3x4 && g.textWidth(t.label, style, size) > maxW) size -= 1f
-        g.text(t.label, style, x + cellW / 2, y + 134f, Align.CENTER, maxW = maxW,
-            color = if (sel) gs.selectedColor else gs.color, size = size, marquee = sel)
-    }
+    onionCellLabel(g, t.label, x, y, sel)
     return true
 }
 
@@ -275,15 +316,21 @@ class TileStrip {
         first = first.coerceIn(0, max(0, count - VISIBLE))
     }
 
-    /** Fewer tiles than the window: centered. */
-    private fun x0(width: Float, count: Int) =
-        (width - 640f) / 2f + 8f + if (count < VISIBLE) (VISIBLE - count) * TILE_W / 2 else 0f
+    /** Fewer tiles than the window: centered. [onion]: OnionOS's slots, from x 10 and never centred. */
+    private fun x0(width: Float, count: Int, onion: Boolean) = Gfx.centred(width, 640f) +
+        if (onion) 10f else 8f + if (count < VISIBLE) (VISIBLE - count) * TILE_W / 2 else 0f
 
-    fun draw(g: Gfx, count: Int, index: Int, tile: (idx: Int, x: Float, y: Float, w: Float, h: Float, sel: Boolean) -> Unit) {
-        val y = TOP + g.cy0
-        val x0 = x0(g.W, count)
+    /**
+     * [onion]: OnionOS's main menu, slots [SLOT_W] apart, [tile] given the slot's left edge (and the
+     * box a 156x278 picture would fill there) and OnionOS's dots. [snap]: no sliding.
+     */
+    fun draw(g: Gfx, count: Int, index: Int, onion: Boolean = false, snap: Boolean = false,
+             tile: (idx: Int, x: Float, y: Float, w: Float, h: Float, sel: Boolean) -> Unit) {
+        val y = (if (onion) ONION_TOP else TOP) + g.cy0
+        val x0 = x0(g.W, count, onion)
+        val pitch = if (onion) SLOT_W else TILE_W
         // Ease towards the target window (about 120 ms), then stop redrawing.
-        if (scroll.isNaN()) scroll = first.toFloat()
+        if (scroll.isNaN() || snap) scroll = first.toFloat()
         val dt = if (lastFrame == 0L) 16L else (g.now - lastFrame).coerceIn(1L, 50L)
         lastFrame = g.now
         val target = first.toFloat()
@@ -293,19 +340,21 @@ class TileStrip {
         val from = kotlin.math.floor(scroll).toInt().coerceAtLeast(0)
         val to = min(count - 1, kotlin.math.ceil(scroll).toInt() + VISIBLE - 1)
         for (idx in from..to) {
-            val x = x0 + (idx - scroll) * TILE_W
-            if (x + TILE_W < 0f || x > g.W) continue
+            val x = x0 + (idx - scroll) * pitch
+            // (an OnionOS picture can be far bigger than its slot)
+            if (!onion && (x + TILE_W < 0f || x > g.W)) continue
             tile(idx, x, y, TILE_W, TILE_H, idx == index)
         }
+        if (onion && g.menuDots(count, index)) return
         // So it's clear more tiles are to the side.
         if (count > VISIBLE) g.dots(count, index, DOTS_Y + g.cy0)
     }
 
     /** The tile at [x], [y] (a tap), or null: the header, dots and footer are no tile. */
-    fun hit(x: Float, y: Float, width: Float, height: Float, count: Int): Int? {
-        val top = TOP + (height - 480f) / 2f
-        if (y < top || y > top + TILE_H) return null
-        val col = kotlin.math.floor((x - x0(width, count)) / TILE_W).toInt()
+    fun hit(x: Float, y: Float, width: Float, height: Float, count: Int, onion: Boolean = false): Int? {
+        val top = Gfx.centred(height, 480f) + if (onion) Gfx.HEADER else TOP
+        if (y < top || y > top + if (onion) 330f else TILE_H) return null
+        val col = kotlin.math.floor((x - x0(width, count, onion)) / (if (onion) SLOT_W else TILE_W)).toInt()
         if (col !in 0 until VISIBLE) return null
         return (first + col).takeIf { it in 0 until count }
     }
@@ -316,6 +365,10 @@ class TileStrip {
         const val TILE_H = 278f
         const val TOP = 90f
         const val DOTS_Y = 396f
+        /** OnionOS's main menu slot width (cells of its 1x4 grid from x 10). */
+        const val SLOT_W = 155f
+        /** Where OnionOS puts the top of a 156x278 tile. */
+        const val ONION_TOP = 91f
 
         /**
          * A system (or Search / Android) as a top-level page tile: the same rounded box, its theme
@@ -324,6 +377,7 @@ class TileStrip {
         fun drawSystem(g: Gfx, t: Tile, x: Float, y: Float, w: Float, h: Float, sel: Boolean) {
             val img = t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
             if (img != null) g.bmp(img, x, y, w, h)
+            else if (g.theme.onionLayout) drawOnionSystem(g, t, x + (w - HomeScenes.CELL_W) / 2, y + 10f, sel)
             else {
                 val art = g.blankTile(x, y, w, h, sel)
                 val at = art?.let { g.tilePictureBox(it, x, y, w, h) }
@@ -357,6 +411,21 @@ class TileStrip {
                 g.text(sub, io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size3x4 * 0.8f, gs.color),
                     x + w / 2, y + 222f, Align.CENTER, maxW = maxW,
                     color = if (sel) gs.selectedColor else Color.argb(170, Color.red(gs.color), Color.green(gs.color), Color.blue(gs.color)))
+            }
+        }
+
+        /** An OnionOS theme's system in a tall tile: its games grid cell, [x], [y] its top left, above the name. */
+        private fun drawOnionSystem(g: Gfx, t: Tile, x: Float, y: Float, sel: Boolean) {
+            g.skin(if (sel) "bg-game-item-f" else "bg-game-item-n")?.let { onionCellBg(g, it, x, y) }
+            val icon = HomeScenes.tileIcon(g, t, sel)
+            when {
+                icon == null -> {
+                    g.systemTile(if (t.glyph == "game") t.short else "", x + 22f, y + 25f, HomeScenes.CELL_W - 44f, 100f, sel)
+                    if (t.glyph != "game") g.glyph(t.glyph, x + HomeScenes.CELL_W / 2, y + 75f, 30f, Color.WHITE)
+                }
+                g.theme.artSource(icon) != ArtSource.MAINUI && icon.width <= HomeScenes.CELL_W && icon.height <= HomeScenes.CELL_H ->
+                    g.bmp(icon, x + (155 - icon.width) / 2, y + (170 - icon.height) / 2 - 10)
+                else -> g.bmpFit(icon, x + 12f, y + 8f, HomeScenes.CELL_W - 24f, 136f, upscale = false)
             }
         }
 
@@ -411,21 +480,31 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
     }
 
     override fun draw(g: Gfx) {
+        val onion = g.theme.onionLayout
         g.background()
-        g.header(null, logo = true)
-        strip.draw(g, tiles.size, index) { idx, x, y, tileW, tileH, sel ->
+        // (OnionOS: the bars, logo and hints under the tiles, the battery over them; B does nothing here)
+        if (onion) { g.headerBar(logo = true); g.footer("SELECT", "BACK") } else g.header(null, logo = true)
+        // Screen-sized tile pictures would slide as one sheet: they change at once.
+        val wide = onion && tiles.any { t -> t.skin?.let { g.skin("ic-$it-f") }.let { it != null && it.width > 640 } }
+        strip.draw(g, tiles.size, index, onion, snap = wide) { idx, x, y, tileW, tileH, sel ->
             val t = tiles[idx]
             val img = t.skin?.let { g.skin("ic-$it-${if (sel) "f" else "n"}") }
-            if (img != null) g.bmp(img, x, y, tileW, tileH) else g.menuTile(t.glyph, x, y, tileW, tileH, sel)
+            when {
+                img == null -> g.menuTile(t.glyph, x, y, tileW, tileH, sel)
+                // At its own size, centred on its slot 10 px above the middle (it may fill the screen).
+                onion -> g.bmp(img, Gfx.slotIconX(x, img.width), g.cy0 + Gfx.slotIconY(img.height))
+                else -> g.bmp(img, x, y, tileW, tileH)
+            }
             // (a theme with its labels in its pictures has none for MainUI's own tiles)
             if (!g.theme.hideIconLabels || img == null) {
                 val gs = g.theme.grid
-                g.text(t.label, io.github.marsinsanity.mainui.theme.FontStyle(gs.typeface, gs.size1x4, gs.color),
-                    x + tileW / 2, y + 195f, Align.CENTER, maxW = tileW - 8f,
-                    color = if (sel) gs.selectedColor else gs.color)
+                val style = FontStyle(gs.typeface, gs.size1x4, gs.color)
+                val color = if (sel) gs.selectedColor else gs.color
+                if (onion) g.text(t.label, style, x + TileStrip.SLOT_W / 2, g.cy0 + 285f, Align.CENTER, color = color)
+                else g.text(t.label, style, x + tileW / 2, y + 195f, Align.CENTER, maxW = tileW - 8f, color = color)
             }
         }
-        g.footer("SELECT", null)
+        if (onion) g.headerStatus() else g.footer("SELECT", null)
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
@@ -452,7 +531,7 @@ class MainMenuScene(host: SceneHost) : Scene(host) {
 
     override fun onTap(x: Float, y: Float): Boolean {
         follow()
-        val idx = strip.hit(x, y, host.logicalWidth, host.logicalHeight, tiles.size) ?: return false
+        val idx = strip.hit(x, y, host.logicalWidth, host.logicalHeight, tiles.size, MainUI.themes.current.onionLayout) ?: return false
         if (idx == index) tiles[idx].open() else { index = idx; follow(); MainUI.settings.mainMenuIndex = index }
         return true
     }
@@ -497,18 +576,24 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
         val page = index / perPage
         val pages = (tiles.size + perPage - 1) / perPage
         val cellW = HomeScenes.CELL_W; val cellH = HomeScenes.CELL_H
+        val onion = g.theme.onionLayout
         val x0 = g.cx0 + (640f - cols * cellW) / 2
-        val areaTop = Gfx.HEADER; val areaH = g.H - Gfx.HEADER - Gfx.FOOTER - 30f
-        val y0 = areaTop + (areaH - rows * cellH) / 2
+        val y0 = gridTop(g.H, onion)
         for (i in 0 until perPage) {
             val idx = page * perPage + i
             if (idx >= tiles.size) break
             HomeScenes.drawCell(g, tiles[idx], x0 + (i % cols) * cellW, y0 + (i / cols) * cellH, idx == index)
         }
-        g.dots(pages, page, g.H - Gfx.FOOTER - 18f)
+        // (OnionOS: no dots, the page number in the footer)
+        if (!onion) g.dots(pages, page, g.H - Gfx.FOOTER - 18f)
         g.footer("SELECT", "BACK")
-        g.footerStatus(index + 1, tiles.size)
+        if (onion) g.footerStatus(page + 1, pages) else g.footerStatus(index + 1, tiles.size)
     }
+
+    /** The grid's top on a canvas [height] tall ([onion]: OnionOS's, 10 px padding under the header and 5 more). */
+    private fun gridTop(height: Float, onion: Boolean) =
+        if (onion) Gfx.centred(height, 480f) + 75f
+        else Gfx.HEADER + (height - Gfx.HEADER - Gfx.FOOTER - 30f - rows * HomeScenes.CELL_H) / 2
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
         if (tiles.isEmpty()) { if (b == Btn.B) { close(); return true }; return false }
@@ -541,9 +626,8 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
     override fun onTap(x: Float, y: Float): Boolean {
         if (tiles.isEmpty()) return false
         val cellW = 155f; val cellH = 170f
-        val x0 = (host.logicalWidth - 640f) / 2 + (640f - cols * cellW) / 2
-        val areaH = host.logicalHeight - Gfx.HEADER - Gfx.FOOTER - 30f
-        val y0 = Gfx.HEADER + (areaH - rows * cellH) / 2
+        val x0 = Gfx.centred(host.logicalWidth, 640f) + (640f - cols * cellW) / 2
+        val y0 = gridTop(host.logicalHeight, MainUI.themes.current.onionLayout)
         val c = floor((x - x0) / cellW).toInt(); val r = floor((y - y0) / cellH).toInt()
         if (c !in 0 until cols || r !in 0 until rows) return false
         val idx = (index / (cols * rows)) * cols * rows + r * cols + c
@@ -645,7 +729,8 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
         }
         if (first > 0) g.arrow(true, 6f, y0 + HomeScenes.CELL_H / 2)
         if (first + count < tiles.size) g.arrow(false, g.W - 6f, y0 + HomeScenes.CELL_H / 2)
-        g.footer("SELECT", if (home) null else "BACK")
+        // (OnionOS's main menu shows B BACK too, though B does nothing there)
+        g.footer("SELECT", if (home && !g.theme.onionLayout) null else "BACK")
         g.footerStatus(index + 1, tiles.size)
     }
 
