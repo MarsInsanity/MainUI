@@ -1,0 +1,53 @@
+{
+    "name": "Ember",
+    "author": "MainUI",
+    "description": "Charcoal and fire: basalt slabs with chamfered corners, rim-lit by a molten glow rising from below.",
+    "hideLabels": {
+        "icons": false,
+        "hints": false
+    },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "Rajdhani-Bold.ttf",
+        "size": 21,
+        "color": "#FFF0E2",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": {
+        "font": "Rajdhani-Bold.ttf",
+        "size": 32,
+        "color": "#FFF0E2"
+    },
+    "hint": {
+        "font": "Rajdhani-Bold.ttf",
+        "size": 30,
+        "color": "#FFF0E2"
+    },
+    "currentpage": {
+        "color": "#FFC45C"
+    },
+    "total": {
+        "color": "#FFF0E2"
+    },
+    "grid": {
+        "font": "Rajdhani-Bold.ttf",
+        "grid1x4": 27,
+        "grid3x4": 17,
+        "color": "#CCAA96",
+        "selectedcolor": "#FFF0E2"
+    },
+    "list": {
+        "font": "Rajdhani-Bold.ttf",
+        "size": 27,
+        "color": "#FFF0E2"
+    },
+    "mainui": {
+        "accent": "#D2451A",
+        "panel": "#F6221A18",
+        "background": "#141010",
+        "stamp": "7baed8d1a2621d89"
+    }
+}

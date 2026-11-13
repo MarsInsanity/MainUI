@@ -1,0 +1,53 @@
+{
+    "name": "Abyss",
+    "author": "MainUI",
+    "description": "Deep ocean: a sunlit turquoise surface sinking into the navy abyss, with porthole capsules and rising bubbles.",
+    "hideLabels": {
+        "icons": false,
+        "hints": false
+    },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "Kanit-SemiBold.ttf",
+        "size": 18,
+        "color": "#EAFDFF",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": {
+        "font": "Kanit-SemiBold.ttf",
+        "size": 28,
+        "color": "#EAFDFF"
+    },
+    "hint": {
+        "font": "Kanit-SemiBold.ttf",
+        "size": 26,
+        "color": "#EAFDFF"
+    },
+    "currentpage": {
+        "color": "#54F0E4"
+    },
+    "total": {
+        "color": "#EAFDFF"
+    },
+    "grid": {
+        "font": "Kanit-SemiBold.ttf",
+        "grid1x4": 23,
+        "grid3x4": 17,
+        "color": "#96C8D8",
+        "selectedcolor": "#EAFDFF"
+    },
+    "list": {
+        "font": "Kanit-SemiBold.ttf",
+        "size": 24,
+        "color": "#EAFDFF"
+    },
+    "mainui": {
+        "accent": "#088090",
+        "panel": "#F6061E36",
+        "background": "#020B1F",
+        "stamp": "979f99dd1111ca0d"
+    }
+}

@@ -1,0 +1,53 @@
+{
+    "name": "Mono",
+    "author": "MainUI",
+    "description": "Pure black minimalism: hairline drawings, white focus brackets and lots of space.",
+    "hideLabels": {
+        "icons": false,
+        "hints": false
+    },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "IBMPlexSans-Medium.ttf",
+        "size": 17,
+        "color": "#FFFFFF",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": {
+        "font": "IBMPlexSans-Medium.ttf",
+        "size": 25,
+        "color": "#FFFFFF"
+    },
+    "hint": {
+        "font": "IBMPlexSans-Medium.ttf",
+        "size": 22,
+        "color": "#D6D6D6"
+    },
+    "currentpage": {
+        "color": "#FFFFFF"
+    },
+    "total": {
+        "color": "#8C8C8C"
+    },
+    "grid": {
+        "font": "IBMPlexSans-Medium.ttf",
+        "grid1x4": 21,
+        "grid3x4": 15,
+        "color": "#B0B0B0",
+        "selectedcolor": "#FFFFFF"
+    },
+    "list": {
+        "font": "IBMPlexSans-Regular.ttf",
+        "size": 23,
+        "color": "#FFFFFF"
+    },
+    "mainui": {
+        "accent": "#7A7A7A",
+        "panel": "#FF121212",
+        "background": "#000000",
+        "stamp": "b8b451dfa8cca3af"
+    }
+}

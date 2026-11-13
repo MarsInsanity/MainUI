@@ -1,0 +1,53 @@
+{
+    "name": "Synthwave",
+    "author": "MainUI",
+    "description": "80s retro-futurism: a striped sunset sun over a neon grid, glass panels lit by glowing tubes.",
+    "hideLabels": {
+        "icons": false,
+        "hints": false
+    },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "Audiowide-Regular.ttf",
+        "size": 16,
+        "color": "#FFF2FC",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": {
+        "font": "Audiowide-Regular.ttf",
+        "size": 26,
+        "color": "#FFF2FC"
+    },
+    "hint": {
+        "font": "Audiowide-Regular.ttf",
+        "size": 24,
+        "color": "#FFF2FC"
+    },
+    "currentpage": {
+        "color": "#28E8FF"
+    },
+    "total": {
+        "color": "#FFF2FC"
+    },
+    "grid": {
+        "font": "Audiowide-Regular.ttf",
+        "grid1x4": 19,
+        "grid3x4": 14,
+        "color": "#EEB6E4",
+        "selectedcolor": "#FFF2FC"
+    },
+    "list": {
+        "font": "Audiowide-Regular.ttf",
+        "size": 22,
+        "color": "#FFF2FC"
+    },
+    "mainui": {
+        "accent": "#DE1C8A",
+        "panel": "#F214052A",
+        "background": "#100322",
+        "stamp": "22c8b52b6cc3c601"
+    }
+}

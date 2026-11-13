@@ -1,0 +1,53 @@
+{
+    "name": "Paper",
+    "author": "MainUI",
+    "description": "A notebook page: ruled cream paper, navy ink drawings, index cards and a yellow highlighter.",
+    "hideLabels": {
+        "icons": false,
+        "hints": false
+    },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "PatrickHand-Regular.ttf",
+        "size": 20,
+        "color": "#2A2A2A",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": {
+        "font": "PatrickHand-Regular.ttf",
+        "size": 32,
+        "color": "#2A2A2A"
+    },
+    "hint": {
+        "font": "PatrickHand-Regular.ttf",
+        "size": 28,
+        "color": "#2A2A2A"
+    },
+    "currentpage": {
+        "color": "#B2382E"
+    },
+    "total": {
+        "color": "#2A2A2A"
+    },
+    "grid": {
+        "font": "PatrickHand-Regular.ttf",
+        "grid1x4": 26,
+        "grid3x4": 19,
+        "color": "#545A68",
+        "selectedcolor": "#2A2A2A"
+    },
+    "list": {
+        "font": "PatrickHand-Regular.ttf",
+        "size": 26,
+        "color": "#2A2A2A"
+    },
+    "mainui": {
+        "accent": "#8391EE",
+        "panel": "#F8FFF4CF",
+        "background": "#F4EFE6",
+        "stamp": "866359f1916aa6ea"
+    }
+}
