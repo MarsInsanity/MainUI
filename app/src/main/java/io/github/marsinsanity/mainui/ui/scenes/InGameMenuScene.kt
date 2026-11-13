@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -64,8 +65,13 @@ class InGameMenuScene(
     private val main = Handler(Looper.getMainLooper())
     private val emuName = session.emuRef?.let { MainUI.emulators.defFor(it)?.name } ?: session.name
 
+    /** The slot picture drawn this frame beside Save / Load (null: none), and the bind-mode help box, for taps. */
+    private var previewBox: RectF? = null
+    private var helpBox: RectF? = null
+
     companion object {
         const val ROW_H = 56f
+        private const val PANEL_W = 300f
     }
 
     private enum class Action { CONTINUE, SAVE, LOAD, STATES_MENU, NATIVE, SWITCHER, EXIT, BIND, BIND_SAVE, BIND_LOAD, BIND_BACK,
@@ -127,7 +133,7 @@ class InGameMenuScene(
         // Left menu panel like the Miyoo Mini's (bg-pop-menu image when the theme has one)
         val rows = list.size
         val rowH = ROW_H
-        val panelW = 300f
+        val panelW = PANEL_W
         val top = 0f // flush with the top edge, like the Miyoo Mini's menu
         val panelH = rows * rowH
         g.popPanel(4, 0f, top, panelW + 14f, panelH)
@@ -143,8 +149,10 @@ class InGameMenuScene(
             if (sel && (it.data == Action.KEY_SAVE || it.data == Action.KEY_LOAD || it.data == Action.KEY_DELAY)) g.arrow(false, panelW, y + rowH / 2)
         }
         val cur = list.current?.data
+        previewBox = null; helpBox = null
         if (bindMode) {
             val bx = panelW + 40f
+            helpBox = RectF(bx - 12f, top + 14f, g.W - 6f, top + 284f)
             g.fillRect(bx - 12f, top + 14f, g.W - bx - 6f, 270f, g.theme.panel, 10f)
             g.paragraph(if (cur == Action.KEY_DELAY)
                 "When a game you left with a save starts again, MainUI presses the load key once $emuName's " +
@@ -160,6 +168,7 @@ class InGameMenuScene(
             val thumb = if (f.isFile) Images.get("slot:${f.absolutePath}:${f.lastModified()}", host, 640) { f } else null
             val bx = panelW + 40f; val bw = g.W - bx - 30f; val bh = bw * 0.75f
             val by = top + 14f
+            previewBox = RectF(bx, by, bx + bw, by + bh)
             val frame = g.skin("preview-bg")
             if (frame != null) g.bmp(frame, bx - 6, by - 6, bw + 12, bh + 12) else g.fillRect(bx - 4, by - 4, bw + 8, bh + 8, g.theme.panel, 6f)
             if (thumb != null) g.bmpFit(thumb, bx, by, bw, bh)
@@ -183,11 +192,8 @@ class InGameMenuScene(
                 val cur = list.current?.data
                 if (cur == Action.KEY_SAVE || cur == Action.KEY_LOAD) changeKey(cur == Action.KEY_SAVE, b == Btn.RIGHT)
                 else if (cur == Action.KEY_DELAY) changeDelay(b == Btn.RIGHT)
-                else if (controller.hasSlots && (cur == Action.SAVE || cur == Action.LOAD)) {
-                    slot = (slot + if (b == Btn.RIGHT) 1 else -1).coerceIn(0, controller.slotCount - 1)
-                    MainUI.settings.prefs.edit().putInt("slot:${session.gameKey}", slot).apply()
-                    buildItems(); list.active = list.items.indexOfFirst { it.data == cur }.coerceAtLeast(0)
-                } else return false
+                else if (controller.hasSlots && (cur == Action.SAVE || cur == Action.LOAD)) changeSlot(if (b == Btn.RIGHT) 1 else -1)
+                else return false
             }
             Btn.A -> if (!repeat) run(list.current?.data as? Action ?: return true)
             Btn.B, Btn.MENU -> if (!repeat) run(if (bindMode) Action.BIND_BACK else Action.CONTINUE)
@@ -196,12 +202,43 @@ class InGameMenuScene(
         return true
     }
 
+    /** Moves the Save / Load slot by [delta]; [wrap]: past the last slot comes the first (a tap on the arrow). */
+    private fun changeSlot(delta: Int, wrap: Boolean = false) {
+        val cur = list.current?.data
+        val n = controller.slotCount
+        slot = if (wrap) ((slot + delta) % n + n) % n else (slot + delta).coerceIn(0, n - 1)
+        MainUI.settings.prefs.edit().putInt("slot:${session.gameKey}", slot).apply()
+        buildItems(); list.active = list.items.indexOfFirst { it.data == cur }.coerceAtLeast(0)
+    }
+
     override fun onTap(x: Float, y: Float): Boolean {
         if (busy != null) return true // saving / exiting: like the buttons, wait for it
+        val cur = list.current?.data
+        // The slot picture: its left and right thirds pick the slot, like the arrows drawn there.
+        previewBox?.let { r ->
+            if (r.contains(x, y)) {
+                if (x < r.left + r.width() / 3) changeSlot(-1) else if (x > r.right - r.width() / 3) changeSlot(1)
+                return true
+            }
+        }
+        if (helpBox?.contains(x, y) == true) return true
         val idx = (y / ROW_H).toInt()
-        if (x > 320f || idx !in 0 until list.size) { run(Action.CONTINUE); return true }
-        list.active = idx
-        run(list.current?.data as? Action ?: return true)
+        if (x <= PANEL_W + 14f && idx in 0 until list.size) {
+            // A first tap only selects (a stray touch never saves over a slot or quits the game); a
+            // second runs it, as in every MainUI list.
+            if (idx != list.active) { list.active = idx; return true }
+            if (x >= PANEL_W - 34f) {
+                // The arrow at the end of the selected row: the next slot / key.
+                when {
+                    controller.hasSlots && (cur == Action.SAVE || cur == Action.LOAD) -> { changeSlot(1, wrap = true); return true }
+                    cur == Action.KEY_SAVE || cur == Action.KEY_LOAD || cur == Action.KEY_DELAY -> { run(cur as Action); return true }
+                }
+            }
+            run(cur as? Action ?: return true)
+            return true
+        }
+        // Anywhere else (the game around the menu): back out, like B.
+        run(if (bindMode) Action.BIND_BACK else Action.CONTINUE)
         return true
     }
 
