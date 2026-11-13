@@ -273,6 +273,13 @@ class GameSwitcherScene(host: SceneHost) : Scene(host) {
     }
 }
 
+/** After a theme is applied: offers once to turn on its music, which is off by default. */
+internal fun offerThemeMusic(host: SceneHost, name: String) {
+    if (!MainUI.themes.takeBgmOffer()) return
+    host.push(DialogScene(host, "Theme music", "$name comes with background music. Turn it on?\n" +
+        "(Settings > User interface > Theme background music)", "TURN ON", "NO") { MainUI.themes.enableBgm() })
+}
+
 /**
  * Theme Switcher app: full screen theme previews, LEFT/RIGHT to browse,
  * A to apply. Installs .zip themes found in a Themes folder on the fly.
@@ -330,6 +337,7 @@ class ThemeSwitcherScene(host: SceneHost) : Scene(host) {
                         host.toast("Theme applied")
                         themes = MainUI.themes.list()
                         index = themes.indexOfFirst { it.key == MainUI.themes.currentKey }.coerceAtLeast(0)
+                        offerThemeMusic(host, t.name)
                     }
                 }
             }

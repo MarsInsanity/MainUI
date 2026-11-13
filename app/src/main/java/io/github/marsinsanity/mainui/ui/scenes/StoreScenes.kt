@@ -83,6 +83,7 @@ class ThemeStoreScene(host: SceneHost) : ListScene(host, "Get themes") {
                     val entry = MainUI.themes.list().firstOrNull { it.dir?.absolutePath == dir.absolutePath }
                     if (entry != null) host.io({ MainUI.themes.apply(entry) }) {
                         Glyphs.clear(); Images.clear(); host.toast("${e.title} applied")
+                        offerThemeMusic(host, e.title)
                     }
                 } else host.toast("${e.title} installed. Apps > Theme Switcher to use it", 3000)
                 list.items.firstOrNull { it.data === e }?.sub = "installed  ${e.author}"

@@ -300,6 +300,18 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         }
     }
 
+    /**
+     * True once: the theme just applied has music and it is off (most OnionOS themes ship
+     * sound/bgm.mp3), so the caller offers to turn it on.
+     */
+    fun takeBgmOffer(): Boolean {
+        if (settings.bgm || settings.bgmOffered || current.soundBgm == null) return false
+        settings.bgmOffered = true
+        return true
+    }
+
+    fun enableBgm() { settings.bgm = true; reloadSounds() }
+
     fun click() {
         if (changeSound != 0) soundPool?.play(changeSound, 0.6f, 0.6f, 0, 0, 1f)
     }
