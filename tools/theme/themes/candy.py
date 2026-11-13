@@ -22,7 +22,7 @@ ORANGE = (255, 138, 61)
 RED = (239, 71, 111)
 GRAPE = (139, 79, 224)
 FOCUS = (255, 120, 162)      # list bars and the focused card: a lighter pink, so ink text on it reads
-RASPBERRY = (200, 35, 95)    # focused keyboard key (MainUI writes white letters on keys)
+RASPBERRY = (200, 35, 95)    # focused keyboard key (white letters on it) and the accent
 SLATE = (66, 69, 100)
 CANDY = [PINK, YELLOW, MINT, SKY, PURPLE, ORANGE, RED]
 TILE_COLOR = dict(zip(MENU_TILES, CANDY))
@@ -297,6 +297,15 @@ class CandyPen(Pen):
             self.sd.ellipse([*self.p(x - r, y - r), *self.p(x + r, y + r)], fill=255)
         super().ci(x, y, r, w, fill)
 
+    def pixels(self, x0, y0, cell, rows, filled_alpha=True):
+        """Pixel art with its squares touching: the Pen's hairline seams between them would be
+        flooded with the body colour."""
+        for j, row in enumerate(rows):
+            for i, ch in enumerate(row):
+                if ch in "Xo":
+                    xa, ya = x0 + i * cell, y0 + j * cell
+                    self.rr(xa - 0.15, ya - 0.15, xa + cell + 0.15, ya + cell + 0.15, r=0.4, fill=ch == "X", soft=ch == "o")
+
     def el(self, x0, y0, x1, y1, w=None, fill=False, soft=False):
         if soft and not fill:
             self.sd.ellipse([*self.p(x0, y0), *self.p(x1, y1)], fill=255)
@@ -324,8 +333,6 @@ def candy_picture(w, h, cx, cy, draw_fn, body, detail, sc=1.0, k=1.3, drop=(3, 3
     # (pixels a drawing paints in its own colour, such as eyes, are holes in the line work)
     other = ImageChops.multiply(la, lines.convert("L").point(lambda v: 255 if v < 128 else 0))
     la = ImageChops.subtract(la, other)
-    # hairline seams between abutting squares (pixel art) closed
-    la = la.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(5))
     inside = enclosed(ImageChops.lighter(la, other), w, h)
     every = ImageChops.lighter(ImageChops.lighter(la, inside), soft)
     rim = None
@@ -360,7 +367,7 @@ class Theme(Style):
 
     bg_top = CREAM
     bg_bottom = CREAM
-    accent = PINK              # MainUI's toasts, progress bars, row-view glow and its own fallbacks
+    accent = RASPBERRY         # MainUI's toast borders, progress bars, row-view glow (a pink one)
     accent2 = INK
     highlight = GRAPE          # the page counter's current page
     text = INK

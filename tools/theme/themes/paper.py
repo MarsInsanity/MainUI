@@ -590,10 +590,11 @@ class Theme(Style):
         im = canvas(w, h)
         d = ImageDraw.Draw(im)
         box = (4.5, 4, w - 4.5, h - 5.5)
-        d.rounded_rectangle([S(v + 1.5) for v in box], radius=S(6), fill=rgba(SHADE, 80))
+        # shadow straight down: a sideways one would widen on the stretched keys
+        d.rounded_rectangle([S(v + (0.5 if i % 2 == 0 else 1.5)) for i, v in enumerate(box)], radius=S(6), fill=rgba(SHADE, 85))
         d.rounded_rectangle([S(v) for v in box], radius=S(6), fill=rgba(RED_INK if focused else INK))
         if focused:  # highlighter ring, clear of every edge
-            d.rounded_rectangle([S(v) for v in (1.5, 1.5, w - 1.5, h - 1.5)], radius=S(8), outline=rgba(HL), width=int(S(2)))
+            d.rounded_rectangle([S(v) for v in (1.5, 1.5, w - 1.5, h - 1.5)], radius=S(8), outline=rgba(HL), width=int(S(1.6)))
         return finish(im)
 
     def input_box(self):
