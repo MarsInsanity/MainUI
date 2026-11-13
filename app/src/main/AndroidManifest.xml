@@ -74,6 +74,11 @@
 
         <!-- Serves rom files to standalone emulators as content:// uris -->
         <provider
+            android:name=".emu.RomDocumentProvider"
+            android:authorities="${applicationId}.roms"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+        <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"
             android:exported="false"

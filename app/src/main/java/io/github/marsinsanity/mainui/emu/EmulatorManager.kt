@@ -512,6 +512,7 @@ class EmulatorManager(
             .replace("%ROM%", rom.absolutePath)
             .replace("%ROMURI%", Uri.fromFile(rom).toString())
             .replace("%ROMPROVIDER%", providerUri(rom).toString())
+            .replace("%ROMDOC%", romDocUri(rom).toString())
             .replace("%ROMSAF%", if (t.contains("%ROMSAF%")) romSaf else "")
             .replace("%BASENAME%", rom.nameWithoutExtension)
             .replace("%PKG%", pkg)
@@ -528,7 +529,7 @@ class EmulatorManager(
             // Only MainUI's own files can be shared this way. Granting a storage (SAF) link MainUI
             // doesn't hold makes Android refuse to start the emulator; it has its own folder grant.
             // (Only the rom's own link: an edited recipe must not get MainUI's other files.)
-            if (uri.scheme == "content" && uri == providerUri(rom))
+            if (uri.scheme == "content" && (uri == providerUri(rom) || uri == romDocUri(rom)))
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         }
         for ((k, v) in def.extras) {
@@ -550,6 +551,9 @@ class EmulatorManager(
     }
 
     fun providerUri(f: File): Uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
+
+    /** [f] as a single document of MainUI's own (%ROMDOC%, see [RomDocumentProvider]). */
+    fun romDocUri(f: File): Uri = RomDocumentProvider.uri("${ctx.packageName}.roms", f)
 
     /** Brings an already running emulator task to the front without restarting it. */
     fun resumeIntent(pkg: String, activity: String?): Intent? {
