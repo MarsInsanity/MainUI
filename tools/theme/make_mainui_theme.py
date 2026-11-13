@@ -536,10 +536,49 @@ def g_handheld(d, cx, cy, s, c, w):
     buttons(d, cx + s * 0.26, cy + s * 0.42, s * 0.3, c)
 
 
+def g_hidden(d, cx, cy, s, c, w):
+    """An eye, struck through: hidden apps."""
+    arc(d, cx, cy + s * 0.55, s * 1.05, 212, 328, c, w)
+    arc(d, cx, cy - s * 0.55, s * 1.05, 32, 148, c, w)
+    circle(d, cx, cy, s * 0.26, fill=c)
+    line(d, [(cx - s * 0.8, cy + s * 0.8), (cx + s * 0.8, cy - s * 0.8)], c, w)
+
+
+def g_tag(d, cx, cy, s, c, w):
+    """A price tag: categories."""
+    pts = [(cx - s * 0.85, cy - s * 0.85), (cx + s * 0.05, cy - s * 0.85), (cx + s * 0.9, cy),
+           (cx + s * 0.05, cy + s * 0.85), (cx - s * 0.85, cy + s * 0.85)]
+    poly(d, pts, c, w)
+    circle(d, cx - s * 0.42, cy - s * 0.42, s * 0.16, c, w * 0.8)
+
+
+def g_refresh(d, cx, cy, s, c, w):
+    """Two arrows chasing round: updates."""
+    arc(d, cx, cy, s * 0.8, 200, 340, c, w)
+    arc(d, cx, cy, s * 0.8, 20, 160, c, w)
+    for a, turn in ((340, 1), (160, 1)):
+        r = math.radians(a)
+        px, py = cx + s * 0.8 * math.cos(r), cy + s * 0.8 * math.sin(r)
+        t = math.radians(a + 90 * turn)
+        poly(d, [(px + s * 0.32 * math.cos(t), py + s * 0.32 * math.sin(t)),
+                 (px + s * 0.22 * math.cos(t + 2.2), py + s * 0.22 * math.sin(t + 2.2)),
+                 (px + s * 0.22 * math.cos(t - 2.2), py + s * 0.22 * math.sin(t - 2.2))], fill=c)
+
+
+def g_repo(d, cx, cy, s, c, w):
+    """A stack of disks: repositories."""
+    for k in (-0.62, 0, 0.62):
+        ellipse(d, (cx - s * 0.85, cy + s * k - s * 0.24, cx + s * 0.85, cy + s * k + s * 0.24), c, w)
+    line(d, [(cx - s * 0.85, cy - s * 0.62), (cx - s * 0.85, cy + s * 0.62)], c, w)
+    line(d, [(cx + s * 0.85, cy - s * 0.62), (cx + s * 0.85, cy + s * 0.62)], c, w)
+
+
 TILES = {"recent": g_recent, "favorite": g_star, "game": g_gamepad, "retroarch": g_expert, "app": g_apps, "setting": g_gear,
          "emulators": g_handheld}
 APPS = {"themes": g_palette, "pacman": g_bag, "gameswitcher": g_switcher, "search": g_search, "gallery": g_image,
-        "activity": g_chart, "retroarch": g_expert, "tweaks": g_sliders, "download": g_download, "folder": g_folder}
+        "activity": g_chart, "retroarch": g_expert, "tweaks": g_sliders, "download": g_download, "folder": g_folder,
+        # Hidden apps (Apps) and the App Store's own entries
+        "hidden": g_hidden, "emulators": g_handheld, "category": g_tag, "updates": g_refresh, "repos": g_repo}
 
 
 def preview(skin):
@@ -612,8 +651,6 @@ def main():
     put("ic-favorite-mark", favorite_mark())
     put("extra/toggle-on", toggle(True))
     put("extra/toggle-off", toggle(False))
-    put("extra/gs-top-bar", bar(40, line_at_top=False))
-    put("extra/gs-bottom-bar", bar(40, line_at_top=True))
     for i, hh in enumerate((70, 130, 190, 250), 1):
         put(f"bg-pop-menu-{i}", panel(320, hh))
     put("pop-bg", panel(640, 300, 22))

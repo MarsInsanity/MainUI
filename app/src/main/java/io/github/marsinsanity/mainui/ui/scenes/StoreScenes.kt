@@ -157,13 +157,15 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
             }, all.size, versions, blocked)
         }) { (apps, total, versions, blocked) ->
             if (busy == "Loading apps...") busy = null
+            // (the theme's own app icons, as for MainUI's apps in Apps)
+            fun icon(name: String, glyph: String) = { MainUI.themes.current.appIcon(name) ?: Glyphs.get(glyph) }
             val items = mutableListOf(
-                UiItem("Search...", icon = { Glyphs.get("search") }, sub = query.ifEmpty { null }, onSelect = { search() }),
-                UiItem("Emulators", icon = { Glyphs.get("game") }, sub = "RetroArch, PPSSPP, Azahar...", onSelect = { host.push(EmulatorStoreScene(host)) }),
-                UiItem("Category", ItemType.ACTION, icon = { Glyphs.get("app") }, sub = category ?: "All", onSelect = { pickCategory() }),
-                UiItem(if (updatesOnly) "Showing updates" else "Updates", icon = { Glyphs.get("switcher") },
+                UiItem("Search...", icon = icon("search", "search"), sub = query.ifEmpty { null }, onSelect = { search() }),
+                UiItem("Emulators", icon = icon("emulators", "game"), sub = "RetroArch, PPSSPP, Azahar...", onSelect = { host.push(EmulatorStoreScene(host)) }),
+                UiItem("Category", ItemType.ACTION, icon = icon("category", "app"), sub = category ?: "All", onSelect = { pickCategory() }),
+                UiItem(if (updatesOnly) "Showing updates" else "Updates", icon = icon("updates", "switcher"),
                     sub = if (updatesOnly) "show all" else null, onSelect = { updatesOnly = !updatesOnly; rebuild() }),
-                UiItem("Repositories", icon = { Glyphs.get("setting") }, sub = "refresh / add", onSelect = { host.push(RepoScene(host)) }),
+                UiItem("Repositories", icon = icon("repos", "setting"), sub = "refresh / add", onSelect = { host.push(RepoScene(host)) }),
             )
             for (a in apps.take(1500)) {
                 val installed = versions[a.pkg]
@@ -374,7 +376,7 @@ class EmulatorStoreScene(host: SceneHost) : ListScene(host, "Emulators", large =
         fun emuIcon(host: SceneHost, e: io.github.marsinsanity.mainui.store.EmulatorStore.Entry) =
             e.installed?.let { MainUI.apps.icon(it, 96) }
                 ?: e.fdroid?.let { a -> Images.get("appicon:${a.pkg}", host, 96, network = true) { AppStore.icon(a) } }
-                ?: Glyphs.get("game")
+                ?: MainUI.themes.current.appIcon("emulators") ?: Glyphs.get("game")
     }
 }
 
