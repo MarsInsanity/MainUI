@@ -45,7 +45,7 @@ class AppsScene(host: SceneHost) : ListScene(host, "Apps", large = true) {
                 items += UiItem(b.label, icon = { MainUI.themes.current.appIcon(b.icon) ?: Glyphs.get(b.glyph) },
                     sub = "MainUI", data = b, onSelect = { b.open() })
             }
-            items += UiItem("Hidden apps", icon = { Glyphs.get("hidden") }, sub = "$hiddenCount hidden",
+            items += UiItem("Hidden apps", icon = { MainUI.themes.current.appIcon("hidden") ?: Glyphs.get("hidden") }, sub = "$hiddenCount hidden",
                 onSelect = { host.push(HiddenAppsScene(host)) })
             for (a in apps) items += appItem(a)
             list.set(items)
@@ -113,7 +113,7 @@ class HiddenAppsScene(host: SceneHost) : ListScene(host, "Hidden apps", large = 
     private fun reload() {
         host.io({ MainUI.apps.hiddenApps() }) { apps ->
             val items = mutableListOf(
-                UiItem("Edit hidden apps...", icon = { Glyphs.get("hidden") }, sub = "show / hide any app",
+                UiItem("Edit hidden apps...", icon = { MainUI.themes.current.appIcon("hidden") ?: Glyphs.get("hidden") }, sub = "show / hide any app",
                     onSelect = { host.push(AppVisibilityScene(host)) }),
             )
             if (apps.isEmpty()) items += UiItem("No hidden apps. Press Y on an app in Apps to hide it.", disabled = true)
