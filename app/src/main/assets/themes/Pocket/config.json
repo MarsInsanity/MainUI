@@ -1,0 +1,53 @@
+{
+    "name": "Pocket",
+    "author": "MainUI",
+    "description": "A four-shade green LCD handheld: hard pixels, dot-matrix paper and inverted selections.",
+    "hideLabels": {
+        "icons": false,
+        "hints": false
+    },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "PressStart2P-Regular.ttf",
+        "size": 16,
+        "color": "#0F380F",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": {
+        "font": "PressStart2P-Regular.ttf",
+        "size": 24,
+        "color": "#0F380F"
+    },
+    "hint": {
+        "font": "PressStart2P-Regular.ttf",
+        "size": 16,
+        "color": "#0F380F"
+    },
+    "currentpage": {
+        "color": "#0F380F"
+    },
+    "total": {
+        "color": "#0F380F"
+    },
+    "grid": {
+        "font": "Silkscreen-Bold.ttf",
+        "grid1x4": 16,
+        "grid3x4": 12,
+        "color": "#0F380F",
+        "selectedcolor": "#9BBC0F"
+    },
+    "list": {
+        "font": "Silkscreen-Bold.ttf",
+        "size": 16,
+        "color": "#0F380F"
+    },
+    "mainui": {
+        "accent": "#0F380F",
+        "panel": "#FFAED713",
+        "background": "#9BBC0F",
+        "stamp": "d334c67b9d58f675"
+    }
+}

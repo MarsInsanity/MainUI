@@ -156,6 +156,29 @@ internal storage work for roms on the SD card and the other way round.
 MainUI ships with its own theme, **MainUI** (blue, with art for every system). It is a normal OnionOS
 theme: `tools/theme/make_mainui_theme.py` regenerates it (Pillow), and it can be copied to a Miyoo Mini.
 
+Twelve more themes come with it, each with its own fonts and its own style for every system's icon,
+listed in **Apps > Theme Switcher** after MainUI and MainUI Classic:
+
+| Theme | Look |
+|-------|------|
+| Aurora | Polar night, northern lights, frosted glass cards |
+| Paper | Light: notebook paper, ink drawings, highlighter selection |
+| Synthwave | 80s neon: striped sunset, perspective grid, glowing tubes |
+| Pocket | Four-shade green pixel LCD |
+| Cartridge | Light: ivory, red and gold 80s console plastic, cartridge tiles |
+| Mono | Pure black, hairline glyphs, corner-bracket selection |
+| Sakura | Light: pastel pink, cherry blossoms, rounded cards |
+| Phosphor | Amber CRT terminal: scanlines, double-line frames, cursor-bar selection |
+| Abyss | Deep ocean: light rays, bubbles, glass porthole capsules |
+| Ember | Charcoal and fire: chamfered basalt slabs, molten edges |
+| Candy | Light: confetti, a colour per tile, thick outlines and hard shadows |
+| Slate | Modern dark: tonal surfaces, pill selection |
+
+They are OnionOS themes too (copy one from `app/src/main/assets/themes/` to a Miyoo Mini). Each is a
+module in `tools/theme/themes/` built on `tools/theme/theme_kit.py`; `python3 tools/theme/make_themes.py
+[name ...]` regenerates them (`--mock DIR` also writes a preview of MainUI's home, Games, list and pop-up
+screens for each). The fonts are SIL Open Font License fonts from Google Fonts, licence next to each.
+
 Get more themes in **Apps > Theme Downloader** (the [OnionUI theme repository](https://github.com/OnionUI/Themes)),
 or copy an OnionOS theme folder (or its `.zip`) into `Themes/`, then pick it in **Apps > Theme Switcher**.
 A pack folder copied as it is ("Material (6-pack)") lists each theme in it, and a `.zip` with the pack's
@@ -713,7 +736,8 @@ with a different key can't update them.
 
 ## Licence
 
-GPL-3.0 (see `LICENSE`). Bundled fonts are under the SIL Open Font License (`app/src/main/assets/fonts/OFL-*.txt`).
+GPL-3.0 (see `LICENSE`). Bundled fonts are under the SIL Open Font License (`app/src/main/assets/fonts/OFL-*.txt`,
+and each bundled theme's `OFL-*.txt` next to its fonts).
 OnionOS's default system and app icons (`app/src/main/assets/onion_icons/`) and OnionOS's own fallback
 pictures and default theme settings (`app/src/main/assets/onion_res/`), from the
 [OnionOS repository](https://github.com/OnionUI/Onion), GPL-3.0, are bundled; no Miyoo or OnionOS theme art is.

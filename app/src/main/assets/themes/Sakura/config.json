@@ -1,0 +1,53 @@
+{
+    "name": "Sakura",
+    "author": "MainUI",
+    "description": "Spring in pastel pink: drifting cherry petals, soft white cards edged in pink and plum ink.",
+    "hideLabels": {
+        "icons": false,
+        "hints": false
+    },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "VarelaRound-Regular.ttf",
+        "size": 18,
+        "color": "#5B2A45",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": {
+        "font": "VarelaRound-Regular.ttf",
+        "size": 28,
+        "color": "#5B2A45"
+    },
+    "hint": {
+        "font": "VarelaRound-Regular.ttf",
+        "size": 27,
+        "color": "#5B2A45"
+    },
+    "currentpage": {
+        "color": "#B03460"
+    },
+    "total": {
+        "color": "#5B2A45"
+    },
+    "grid": {
+        "font": "VarelaRound-Regular.ttf",
+        "grid1x4": 23,
+        "grid3x4": 15,
+        "color": "#875470",
+        "selectedcolor": "#4A1E36"
+    },
+    "list": {
+        "font": "VarelaRound-Regular.ttf",
+        "size": 24,
+        "color": "#5B2A45"
+    },
+    "mainui": {
+        "accent": "#C2456F",
+        "panel": "#FFFAC4D6",
+        "background": "#FCE8EE",
+        "stamp": "4e53de90a4cdeebe"
+    }
+}

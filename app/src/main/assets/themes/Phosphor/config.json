@@ -1,0 +1,53 @@
+{
+    "name": "Phosphor",
+    "author": "MainUI",
+    "description": "An amber CRT terminal: scanlines and soft bloom, double-line box frames and reverse-video cursors.",
+    "hideLabels": {
+        "icons": false,
+        "hints": false
+    },
+    "batteryPercentage": {
+        "visible": true,
+        "font": "VT323-Regular.ttf",
+        "size": 26,
+        "color": "#FFBA24",
+        "textAlign": "left",
+        "fixed": false,
+        "offsetX": 0,
+        "offsetY": 0
+    },
+    "title": {
+        "font": "VT323-Regular.ttf",
+        "size": 40,
+        "color": "#FFBA24"
+    },
+    "hint": {
+        "font": "VT323-Regular.ttf",
+        "size": 32,
+        "color": "#FFBA24"
+    },
+    "currentpage": {
+        "color": "#FFE296"
+    },
+    "total": {
+        "color": "#D68E0C"
+    },
+    "grid": {
+        "font": "VT323-Regular.ttf",
+        "grid1x4": 32,
+        "grid3x4": 22,
+        "color": "#F0A818",
+        "selectedcolor": "#160B00"
+    },
+    "list": {
+        "font": "VT323-Regular.ttf",
+        "size": 32,
+        "color": "#FFBA24"
+    },
+    "mainui": {
+        "accent": "#B06400",
+        "panel": "#F4100A03",
+        "background": "#090602",
+        "stamp": "a17a1ef225732d1c"
+    }
+}
