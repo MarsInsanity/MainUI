@@ -23,6 +23,11 @@ object BatteryState {
     @Volatile var charging = false
 }
 
+object WifiState {
+    /** Signal bars (1..4) while connected to Wi-Fi, 0 otherwise. */
+    @Volatile var bars = 0
+}
+
 enum class Align { LEFT, CENTER, RIGHT }
 
 /**
@@ -67,9 +72,9 @@ class Gfx {
     private val path = Path()
 
     /** Vertical offset that centres 480px tall layouts inside a taller canvas. */
-    val cy0 get() = (H - 480f) / 2f
+    val cy0 get() = centred(H, 480f)
     /** Horizontal offset that centres 640px wide layouts inside a wider canvas. */
-    val cx0 get() = (W - 640f) / 2f
+    val cx0 get() = centred(W, 640f)
 
     companion object {
         /**
@@ -94,6 +99,64 @@ class Gfx {
             val aspect = screenW.toFloat() / screenH
             return if (aspect >= 4f / 3f) (480f * aspect) to 480f else 640f to (640f / aspect)
         }
+
+        /** Offset that centres [content] px in [size] px, in whole pixels (theme art stays on the pixel grid). */
+        fun centred(size: Float, content: Float): Float = kotlin.math.floor((size - content) / 2f + 0.5f)
+
+        /** Wi-Fi bars (1..4) for a connection's [rssi] in dBm, as Android counts 4 levels; 0: no signal. */
+        fun wifiBars(rssi: Int): Int = when {
+            rssi <= -127 -> 0
+            rssi >= -55 -> 4
+            rssi <= -100 -> 1
+            else -> 1 + (rssi + 100) * 3 / 45
+        }
+
+        /** OnionOS's battery picture (render/battery.h): its size and where the icon and text go in it. */
+        class BatteryBox(val w: Int, val h: Int, val iconX: Int, val iconY: Int, val textX: Int)
+
+        /** [BatteryBox] for an [iw] x [ih] icon and a [tw] x [th] percentage, Onion's integer maths included. */
+        fun batteryBox(iw: Int, ih: Int, tw: Int, th: Int, visible: Boolean, fixed: Boolean, align: String, offsetX: Int): BatteryBox {
+            var w = 2 * (tw + 5) + iw
+            var h = if (th > ih) th else iw // (Onion's: the icon's width)
+            if (!visible) { w = iw; h = ih } else if (fixed || align == "center") w = max(iw, tw)
+            if (w % 2 != 0) w++
+            if (h % 2 != 0) h++
+            w = max(w, 48); h = max(h, 48)
+            var iconX = 0
+            var textX = 0
+            if (visible) {
+                if (fixed) textX = when (align) {
+                    "right" -> iw - tw + offsetX
+                    "center" -> (iw - tw) / 2 + offsetX
+                    else -> offsetX
+                } else when (align) {
+                    "right" -> { iconX = tw + 5; textX = offsetX }
+                    "center" -> textX = (iw - tw) / 2 + offsetX
+                    else -> textX = iw + 5 + offsetX
+                }
+            }
+            return BatteryBox(w, h, iconX, (h - ih) / 2, textX)
+        }
+
+        /**
+         * Where the battery's centre (OnionOS: y 30) goes on a canvas [h] tall when its picture shows
+         * only rows [top, bottom) of the 640x480 screen: with the footer when they are all in its band,
+         * with the header when all in that one, else with the centred content.
+         */
+        fun batteryAnchorY(top: Int, bottom: Int, h: Float): Float = when {
+            top >= 420 -> h - 450f
+            bottom <= 60 -> 30f
+            else -> centred(h, 480f) + 30f
+        }
+
+        /** The top-left of OnionOS main menu dot [i] of [count], [pitch] apart (dot-a's width + 5). */
+        fun menuDotX(i: Int, count: Int, pitch: Int): Int = (640 - pitch * count) / 2 + i * pitch
+
+        /** The left of OnionOS's main menu icon [w] px wide in the 155 px slot starting at [slotX]. */
+        fun slotIconX(slotX: Float, w: Int): Float = slotX + (155 - w) / 2
+
+        /** The top of OnionOS's main menu icon [h] px tall (centred 10 px above the middle of rows 60..420). */
+        fun slotIconY(h: Int): Int = 50 + (360 - h) / 2
     }
 
     fun begin(canvas: Canvas, screenW: Int, screenH: Int) {
@@ -302,9 +365,11 @@ class Gfx {
     fun background() {
         val b = skin("background")
         if (b != null) {
+            val fit = MainUI.settings.backgroundFit
+            if (fit == "auto" && theme.onionLayout) { backgroundNative(b); return }
             // OnionOS shows background.png turned 180 degrees (themes store it upside down).
             c.save(); c.rotate(180f, W / 2, H / 2)
-            when (MainUI.settings.backgroundFit) {
+            when (fit) {
                 "stretch" -> bmp(b, 0f, 0f, W, H)
                 "fit" -> { c.drawColor(Color.BLACK); bmpFit(b, 0f, 0f, W, H) }
                 else -> bmpCover(b, 0f, 0f, W, H)
@@ -318,18 +383,110 @@ class Gfx {
         fill.shader = null
     }
 
-    fun header(title: String?, logo: Boolean = false, showBattery: Boolean = true) {
-        val bg = skin("bg-title")
-        if (bg != null) bar(bg, 0f, HEADER) else fillRect(0f, 0f, W, HEADER, darken(theme.bgColor, 0.45f))
-        if (logo) {
-            val l = skin("miyoo-topbar")
-            if (l != null) bmp(l, 20f, 30f - l.height / 2f)
-            else text("MainUI", theme.title, 20f, 30f, color = Color.WHITE)
+    private val turnSrc = android.graphics.Rect()
+
+    /** Part [sx], [sy], [sw] x [sh] of [b] turned 180 degrees (coordinates in the turned picture), into the box. */
+    private fun turned(b: Bitmap, sx: Int, sy: Int, sw: Int, sh: Int, dx: Float, dy: Float, dw: Float, dh: Float) {
+        if (sw <= 0 || sh <= 0 || dw <= 0f || dh <= 0f) return
+        turnSrc.set(b.width - sx - sw, b.height - sy - sh, b.width - sx, b.height - sy)
+        rect.set(dx, dy, dx + dw, dy + dh)
+        c.save(); c.rotate(180f, rect.centerX(), rect.centerY())
+        c.drawBitmap(b, turnSrc, rect, bmpPaint)
+        c.restore()
+    }
+
+    /**
+     * The background as a Miyoo shows it: turned 180 degrees and 1:1. On a bigger canvas its rows
+     * 0-60, 60-420 and 420-480 go with the header, the centred content and the footer, and the room
+     * between and beside them gets its edge rows and columns stretched.
+     */
+    private fun backgroundNative(b: Bitmap) {
+        val bw = min(b.width, 640); val bh = min(b.height, 480)
+        if (bw < 640 || bh < 480) c.drawColor(Color.BLACK)
+        val x0 = cx0
+        // (dy1 null: 1:1 rows; else one row stretched from dy0 to dy1)
+        fun band(sy0: Int, sy1: Int, dy0: Float, dy1: Float? = null) {
+            val y0 = if (dy1 == null) sy0 else min(sy0, bh - 1)
+            val rows = min(sy1, bh) - y0
+            val dh = dy1?.let { it - dy0 } ?: rows.toFloat()
+            if (rows <= 0 || dh <= 0f) return
+            turned(b, 0, y0, bw, rows, x0, dy0, bw.toFloat(), dh)
+            if (x0 > 0f) {
+                turned(b, 0, y0, 1, rows, 0f, dy0, x0, dh)
+                turned(b, bw - 1, y0, 1, rows, x0 + bw, dy0, W - x0 - bw, dh)
+            }
         }
-        // Right side first: the battery (its width depends on the theme and the percentage),
-        // then the clock just left of it, so neither covers the other ("6:52 PM" is wide).
-        val batteryLeft = if (showBattery) battery(W - 44f, 30f) else W - BATTERY_MARGIN
-        var rightEdge = batteryLeft
+        val y0 = cy0
+        if (y0 <= 0f) { band(0, 480, 0f); return }
+        band(0, 60, 0f)
+        band(60, 61, 60f, y0 + 60f)
+        band(60, 420, y0 + 60f)
+        band(419, 420, y0 + 420f, H - FOOTER)
+        band(420, 480, H - FOOTER)
+    }
+
+    /**
+     * A theme bar as OnionOS draws it: at its own size (a 1x1 picture hides the bar), in the 640
+     * column; beside a 640 wide one on a wider canvas, its end columns stretched.
+     */
+    private fun onionBar(b: Bitmap, y: Float) {
+        val x0 = cx0
+        bmp(b, x0, y)
+        if (x0 <= 0f || b.width != 640) return
+        val h = b.height.toFloat()
+        sliceSrc.set(0, 0, 1, b.height); sliceDst.set(0f, y, x0, y + h)
+        c.drawBitmap(b, sliceSrc, sliceDst, bmpPaint)
+        sliceSrc.set(639, 0, 640, b.height); sliceDst.set(x0 + 640f, y, W, y + h)
+        c.drawBitmap(b, sliceSrc, sliceDst, bmpPaint)
+    }
+
+    fun header(title: String?, logo: Boolean = false, showBattery: Boolean = true) {
+        headerBar(logo)
+        val rightEdge = headerStatus(showBattery)
+        // The centred title stays clear of the clock / battery on the right (and as far from the left).
+        if (title != null) {
+            val room = minOf(W - 220f, 2f * (rightEdge - 14f - W / 2)).coerceAtLeast(120f)
+            text(title, theme.title, W / 2, 29f, Align.CENTER, maxW = room)
+        }
+    }
+
+    /**
+     * The top bar: bg-title and, with [logo], miyoo-topbar (and in an OnionOS theme div-line-h below
+     * it, as its main menu has). [headerStatus] draws the battery.
+     */
+    fun headerBar(logo: Boolean = false) {
+        val onion = theme.onionLayout
+        val bg = skin("bg-title")
+        when {
+            bg == null -> fillRect(0f, 0f, W, HEADER, darken(theme.bgColor, 0.45f))
+            onion -> onionBar(bg, 0f)
+            else -> bar(bg, 0f, HEADER)
+        }
+        if (!logo) return
+        val l = skin("miyoo-topbar")
+        val x = (if (onion) cx0 else 0f) + 20f
+        when {
+            l == null -> text("MainUI", theme.title, x, 30f, color = Color.WHITE)
+            // (a taller one is a screen overlay framing the tiles: it goes with them)
+            onion -> bmp(l, x, (if (l.height > HEADER) cy0 else 0f) + (60 - l.height) / 2)
+            else -> bmp(l, 20f, 30f - l.height / 2f)
+        }
+        if (onion) skin("div-line-h")?.let { onionBar(it, HEADER) }
+    }
+
+    /**
+     * The battery, an OnionOS theme's Wi-Fi icon left of it, and the clock left of those (it is
+     * MainUI's, off by default). Returns their left edge.
+     */
+    fun headerStatus(showBattery: Boolean = true): Float {
+        val onion = theme.onionLayout
+        val batteryLeft = when {
+            !showBattery -> W - BATTERY_MARGIN
+            onion -> battery(cx0 + 596f, 30f)
+            else -> battery(W - 44f, 30f)
+        }
+        var left = batteryLeft
+        if (onion) wifi()?.let { left = min(left, it) }
         if (MainUI.settings.showClock) {
             val h24 = when (MainUI.settings.clockFormat) {
                 "12" -> false
@@ -343,21 +500,50 @@ class Gfx {
             fmt.timeZone = java.util.TimeZone.getDefault()
             val clock = fmt.format(Date(now))
             val style = theme.battery.let { FontStyle(it.typeface, 22f, it.clockColor) }
-            val clockRight = batteryLeft - if (showBattery) 14f else 0f
+            val clockRight = left - if (showBattery || left < batteryLeft) 14f else 0f
             text(clock, style, clockRight, 30f, Align.RIGHT)
-            rightEdge = clockRight - textWidth(clock, style)
+            left = clockRight - textWidth(clock, style)
             // Draw again when the minute changes, even on a screen nobody touches.
             redrawAfter(60_000L - now % 60_000L + 50L)
         }
-        // The centred title stays clear of the clock / battery on the right (and as far from the left).
-        if (title != null) {
-            val room = minOf(W - 220f, 2f * (rightEdge - 14f - W / 2)).coerceAtLeast(120f)
-            text(title, theme.title, W / 2, 29f, Align.CENTER, maxW = room)
-        }
+        return left
     }
 
     /** The clock's formatter, made again only when its pattern or the language changes. */
     private var clockFormat: Triple<String, Locale, SimpleDateFormat>? = null
+
+    /**
+     * OnionOS's Wi-Fi icon (icon-wifi-signal-01..04) while connected, centred in the 48 px box at
+     * (504, 6) left of the battery's. Returns the box's left edge, null when not connected.
+     */
+    private fun wifi(): Float? {
+        val n = WifiState.bars.coerceAtMost(4)
+        if (n <= 0) return null
+        val boxX = cx0 + 504f
+        val b = skin("icon-wifi-signal-0$n")
+        if (b != null) {
+            val x = boxX + (48 - b.width) / 2
+            bmp(b, x, (6 + (48 - b.height) / 2).toFloat())
+            return if (b.width <= 640) min(x, boxX) else boxX
+        }
+        drawWifiIcon(boxX + 24f, 30f, n)
+        return boxX
+    }
+
+    /** A Wi-Fi fan with [bars] of its 4 parts lit, for a theme without the icons. */
+    private fun drawWifiIcon(cx: Float, cy: Float, bars: Int) {
+        val lit = theme.battery.color
+        val dim = withAlpha(lit, 80)
+        val base = cy + 10f
+        circle(cx, base, 2.6f, if (bars >= 1) lit else dim)
+        stroke.strokeWidth = 3.4f; stroke.strokeCap = Paint.Cap.ROUND
+        for (i in 1..3) {
+            val r = 6.5f * i
+            stroke.color = if (bars > i) lit else dim
+            rect.set(cx - r, base - r, cx + r, base + r)
+            c.drawArc(rect, 225f, 90f, false, stroke)
+        }
+    }
 
     /** Battery icon + percentage following Onion's batteryPercentage rules. Returns its left edge. */
     fun battery(cx: Float, cy: Float): Float {
@@ -372,6 +558,7 @@ class Gfx {
             else -> "power-full-icon"
         }
         val icon = skin(name) ?: if (name == "power-full-icon") skin("power-full-icon_back") else null
+        if (theme.onionLayout) return onionBattery(icon, lvl, charging, cx, cy)
         val st = theme.battery
         val visible = st.visible && !charging
         val label = "$lvl%"
@@ -410,6 +597,89 @@ class Gfx {
         return if (visible) minOf(iconX, textX) else iconX
     }
 
+    /**
+     * The battery of an OnionOS theme exactly as OnionOS composes it ([batteryBox]), centred on
+     * ([cx], [cy]) and never moved inside the screen: themes with a screen-sized see-through icon
+     * place their battery anywhere with it (win98: in its taskbar). Returns the left edge of what
+     * shows in the top bar.
+     */
+    private fun onionBattery(icon: Bitmap?, lvl: Int, charging: Boolean, cx: Float, cy: Float): Float {
+        val st = theme.battery
+        val iw = icon?.width ?: 44
+        val ih = icon?.height ?: 24
+        val label = "$lvl%"
+        val style = FontStyle(st.typeface, st.size, st.color)
+        setText(style)
+        val fm = tp.fontMetrics
+        val fontH = fm.descent - fm.ascent
+        val tw = kotlin.math.ceil(tp.measureText(label)).toInt()
+        val th = kotlin.math.ceil(fontH).toInt()
+        val visible = st.visible && !charging && iw <= 640
+        val box = batteryBox(iw, ih, tw, th, visible, st.fixed, st.align, st.offsetX)
+        var y = cy
+        if (icon != null && ih > HEADER) {
+            // (a canvas: placed with the band of the 640x480 screen its picture shows in)
+            alphaBounds(icon)?.let { r ->
+                val top = 30 - box.h / 2 + box.iconY
+                y = batteryAnchorY(top + r.top, top + r.bottom, H) + (cy - 30f)
+            }
+        }
+        val left = cx - box.w / 2
+        val top = y - box.h / 2
+        if (icon != null) bmp(icon, left + box.iconX, top + box.iconY)
+        else drawBatteryIcon(left + box.iconX, top + box.iconY + ih / 2f, lvl, charging)
+        if (visible) {
+            // (OnionOS moves Exo 2 up by 7.5% of its height)
+            val offY = if (isExo2(st.typeface)) (st.offsetY - 0.075f * fontH).toInt() else st.offsetY
+            text(label, style, left + box.textX, top + (box.h - th) / 2 + th / 2f + offY)
+        }
+        if (iw > 640 || ih > 2 * HEADER) return cx - 24f
+        return left + if (visible) min(box.iconX, box.textX) else box.iconX
+    }
+
+    private val exoFont: android.graphics.Typeface? by lazy {
+        runCatching { android.graphics.Typeface.createFromAsset(MainUI.app.assets, "fonts/Exo-2-Bold-Italic.ttf") }.getOrNull()
+    }
+    private val exoFaces = java.util.WeakHashMap<android.graphics.Typeface, Boolean>()
+
+    /** [tf] is Exo 2 Bold Italic (OnionOS's default battery font, or the same file from a theme). */
+    private fun isExo2(tf: android.graphics.Typeface): Boolean = exoFaces.getOrPut(tf) {
+        val exo = exoFont ?: return@getOrPut false
+        val p = Paint().apply { textSize = 40f }
+        fun metrics(t: android.graphics.Typeface): List<Float> {
+            p.typeface = t
+            return listOf(p.measureText("0123456789%"), p.fontMetrics.ascent, p.fontMetrics.descent)
+        }
+        tf === exo || metrics(tf) == metrics(exo)
+    }
+
+    private val alphaBoxes = java.util.WeakHashMap<Bitmap, android.graphics.Rect>()
+    private val noAlphaBox = android.graphics.Rect()
+
+    /** The box around [b]'s visible pixels (alpha 16 and up), null when it has none. Cached. */
+    fun alphaBounds(b: Bitmap): android.graphics.Rect? {
+        val box = synchronized(alphaBoxes) {
+            alphaBoxes.getOrPut(b) {
+                runCatching {
+                    val w = b.width; val h = b.height
+                    val px = IntArray(w * h)
+                    b.getPixels(px, 0, w, 0, 0, w, h)
+                    var l = w; var t = h; var r = -1; var btm = -1
+                    for (y in 0 until h) for (x in 0 until w) {
+                        if ((px[y * w + x] ushr 24) >= 16) {
+                            if (x < l) l = x
+                            if (x > r) r = x
+                            if (y < t) t = y
+                            btm = y
+                        }
+                    }
+                    if (r < 0) noAlphaBox else android.graphics.Rect(l, t, r + 1, btm + 1)
+                }.getOrDefault(noAlphaBox)
+            }
+        }
+        return box.takeIf { it !== noAlphaBox }
+    }
+
     private fun drawBatteryIcon(x: Float, cy: Float, lvl: Int, charging: Boolean) {
         val w = 40f; val h = 20f; val y = cy - h / 2
         strokeRect(x, y, w, h, Color.WHITE, 2.5f, 4f)
@@ -436,28 +706,40 @@ class Gfx {
             // ...and its hints: taps on the bar are for the overlay's buttons only.
             pendingHints.clear()
         }
-        if (bg != null) bar(bg, y, FOOTER) else fillRect(0f, y, W, FOOTER, darken(theme.bgColor, 0.45f))
+        val onion = theme.onionLayout
+        when {
+            bg == null -> fillRect(0f, y, W, FOOTER, darken(theme.bgColor, 0.45f))
+            onion -> onionBar(bg, y)
+            else -> bar(bg, y, FOOTER)
+        }
         val cy = H - 30f
-        // (a theme whose footer picture has its hints: only its own A / B, as OnionOS draws it)
-        val inArt = theme.hintsInArt
-        val hideLabels = inArt
+        // A theme whose footer picture has its hints: only its own A / B, as OnionOS draws it. With
+        // hideLabels.hints their words are " "; a 640 wide see-through A pushes B off screen.
+        val blank = theme.hideHintLabels
+        val pushedOff = !blank && theme.hintsInArt && (skin("icon-A-54")?.width ?: 0) + 25 >= 640
+        val inArt = blank || pushedOff
         val hints = buildList {
             aLabel?.let { add("A" to it) }
             bLabel?.let { add("B" to it) }
             if (!inArt) addAll(extra)
         }
-        val left = 20f
+        val left = (if (onion) cx0 else 0f) + 20f
+        val right = if (onion) cx0 + 620f else W - 20f
+        fun labelW(l: String, scale: Float) = when {
+            pushedOff -> 0f
+            blank -> textWidth(" ", theme.hint, theme.hint.size * scale)
+            else -> textWidth(l, theme.hint, theme.hint.size * scale)
+        }
         fun widthOf(n: Int, gap: Float, scale: Float): Float = hints.take(n).sumOf { (b, l) ->
-            (buttonIcon(b, 0f, 0f, scale = scale, draw = false) + 5f * scale +
-                (if (hideLabels) 0f else textWidth(l, theme.hint, theme.hint.size * scale))).toDouble()
+            (buttonIcon(b, 0f, 0f, scale = scale, draw = false) + 5f * scale + labelW(l, scale)).toDouble()
         }.toFloat() + gap * (n - 1).coerceAtLeast(0)
         // (gap, smallest scale, room on the right) tried in order.
-        val withCounter = W - left - 20f - reserveRight - (if (reserveRight > 0f) 12f else 0f)
-        val noCounter = W - left - 20f
+        val withCounter = right - left - reserveRight - (if (reserveRight > 0f) 12f else 0f)
+        val noCounter = right - left
         var n = hints.size
         var gap = 30f; var scale = 1f
         run fit@{
-            while (n > 0) {
+            while (n > 0 && !inArt) {
                 for ((g, minScale, room) in listOf(Triple(30f, 1f, withCounter), Triple(16f, 1f, withCounter),
                     Triple(16f, 0.82f, withCounter), Triple(16f, 0.72f, noCounter))) {
                     val w1 = widthOf(n, g, 1f)
@@ -468,14 +750,17 @@ class Gfx {
                 n-- // drop the last extra hint
             }
         }
+        val clip = onion && cx0 > 0f
+        if (clip) { c.save(); c.clipRect(cx0, 0f, cx0 + 640f, H) }
         var x = left
         for ((btn, label) in hints.take(n)) {
             val startX = x
             x += buttonIcon(btn, x, cy, scale = scale) + 5f * scale
-            if (!hideLabels) x += text(label, theme.hint, x, cy - 1, size = theme.hint.size * scale)
+            x += if (inArt) labelW(label, scale) else text(label, theme.hint, x, cy - 1, size = theme.hint.size * scale)
             btnFor(btn)?.let { pendingHints += RectF(startX - 10, y, x + gap / 2, H) to it }
             x += gap
         }
+        if (clip) c.restore()
         hintsEndX = x - gap
     }
 
@@ -554,9 +839,10 @@ class Gfx {
         val cur = if (total == 0) 0 else current
         val cy = H - 31f
         val width = statusWidth(current, total)
-        if (W - 20f - width < hintsEndX + 12f) return // no room next to the hints
-        val tw = text("$total", theme.total, W - 20f, cy, Align.RIGHT)
-        text("$cur/", theme.currentPage, W - 20f - tw, cy, Align.RIGHT)
+        val right = if (theme.onionLayout) cx0 + 620f else W - 20f
+        if (right - width < hintsEndX + 12f) return // no room next to the hints
+        val tw = text("$total", theme.total, right, cy, Align.RIGHT)
+        text("$cur/", theme.currentPage, right - tw, cy, Align.RIGHT)
     }
 
     /** Page dots (dot-a / dot-n). */
@@ -580,6 +866,28 @@ class Gfx {
             else circle(x + dw / 2, cy, if (i == active) 6f else 4.5f, if (i == active) Color.WHITE else Color.argb(140, 255, 255, 255))
             x += dw + gap
         }
+    }
+
+    /**
+     * OnionOS main menu dots: one per item ([count]), dot-a.w + 5 apart, centred in the 640 column,
+     * their tops at 390, each at its own size. False: the theme lacks dot-a or dot-n.
+     */
+    fun menuDots(count: Int, active: Int): Boolean {
+        val a = skin("dot-a") ?: return false
+        val n = skin("dot-n") ?: return false
+        for (i in 0 until count) bmp(if (i == active) a else n, cx0 + menuDotX(i, count, a.width + 5), cy0 + 390f)
+        return true
+    }
+
+    /** [bmpFit] for the part [src] of [b]. */
+    fun bmpFit(b: Bitmap, src: android.graphics.Rect, x: Float, y: Float, w: Float, h: Float, alpha: Int = 255, upscale: Boolean = true) {
+        var s = min(w / src.width(), h / src.height())
+        if (!upscale) s = min(s, 1f)
+        val dw = src.width() * s; val dh = src.height() * s
+        rect.set(x + (w - dw) / 2, y + (h - dh) / 2, x + (w + dw) / 2, y + (h + dh) / 2)
+        bmpPaint.alpha = alpha
+        c.drawBitmap(b, src, rect, bmpPaint)
+        bmpPaint.alpha = 255
     }
 
     fun arrow(left: Boolean, x: Float, cy: Float, withBg: Boolean = false) {

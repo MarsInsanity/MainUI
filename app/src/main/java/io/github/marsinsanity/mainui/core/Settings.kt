@@ -48,8 +48,11 @@ class Settings(ctx: Context) {
     var homeLayout by str("home_layout", "menu")
     /** "grid" = OnionOS 4x2 games grid, "row" = the same cells in one scrolling row. */
     var systemsLayout by str("systems_layout", "grid")
-    /** "cover", "stretch" or "fit" for 640x480 theme backgrounds on non 4:3 screens. */
-    var backgroundFit by str("background_fit", "cover")
+    /**
+     * 640x480 theme backgrounds on non 4:3 screens: "auto" (OnionOS themes 1:1 as on a Miyoo, others
+     * "cover"), "cover", "stretch" or "fit".
+     */
+    var backgroundFit by str("background_fit", "auto")
     /** Systems an OnionOS theme has no icon for: OnionOS's default icons first, as on a Miyoo. */
     var onionIcons by bool("onion_icons", true)
     var smoothScaling by bool("smooth_scaling", true)

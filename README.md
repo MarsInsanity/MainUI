@@ -231,8 +231,9 @@ Differences from a Miyoo Mini, due to the screen:
   holding a direction doesn't become a buzz. Choosing a level says so if no motor is found.
 - The top bar clock (Settings > User interface > *Show clock*) is 24-hour, 12-hour or like Android's
   own setting (*Clock format*).
-- Backgrounds are cropped to fill the screen by default (Settings > User interface > Background fit:
-  Crop / Stretch / Fit).
+- Backgrounds (Settings > User interface > Background fit: Auto / Crop / Stretch / Fit): on Auto an
+  OnionOS theme's is shown 1:1 as on a Miyoo, its header and footer rows behind the bars on a taller
+  screen and its edges stretched on a wider one; MainUI's own themes' are cropped to fill the screen.
 - Fonts that Onion ships (`/mnt/SDCARD/miyoo/app/...`) are matched by file name. BPreplay, Exo 2 and
   Adobe Blank are bundled. Helvetica and Microsoft YaHei are not, because of their licences, so the
   system font is used instead (regular, or bold for `HENB.TTF`). A font a theme names but doesn't

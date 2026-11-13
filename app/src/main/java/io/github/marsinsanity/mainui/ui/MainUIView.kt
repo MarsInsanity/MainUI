@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Canvas
 import android.graphics.Color
+import android.net.wifi.SupplicantState
+import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
@@ -166,15 +168,41 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         }
     }
 
+    // ---- Wi-Fi (OnionOS themes show its signal in the top bar) -------------------------------
+
+    private val wifiReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) { if (updateWifi()) invalidate() }
+    }
+
+    /** Reads the Wi-Fi signal into [WifiState]; true when it changed. */
+    private fun updateWifi(): Boolean {
+        val bars = runCatching {
+            val wm = context.applicationContext.getSystemService(WifiManager::class.java)
+            @Suppress("DEPRECATION") val info = wm?.connectionInfo
+            if (wm == null || !wm.isWifiEnabled || info == null || info.supplicantState != SupplicantState.COMPLETED) 0
+            else Gfx.wifiBars(info.rssi)
+        }.getOrDefault(0)
+        if (bars == WifiState.bars) return false
+        WifiState.bars = bars
+        return true
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         context.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        context.registerReceiver(wifiReceiver, IntentFilter().apply {
+            addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
+            addAction(WifiManager.RSSI_CHANGED_ACTION)
+            addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
+        })
+        updateWifi()
         requestFocus()
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         runCatching { context.unregisterReceiver(batteryReceiver) }
+        runCatching { context.unregisterReceiver(wifiReceiver) }
         releaseAll()
         handler.removeCallbacksAndMessages(null)
     }
