@@ -3,6 +3,7 @@ package io.github.marsinsanity.mainui.theme
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.SoundPool
@@ -162,12 +163,12 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
             val children = root.listFiles()?.sortedBy { it.name.lowercase() } ?: continue
             for (f in children) {
                 if (f.isDirectory) {
-                    val cfg = File(f, "config.json")
-                    if (!cfg.isFile && !File(f, "skin").isDirectory) continue
-                    val o = runCatching { JSONObject(cfg.readText()) }.getOrNull()
-                    val e = ThemeEntry(f, null, o?.optString("name")?.ifEmpty { null } ?: f.name,
-                        o?.optString("author") ?: "", o?.optString("description") ?: "")
-                    if (seen.add(f.name.lowercase())) out += e
+                    for (d in themeFolders(f)) {
+                        val o = runCatching { JSONObject(File(d, "config.json").readText()) }.getOrNull()
+                        val e = ThemeEntry(d, null, o?.optString("name")?.ifEmpty { null } ?: d.name,
+                            o?.optString("author") ?: "", o?.optString("description") ?: "")
+                        if (seen.add((if (d == f) d.name else "${f.name}/${d.name}").lowercase())) out += e
+                    }
                 } else if (f.extension.equals("zip", true)) {
                     val n = f.nameWithoutExtension
                     if (seen.add(n.lowercase())) out += ThemeEntry(null, f, n, "", "Not installed yet (.zip)")
@@ -177,7 +178,7 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         return out
     }
 
-    /** Preview for the theme switcher (preview.png, or background as fallback). */
+    /** Preview for the theme switcher (preview.png, or background as fallback, turned upright). */
     fun preview(entry: ThemeEntry, maxW: Int = 640): Bitmap? {
         // Made smaller when it's big: one bigger than the image cache was decoded again every frame.
         fun scaled(w: Int, h: Int) = BitmapFactory.Options().apply { inSampleSize = sampleSize(w, h, maxW, 16L shl 20) }
@@ -187,7 +188,11 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
                 if (!f.isFile) continue
                 val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(f.absolutePath, b)
-                return BitmapFactory.decodeFile(f.absolutePath, scaled(b.outWidth, b.outHeight))
+                val bmp = BitmapFactory.decodeFile(f.absolutePath, scaled(b.outWidth, b.outHeight))
+                if (rel == "preview.png" || bmp == null) return bmp
+                // (themes store background.png upside down, see Gfx.background)
+                return Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(180f) }, true)
+                    .also { if (it !== bmp) bmp.recycle() }
             }
             // A bundled theme not unpacked yet: its picture straight from the APK.
             if (isBundled(d)) runCatching {
@@ -196,7 +201,7 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         }
         entry.zip?.let { z ->
             runCatching {
-                ZipFile(z).use { zf ->
+                readZip(z) { zf ->
                     val e = zf.entries().asSequence().firstOrNull { it.name.endsWith("preview.png", true) && it.name.count { c -> c == '/' } <= 1 }
                         ?: return null
                     val bytes = zf.getInputStream(e).use { it.readBytes() }
@@ -209,43 +214,58 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         return null
     }
 
-    /** Extracts an Onion theme .zip next to itself. Handles zips with or without a top folder. */
-    fun install(zip: File): File? = runCatching {
-        ZipFile(zip).use { zf ->
-            val entries = zf.entries().toList().filter { !it.name.startsWith("__MACOSX/") }
-            val tops = entries.map { it.name.substringBefore('/') }.toSet()
-            // A pack of several themes ("CyberOnion (2-pack)"): each top folder that is a theme
-            // (config.json or skin/) is installed as a theme of its own.
-            val themeTops = tops.filter { t -> entries.any { it.name == "$t/config.json" || it.name.startsWith("$t/skin/") } }
-            if (themeTops.size > 1) {
-                val dirs = themeTops.mapNotNull { extract(zf, entries, zip.parentFile!!, it, true) }
-                // The pack's own name has no folder: remembered, so the Theme Downloader knows it is installed.
-                runCatching { packMarker(zip.parentFile!!, zip.nameWithoutExtension).writeText(dirs.joinToString("\n") { it.name }) }
-                return@runCatching dirs.first()
+    /**
+     * Extracts an Onion theme .zip next to itself: the theme at its root, in a top folder, or each
+     * theme of a pack ("CyberOnion (2-pack)", also with the pack's own folder on top).
+     */
+    fun install(zip: File): File? {
+        val themesDir = zip.parentFile ?: return null
+        val created = mutableListOf<File>()
+        val dirs = runCatching {
+            readZip(zip) { zf ->
+                val entries = zf.entries().toList().filter { !it.name.startsWith("__MACOSX/") }
+                val names = HashSet<String>()
+                themeRoots(entries.map { it.name }).mapNotNull { root ->
+                    val name = if (root.isEmpty()) zip.nameWithoutExtension else root.substringAfterLast('/')
+                    // (two themes of the same name are not merged into one folder: the first one is kept)
+                    if (!names.add(name.lowercase())) return@mapNotNull null
+                    val target = File(themesDir, name)
+                    if (!target.exists()) created += target
+                    extract(zf, entries, themesDir, root, name)
+                }
             }
-            val hasTopFolder = tops.size == 1 && entries.any { it.name.contains('/') }
-            val top = if (themeTops.size == 1) themeTops[0] else if (hasTopFolder) tops.first() else zip.nameWithoutExtension
-            extract(zf, entries, zip.parentFile!!, top, hasTopFolder || themeTops.size == 1) ?: throw java.io.IOException("bad theme folder \"$top\"")
+        }.getOrNull()
+        // Only usable themes count (and free the zip); anything else keeps the zip, fails and leaves nothing behind.
+        if (dirs.isNullOrEmpty() || !dirs.all { isTheme(it) }) { created.forEach { it.deleteRecursively() }; return null }
+        // The pack's own name has no folder: remembered, so the Theme Downloader knows it is installed.
+        if (dirs.size > 1) runCatching { packMarker(themesDir, zip.nameWithoutExtension).writeText(dirs.joinToString("\n") { it.name }) }
+        zip.delete()
+        return dirs.first()
+    }
+
+    /** Opens [zip], with the zip format's old CP437 names when they aren't UTF-8. */
+    private inline fun <T> readZip(zip: File, block: (ZipFile) -> T): T =
+        try { ZipFile(zip).use(block) } catch (e: IllegalArgumentException) {
+            val cp437 = runCatching { java.nio.charset.Charset.forName("IBM437") }.getOrDefault(Charsets.ISO_8859_1)
+            ZipFile(zip, cp437).use(block)
         }
-    }.getOrNull()
-        // Only a usable theme counts (and frees its zip); anything else keeps the zip and fails.
-        ?.takeIf { File(it, "config.json").isFile || File(it, "skin").isDirectory }?.also { zip.delete() }
 
     /** Lists the theme folders a pack of several themes ([name]: the pack's) was installed as. */
     fun packMarker(themesDir: File, name: String) = File(themesDir, ".$name.pack")
 
     /**
-     * Unpacks theme [top] into [dir]/[top]: the entries under "[top]/" when [inFolder], else every
-     * entry. Null for a [top] that isn't a plain folder name.
+     * Unpacks the entries under [root] ("" = all of them) into [dir]/[name]. Null for a [name] that
+     * isn't a plain folder name.
      */
-    private fun extract(zf: ZipFile, entries: List<java.util.zip.ZipEntry>, dir: File, top: String, inFolder: Boolean): File? {
+    private fun extract(zf: ZipFile, entries: List<java.util.zip.ZipEntry>, dir: File, root: String, name: String): File? {
         // The theme folder must be a plain name: never "..", ".", or a path.
-        if (top.isBlank() || top == "." || top == ".." || top.contains('/') || top.contains('\\')) return null
-        val target = File(dir, top)
+        if (name.isBlank() || name == "." || name == ".." || name.contains('/') || name.contains('\\')) return null
+        val target = File(dir, name)
         val inside = target.canonicalPath + File.separator
+        val prefix = if (root.isEmpty()) "" else "$root/"
         for (e in entries) {
-            if (inFolder && !e.name.startsWith("$top/")) continue
-            val out = File(dir, if (inFolder) e.name else "$top/${e.name}")
+            if (!e.name.startsWith(prefix)) continue
+            val out = File(target, e.name.substring(prefix.length))
             // Zip slip: everything must land inside the theme's own folder (a prefix test of the
             // bare path would let "Blue/../Blueprint/x" into a sibling theme "Blueprint").
             if (!(out.canonicalPath + if (e.isDirectory) File.separator else "").startsWith(inside)) continue
@@ -293,4 +313,31 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     companion object {
         const val CLASSIC = "classic"
     }
+}
+
+/** A folder MainUI can use as a theme: OnionOS's config.json, or at least skin/. */
+internal fun isTheme(dir: File) = File(dir, "config.json").isFile || File(dir, "skin").isDirectory
+
+/**
+ * The themes in folder [f] of a Themes folder: [f] itself, or for a pack folder copied as it is
+ * ("Material (6-pack)"), each theme in it with a config.json.
+ */
+internal fun themeFolders(f: File): List<File> =
+    if (isTheme(f)) listOf(f)
+    else f.listFiles()?.filter { it.isDirectory && File(it, "config.json").isFile }?.sortedBy { it.name.lowercase() }.orEmpty()
+
+/**
+ * The theme folders in a zip with entries [names], as paths without the trailing '/' ("" = the zip's
+ * root): each folder with a config.json or a skin/, but not one inside another (Milk's v1/ and v2/
+ * are part of Milk).
+ */
+internal fun themeRoots(names: List<String>): List<String> {
+    val roots = LinkedHashSet<String>()
+    for (n in names) {
+        val parts = n.split('/')
+        if (parts.last() == "config.json") roots += parts.dropLast(1).joinToString("/")
+        val skin = parts.indexOf("skin")
+        if (skin >= 0 && skin < parts.size - 1) roots += parts.take(skin).joinToString("/")
+    }
+    return roots.filter { r -> roots.none { o -> o != r && (o.isEmpty() || r.startsWith("$o/")) } }
 }

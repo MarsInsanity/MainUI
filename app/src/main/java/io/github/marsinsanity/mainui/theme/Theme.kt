@@ -23,9 +23,9 @@ data class BatteryStyle(
  *
  * Mirrors Onion's theme_loadFromPath(): same defaults, same fallback chain
  * (hint -> title, list -> title, currentpage/total -> hint, battery -> hint)
- * and the same `hideIconTitle` backwards compatibility. Images missing from a
- * theme return null and the renderer draws a built-in replacement, so partial
- * themes still look complete.
+ * and the same `hideIconTitle` backwards compatibility. A missing skin/extra
+ * picture falls back to OnionOS's own (assets onion_res/), as on a Miyoo; other
+ * missing images return null and the renderer draws a built-in replacement.
  */
 class Theme private constructor(
     private val ctx: Context,
@@ -57,34 +57,56 @@ class Theme private constructor(
     var bgColor = Color.rgb(30, 30, 32); private set
 
     private val bitmaps = ConcurrentHashMap<String, Any>() // Bitmap or MISSING
-    private val typefaces = HashMap<String, Typeface>()
+    private val typefaces = HashMap<String, Typeface?>() // null: not found
+    /** Pictures that are not the theme's own (see [artSource]); identity keys. */
+    private val artSources = ConcurrentHashMap<Bitmap, ArtSource>()
+
+    /** What a Miyoo falls back to for fonts it can't find: Exo 2 (hint, battery)... */
+    private val exoFont: Typeface by lazy {
+        runCatching { Typeface.createFromAsset(ctx.assets, "fonts/Exo-2-Bold-Italic.ttf") }.getOrNull() ?: Typeface.DEFAULT_BOLD
+    }
+    /** ...and stock MainUI's HENB.TTF (title, list, grid): from MainUI/Fonts, else the system bold. */
+    private val henbFont: Typeface by lazy {
+        fontDirs.map { File(it, "HENB.TTF") }.firstOrNull { it.isFile }
+            ?.let { runCatching { Typeface.createFromFile(it) }.getOrNull() } ?: Typeface.DEFAULT_BOLD
+    }
 
     val isBuiltIn get() = dir == null
 
     private fun load() {
-        val fallbackFont = font("BPreplayBold.otf")
         val white = Color.WHITE
-        var t = FontStyle(fallbackFont, 36f, white)
-        var h = FontStyle(fallbackFont, 40f, white)
-        var cp = FontStyle(fallbackFont, 40f, white)
-        var tot = FontStyle(fallbackFont, 40f, white)
-        var l = FontStyle(fallbackFont, 24f, white)
-        var g = GridStyle(fallbackFont, 24f, 18f, Color.rgb(104, 104, 104), white)
-        var b = BatteryStyle(false, fallbackFont, 24f, white, 0, 0, "left", false)
+        val henb = henbFont; val exo = exoFont
+        var t = FontStyle(henb, 36f, white)
+        var h = FontStyle(exo, 40f, white)
+        var cp = FontStyle(exo, 40f, white)
+        var tot = FontStyle(exo, 40f, white)
+        var l = FontStyle(henb, 24f, white)
+        var g = GridStyle(henb, 24f, 18f, Color.rgb(104, 104, 104), white)
+        var b = BatteryStyle(false, exo, 24f, white, 0, 0, "left", false)
 
         val configs = mutableListOf<JSONObject>()
         val main = dir?.let { File(it, "config.json") }?.takeIf { it.isFile }
-        if (main != null) runCatching { configs += JSONObject(main.readText()) }
-        else runCatching { configs += JSONObject(ctx.assets.open("default_theme/config.json").bufferedReader().readText()) }
+        fun asset(path: String) = ctx.assets.open(path).bufferedReader().use { it.readText() }
+        when {
+            main != null -> runCatching { configs += JSONObject(main.readText()) }
+            // A theme folder without config.json gets OnionOS's default theme settings, as on a Miyoo.
+            dir != null -> { name = dir.name; author = ""; runCatching { configs += JSONObject(asset("onion_res/config.json")) } }
+            else -> runCatching { configs += JSONObject(asset("default_theme/config.json")) }
+        }
+        val ownConfig = main != null || dir == null
         val overrides = overrideDir?.let { File(it, "config.json") }?.takeIf { it.isFile }
         if (overrides != null) runCatching { configs += JSONObject(overrides.readText()) }
+        // (known before any font is looked up: MainUI's own themes name its bundled fonts directly)
+        onionLayout = configs.none { it.has("mainui") }
 
         var ownPalette = 0 // MainUI colours the configs set: 1 accent, 2 panel, 4 background
         configs.forEachIndexed { idx, c ->
             val useFallbacks = idx == 0
-            c.optString("name").takeIf { it.isNotEmpty() }?.let { name = it }
-            c.optString("author").takeIf { it.isNotEmpty() }?.let { author = it }
-            c.optString("description").takeIf { it.isNotEmpty() }?.let { description = it }
+            if (idx > 0 || ownConfig) {
+                c.optString("name").takeIf { it.isNotEmpty() }?.let { name = it }
+                c.optString("author").takeIf { it.isNotEmpty() }?.let { author = it }
+                c.optString("description").takeIf { it.isNotEmpty() }?.let { description = it }
+            }
             val hide = c.optJSONObject("hideLabels")
             if (hide != null) {
                 hideIconLabels = hide.optBoolean("icons", hideIconLabels)
@@ -92,18 +114,19 @@ class Theme private constructor(
             } else if (c.has("hideIconTitle")) {
                 val v = c.optBoolean("hideIconTitle"); hideIconLabels = v; hideHintLabels = v
             }
-            t = fontStyle(c.optJSONObject("title"), t, null)
-            h = fontStyle(c.optJSONObject("hint"), h, if (useFallbacks) t else null)
-            cp = fontStyle(c.optJSONObject("currentpage"), cp, if (useFallbacks) h else null)
-            tot = fontStyle(c.optJSONObject("total"), tot, if (useFallbacks) h else null)
-            l = fontStyle(c.optJSONObject("list"), l, if (useFallbacks) t else null)
+            // (a font a Miyoo can't find: HENB for title, list and grid, Exo 2 for the rest)
+            t = fontStyle(c.optJSONObject("title"), t, null, henb)
+            h = fontStyle(c.optJSONObject("hint"), h, if (useFallbacks) t else null, exo)
+            cp = fontStyle(c.optJSONObject("currentpage"), cp, if (useFallbacks) h else null, exo)
+            tot = fontStyle(c.optJSONObject("total"), tot, if (useFallbacks) h else null, exo)
+            l = fontStyle(c.optJSONObject("list"), l, if (useFallbacks) t else null, henb)
             c.optJSONObject("grid")?.let { gj ->
                 g = GridStyle(
-                    gj.optString("font").takeIf { it.isNotEmpty() }?.let { font(it) } ?: g.typeface,
+                    gj.optString("font").takeIf { it.isNotEmpty() }?.let { font(it, henb) } ?: g.typeface,
                     gj.optDouble("grid1x4", g.size1x4.toDouble()).toFloat(),
                     gj.optDouble("grid3x4", g.size3x4.toDouble()).toFloat(),
-                    color(gj, "color") ?: g.color,
-                    color(gj, "selectedcolor") ?: color(gj, "selectedColor") ?: g.selectedColor,
+                    stockColor(gj, "color") ?: g.color,
+                    stockColor(gj, "selectedcolor") ?: stockColor(gj, "selectedColor") ?: g.selectedColor,
                 )
             }
             val bj = c.optJSONObject("batteryPercentage")
@@ -112,9 +135,10 @@ class Theme private constructor(
                     ?: if (bj.has("onleft")) (if (bj.optBoolean("onleft")) "right" else "left") else b.align
                 b = BatteryStyle(
                     bj.optBoolean("visible", b.visible),
-                    bj.optString("font").takeIf { it.isNotEmpty() }?.let { font(it) } ?: if (useFallbacks) h.typeface else b.typeface,
+                    bj.optString("font").takeIf { it.isNotEmpty() }?.let { font(it, exo) } ?: if (useFallbacks) h.typeface else b.typeface,
                     bj.optDouble("size", b.size.toDouble()).toFloat(),
-                    color(bj, "color") ?: if (useFallbacks) h.color else b.color,
+                    // (drawn by OnionOS's own battery code, which reads colours with hex2sdl)
+                    if (bj.has("color")) OnionColor.hex2sdl(bj.optString("color")) else if (useFallbacks) h.color else b.color,
                     bj.optInt("offsetX", b.offsetX), bj.optInt("offsetY", b.offsetY), align,
                     bj.optBoolean("fixed", b.fixed),
                 )
@@ -126,7 +150,6 @@ class Theme private constructor(
             }
             // MainUI-for-Android extension: colours for procedurally drawn elements.
             c.optJSONObject("mainui")?.let { m ->
-                onionLayout = false
                 color(m, "accent")?.let { accent = it; ownPalette = ownPalette or 1 }
                 color(m, "panel")?.let { panel = it; ownPalette = ownPalette or 2 }
                 color(m, "background")?.let { bgColor = it; ownPalette = ownPalette or 4 }
@@ -143,7 +166,7 @@ class Theme private constructor(
      * tiles): they are taken from its pictures, so they match it instead of a fixed red.
      */
     private fun paletteFromArt(own: Int) {
-        fun px(name: String) = skin(name)?.let { pixels(it) }
+        fun px(name: String) = skinOwn(name)?.let { pixels(it) }
         if (own and 4 == 0) px("background")?.let { ThemeArt.dominant(it) }?.let { bgColor = it }
         if (own and 1 == 0) {
             val found = sequenceOf("bg-list-s", "dot-a", "ic-game-f", "icon-A-54", "bg-pop-menu-1", "pop-bg", "background")
@@ -186,7 +209,7 @@ class Theme private constructor(
         val i = if (selected) 1 else 0
         tileArts[i]?.let { return it as? TileArt }
         val st = if (selected) "f" else "n"
-        val src = listOf("game", "app", "setting", "favorite", "recent", "retroarch").firstNotNullOfOrNull { skin("ic-$it-$st") }
+        val src = listOf("game", "app", "setting", "favorite", "recent", "retroarch").firstNotNullOfOrNull { skinOwn("ic-$it-$st") }
         val art = src?.let { b ->
             val small = if (b.width > 640) Bitmap.createScaledBitmap(b, 640, maxOf(1, b.height * 640 / b.width), true) else b
             val t = ThemeArt.tile(pixels(small), small.width, small.height)
@@ -210,7 +233,7 @@ class Theme private constructor(
 
     fun buttonArt(): ButtonArt? {
         buttonArtCache?.let { return it as? ButtonArt }
-        val a = skin("icon-A-54")
+        val a = skinOwn("icon-A-54")
         val art = a?.takeIf { it.width <= 256 && it.height <= 256 }?.let { b ->
             ThemeArt.button(pixels(b), b.width, b.height)?.let {
                 ButtonArt(Bitmap.createBitmap(it.blank, it.w, it.h, Bitmap.Config.ARGB_8888), it.fill, it.ink, it.cx, it.cy, it.inkH, it.ring)
@@ -225,54 +248,88 @@ class Theme private constructor(
      * A button that pushes the labels off screen): only its own A / B buttons are drawn there.
      */
     val hintsInArt: Boolean by lazy {
-        hideHintLabels || skin("icon-A-54")?.let { b ->
+        hideHintLabels || skinOwn("icon-A-54")?.let { b ->
             val px = pixels(b, 160)
             px.none { (it ushr 24) >= 32 }
         } == true
     }
 
-    private fun fontStyle(o: JSONObject?, cur: FontStyle, fallback: FontStyle?): FontStyle {
+    private fun fontStyle(o: JSONObject?, cur: FontStyle, fallback: FontStyle?, missingFont: Typeface): FontStyle {
         if (o == null) return fallback ?: cur
-        val tf = o.optString("font").takeIf { it.isNotEmpty() }?.let { font(it) } ?: fallback?.typeface ?: cur.typeface
+        val tf = o.optString("font").takeIf { it.isNotEmpty() }?.let { font(it, missingFont) } ?: fallback?.typeface ?: cur.typeface
         val size = if (o.has("size")) o.optDouble("size").toFloat() else fallback?.size ?: cur.size
-        val col = color(o, "color") ?: fallback?.color ?: cur.color
+        // (a colour stock MainUI can't read keeps the default, not the fallback's)
+        val col = if (o.has("color")) stockColor(o, "color") ?: cur.color else fallback?.color ?: cur.color
         return FontStyle(tf, size, col)
     }
 
+    private fun stockColor(o: JSONObject, key: String): Int? = if (o.has(key)) OnionColor.stock(o.optString(key)) else null
+
+    /** The "mainui" block's colours: #RRGGBB or #AARRGGBB. */
     private fun color(o: JSONObject, key: String): Int? {
         val s = o.optString(key).takeIf { it.isNotEmpty() } ?: return null
         return runCatching { Color.parseColor(if (s.startsWith("#")) s else "#$s") }.getOrNull()
     }
 
     /**
-     * Resolves Onion font references. Themes often point at fonts that ship with
-     * Onion (/mnt/SDCARD/miyoo/app/...), so the basename is searched in the theme,
-     * MainUI/Fonts, and the fonts bundled with the app.
+     * Resolves a theme's font reference, [missing] when it can't be found. Themes often point at
+     * fonts that ship with Onion (/mnt/SDCARD/miyoo/app/...): those are matched by name to the
+     * ones bundled with the app. A font is also searched by name in the theme and MainUI/Fonts.
      */
-    fun font(ref: String): Typeface {
-        typefaces[ref]?.let { return it }
+    fun font(ref: String, missing: Typeface = exoFont): Typeface {
+        if (typefaces.containsKey(ref)) return typefaces[ref] ?: missing
+        val tf = resolveFont(ref)
+        typefaces[ref] = tf
+        return tf ?: missing
+    }
+
+    private fun resolveFont(ref: String): Typeface? {
         val base = ref.substringAfterLast('/')
         val candidates = mutableListOf<File>()
         if (ref.startsWith("/")) candidates += File(ref)
         dir?.let { candidates += File(it, ref); candidates += File(it, base) }
         fontDirs.forEach { candidates += File(it, base) }
-        var tf: Typeface? = candidates.firstOrNull { it.isFile }?.let { runCatching { Typeface.createFromFile(it) }.getOrNull() }
-        if (tf == null) {
-            val asset = BUNDLED_ALIASES[base.lowercase()]
-            tf = when (asset) {
-                null -> Typeface.create("sans-serif-condensed", Typeface.BOLD)
-                "" -> Typeface.DEFAULT_BOLD
-                else -> runCatching { Typeface.createFromAsset(ctx.assets, "fonts/$asset") }.getOrNull()
-            } ?: Typeface.DEFAULT_BOLD
+        val file = candidates.firstOrNull { it.isFile }
+            // (a Miyoo's FAT card ignores case: "HEN.TTF" finds HEN.ttf)
+            ?: (listOfNotNull(dir?.let { File(it, ref).parentFile }, dir) + fontDirs).distinct().firstNotNullOfOrNull { d ->
+                d.listFiles()?.firstOrNull { it.isFile && it.name.equals(base, ignoreCase = true) }
+            }
+        file?.let { f -> runCatching { Typeface.createFromFile(f) }.getOrNull()?.let { return it } }
+        // A Miyoo has Onion's fonts only there; MainUI's own themes name its bundled fonts directly.
+        val onDevice = ref.startsWith("/mnt/SDCARD/miyoo/app/", ignoreCase = true) || ref.startsWith("/customer/app/", ignoreCase = true)
+        if (onionLayout && !onDevice) return null
+        return when (val asset = BUNDLED_ALIASES[base.lowercase()]) {
+            null -> null
+            SYSTEM_BOLD -> Typeface.DEFAULT_BOLD
+            SYSTEM_REGULAR -> Typeface.DEFAULT
+            else -> runCatching { Typeface.createFromAsset(ctx.assets, "fonts/$asset") }.getOrNull()
         }
-        typefaces[ref] = tf!!
-        return tf!!
     }
 
     // ---- images ----------------------------------------------------------------------
 
-    /** skin/<name>.png with theme override support (MainUI/theme_overrides/skin). */
+    /**
+     * skin/<name>.png with theme override support (MainUI/theme_overrides/skin). An OnionOS theme
+     * without an extra/ picture OnionOS has its own of gets that one, as on a Miyoo.
+     */
     fun skin(name: String): Bitmap? = image("skin/$name.png")
+        ?: if (dir != null && onionLayout && name.startsWith("extra/") && name.substring(6) in ONION_RES) onionAsset("onion_res/${name.substring(6)}.png") else null
+
+    /** skin/<name>.png from the theme (or its overrides) only, never OnionOS's fallback. */
+    fun skinOwn(name: String): Bitmap? = image("skin/$name.png")
+
+    /** Where [b], a picture from [skin], [icon] or [appIcon], came from. */
+    fun artSource(b: Bitmap): ArtSource = artSources[b] ?: ArtSource.THEME
+
+    /** An app asset picture (OnionOS's own), cached. */
+    private fun onionAsset(path: String): Bitmap? {
+        val key = "asset:$path"
+        bitmaps[key]?.let { return it as? Bitmap }
+        val bmp = runCatching { ctx.assets.open(path).use { BitmapFactory.decodeStream(it) } }.getOrNull()
+        bitmaps[key] = bmp ?: MISSING
+        if (bmp != null) artSources[bmp] = ArtSource.ONION
+        return bmp
+    }
 
     /** icons/<name>.png or icons/sel/<name>.png. Tries every alias in order. */
     fun icon(names: List<String>, selected: Boolean = false): Bitmap? {
@@ -294,26 +351,18 @@ class Theme private constructor(
                 val f = File(fb, rel)
                 val bmp = if (f.isFile) runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull() else null
                 bitmaps[key] = bmp ?: MISSING
-                if (bmp != null) return bmp
+                if (bmp != null) { artSources[bmp] = ArtSource.MAINUI; return bmp }
             }
         }
         return null
     }
 
     /** OnionOS's default icon for the first of [names] it has (app assets onion_icons/). */
-    private fun onionDefaultIcon(names: List<String>): Bitmap? {
-        for (n in names) {
-            val key = "onion:$n"
-            val cached = bitmaps[key]
-            if (cached != null) { if (cached is Bitmap) return cached; continue }
-            val bmp = runCatching { ctx.assets.open("onion_icons/$n.png").use { BitmapFactory.decodeStream(it) } }.getOrNull()
-            bitmaps[key] = bmp ?: MISSING
-            if (bmp != null) return bmp
-        }
-        return null
-    }
+    private fun onionDefaultIcon(names: List<String>): Bitmap? = names.firstNotNullOfOrNull { onionAsset("onion_icons/$it.png") }
 
+    /** icons/app/<name>.png; an OnionOS theme without it gets OnionOS's default app icon, as on a Miyoo. */
     fun appIcon(name: String): Bitmap? = image("icons/app/$name.png")
+        ?: if (dir != null && onionLayout && onionIcons) onionAsset("onion_icons/app/$name.png") else null
 
     fun preview(): Bitmap? = image("preview.png")
 
@@ -341,7 +390,7 @@ class Theme private constructor(
     val soundBgm: File? get() = file("sound/bgm.mp3")
 
     /** Drops cached images. Bitmaps are not recycled: the UI thread may still be drawing them. */
-    fun release() { bitmaps.clear(); tileArts.fill(null); buttonArtCache = null }
+    fun release() { bitmaps.clear(); artSources.clear(); tileArts.fill(null); buttonArtCache = null }
 
     companion object {
         private val MISSING = Any()
@@ -352,21 +401,73 @@ class Theme private constructor(
         /** Settings > User interface: OnionOS's default icons before MainUI's for systems a theme lacks. */
         @Volatile var onionIcons = true
 
-        /** Onion bundled font names -> fonts shipped with this app ("" = system bold). */
+        private const val SYSTEM_BOLD = ""
+        private const val SYSTEM_REGULAR = "regular"
+
+        /** Onion bundled font names -> fonts shipped with this app, or the system font of the same weight. */
         private val BUNDLED_ALIASES = mapOf(
             "bpreplaybold.otf" to "BPreplayBold.otf",
             "exo-2-bold-italic.ttf" to "Exo-2-Bold-Italic.ttf",
             "exo-2-bold-italic_universal.ttf" to "Exo-2-Bold-Italic.ttf",
             "adobeblank.ttf" to "AdobeBlank.ttf",
             "adobeblank.ttc" to "AdobeBlank.ttf",
-            "helvetica-neue-2.ttf" to "",
-            "henb.ttf" to "",
-            "microsoftyaheigb.ttf" to "",
-            "wqy-microhei.ttc" to "",
+            "helvetica-neue-2.ttf" to SYSTEM_REGULAR,
+            "henb.ttf" to SYSTEM_BOLD,
+            "microsoftyaheigb.ttf" to SYSTEM_REGULAR,
+            "wqy-microhei.ttc" to SYSTEM_REGULAR,
         )
+
+        /** skin/extra/ pictures OnionOS has its own of (.tmp_update/res), bundled in assets onion_res/. */
+        private val ONION_RES = setOf("toggle-on", "toggle-off", "arrowLeft", "arrowRight", "gs-legend") + (0..10).map { "lum$it" }
 
         fun load(ctx: Context, dir: File?, overrideDir: File?, fontDirs: List<File>): Theme =
             Theme(ctx, dir, overrideDir, fontDirs).apply { load() }
+    }
+}
+
+/** Where a theme picture came from: the theme itself, OnionOS's defaults, or MainUI's bundled theme. */
+enum class ArtSource { THEME, ONION, MAINUI }
+
+/** Theme colour strings read the way a Miyoo reads them. Results are opaque ARGB. */
+object OnionColor {
+    private fun hexDigit(c: Char) = when (c) {
+        in '0'..'9' -> c - '0'
+        in 'a'..'f' -> c - 'a' + 10
+        in 'A'..'F' -> c - 'A' + 10
+        else -> -1
+    }
+
+    /**
+     * Stock MainUI (title, hint, list, grid, currentpage, total): a '#' and at least 6 more
+     * characters, each of the pairs at 1, 3 and 5 read on its own up to its first non-hex
+     * character ("#DDDDDD;" works). Null for anything else: the default is kept.
+     */
+    fun stock(s: String): Int? {
+        if (s.length <= 6 || s[0] != '#') return null
+        fun pair(i: Int): Int {
+            val hi = hexDigit(s[i]); if (hi < 0) return 0
+            val lo = hexDigit(s[i + 1]); return if (lo < 0) hi else hi * 16 + lo
+        }
+        return (0xFF shl 24) or (pair(1) shl 16) or (pair(3) shl 8) or pair(5)
+    }
+
+    /**
+     * OnionOS's hex2sdl: one '#' dropped, then strtoul(..., 16) on a 32-bit unsigned long and its
+     * low 24 bits ("#000" black, "#14646" 0x014646, "white" black).
+     */
+    fun hex2sdl(input: String): Int {
+        var s = input.removePrefix("#").trimStart()
+        var neg = false
+        if (s.startsWith("+") || s.startsWith("-")) { neg = s[0] == '-'; s = s.substring(1) }
+        if (s.length > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') && hexDigit(s[2]) >= 0) s = s.substring(2)
+        var v = 0L
+        for (c in s) {
+            val d = hexDigit(c); if (d < 0) break
+            v = v * 16 + d
+            if (v > 0xFFFFFFFFL) { v = 0xFFFFFFFFL; neg = false; break } // ULONG_MAX on overflow
+        }
+        if (neg) v = (-v) and 0xFFFFFFFFL
+        return (0xFF shl 24) or (v and 0xFFFFFF).toInt()
     }
 }
 

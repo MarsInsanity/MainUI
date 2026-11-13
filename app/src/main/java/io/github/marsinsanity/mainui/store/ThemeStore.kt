@@ -10,7 +10,7 @@ import java.net.URLEncoder
 /**
  * Downloads themes from the OnionOS theme repository
  * (https://github.com/OnionUI/Themes):
- *  - the catalog: .github/data/custom.txt and remixed.txt (one theme per line)
+ *  - the catalog: .github/data/custom.txt, remixed.txt and featured.txt (one theme per line)
  *  - previews: themes/<name>/preview.png
  *  - packages: release/<name>.zip (installed by ThemeManager like any .zip in Themes/)
  */
@@ -50,9 +50,17 @@ object ThemeStore {
             cache.writeText(t.joinToString("\n"))
             t.joinToString("\n")
         }
+        return parseCatalog(text)
+    }
+
+    /**
+     * Catalog lines "C|name", "R|name" (remixed) and "F|name" (featured: some, like OnionOS's
+     * default theme Silky, are on no other list). The featured themes first (as on the
+     * repository's README), then A-Z.
+     */
+    internal fun parseCatalog(text: String): List<Entry> {
         val featured = text.lines().filter { it.startsWith("F|") }.map { it.substringAfter('|').trim().lowercase() }.toSet()
-        // The repository's featured themes first (as on its README), then A-Z.
-        return text.lines().filter { !it.startsWith("F|") }.mapNotNull { l ->
+        return text.lines().mapNotNull { l ->
             val name = l.substringAfter('|').trim()
             if (name.isEmpty() || name.startsWith("#")) null else Entry(name, l.startsWith("R|"), name.lowercase() in featured)
         }.distinctBy { it.name.lowercase() }.sortedWith(compareBy({ !it.featured }, { it.name.lowercase() }))
