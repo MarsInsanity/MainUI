@@ -342,7 +342,7 @@ class Gfx {
             // The zone can change while MainUI runs (travel, Settings): follow it every time.
             fmt.timeZone = java.util.TimeZone.getDefault()
             val clock = fmt.format(Date(now))
-            val style = theme.battery.let { FontStyle(it.typeface, 22f, it.color) }
+            val style = theme.battery.let { FontStyle(it.typeface, 22f, it.clockColor) }
             val clockRight = batteryLeft - if (showBattery) 14f else 0f
             text(clock, style, clockRight, 30f, Align.RIGHT)
             rightEdge = clockRight - textWidth(clock, style)

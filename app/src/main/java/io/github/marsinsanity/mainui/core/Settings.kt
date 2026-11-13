@@ -69,6 +69,8 @@ class Settings(ctx: Context) {
     var showGameArt by bool("show_game_art", true)
     var uiSounds by bool("ui_sounds", true)
     var bgm by bool("bgm", false)
+    /** Turning the music on was offered once, for the first theme applied with sound/bgm.mp3. */
+    var bgmOffered by bool("bgm_offered", false)
     /** Vibration in MainUI's menus: "off", "light", "medium", "strong" (see Haptics). */
     var haptics by str("haptics", "light")
     var showClock by bool("show_clock", false)

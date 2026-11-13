@@ -16,6 +16,8 @@ data class GridStyle(val typeface: Typeface, val size1x4: Float, val size3x4: Fl
 data class BatteryStyle(
     val visible: Boolean, val typeface: Typeface, val size: Float, val color: Int,
     val offsetX: Int, val offsetY: Int, val align: String, val fixed: Boolean,
+    /** MainUI's header clock (Onion has none): the colour read as stock MainUI reads it. */
+    val clockColor: Int = color,
 )
 
 /**
@@ -141,9 +143,11 @@ class Theme private constructor(
                     if (bj.has("color")) OnionColor.hex2sdl(bj.optString("color")) else if (useFallbacks) h.color else b.color,
                     bj.optInt("offsetX", b.offsetX), bj.optInt("offsetY", b.offsetY), align,
                     bj.optBoolean("fixed", b.fixed),
+                    // ("white" or "#000" would make a black clock: the hint colour instead)
+                    stockColor(bj, "color") ?: if (useFallbacks) h.color else b.clockColor,
                 )
             } else if (useFallbacks) {
-                b = b.copy(typeface = h.typeface, color = h.color)
+                b = b.copy(typeface = h.typeface, color = h.color, clockColor = h.color)
             }
             c.optJSONObject("frame")?.let { f ->
                 frameLeft = f.optInt("border-left", frameLeft); frameRight = f.optInt("border-right", frameRight)
