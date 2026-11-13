@@ -14,7 +14,8 @@ D1 = (0x30, 0x62, 0x30)   # shade
 L1 = (0x8B, 0xAC, 0x0F)   # light shade
 L0 = (0x9B, 0xBC, 0x0F)   # paper
 INVERT = {D0: L0, D1: L1, L1: D1, L0: D0}
-CHARS = {"#": D0, "=": D1, "+": L1, ".": L0}
+CHARS = {"#": D0, "=": D1, "+": L1, ".": L0, "*": L0}
+SHINE = "*"  # paper in every state: kept when a sprite is remapped
 CLEAR = (0, 0, 0, 0)
 # Stepped corners: how far each row from a corner is inset, by radius (cells).
 CORNER = {0: [], 1: [1], 2: [2, 1], 3: [3, 1, 1], 4: [4, 2, 1, 1], 5: [5, 3, 2, 1, 1]}
@@ -88,7 +89,7 @@ def scale(im, k):
 # ---- sprites ------------------------------------------------------------------------------
 
 class Grid:
-    """Character grid for a sprite: '#' ink, '=' shade, '+' light shade, '.' paper, ' ' clear."""
+    """Character grid for a sprite: '#' ink, '=' shade, '+' light shade, '.' paper, '*' shine, ' ' clear."""
 
     def __init__(self, w, h):
         self.w, self.h = w, h
@@ -123,19 +124,50 @@ class Grid:
                     self.c[y + j][x + i] = ch
         return self
 
-    def image(self):
+    def image(self, mapping=None):
+        """The sprite, its shades swapped by [mapping] (RGB -> RGB) except the shine."""
         im = Image.new("RGBA", (self.w, self.h), CLEAR)
         px = im.load()
         for y in range(self.h):
             for x in range(self.w):
-                if self.c[y][x] in CHARS:
-                    px[x, y] = rgba(CHARS[self.c[y][x]])
+                ch = self.c[y][x]
+                if ch in CHARS:
+                    c = CHARS[ch]
+                    if mapping and ch != SHINE:
+                        c = mapping.get(c, c)
+                    px[x, y] = rgba(c)
         return im
 
 
-def rows_image(rows):
+def rows_grid(rows):
     g = Grid(max(len(r) for r in rows), len(rows))
-    return g.put(0, 0, [r.replace(" ", "_") for r in rows]).image()
+    return g.put(0, 0, [r.replace(" ", "_") for r in rows])
+
+
+def rows_image(rows):
+    return rows_grid(rows).image()
+
+
+def cutout(rows):
+    """Ink rows with a one-cell paper rim around them."""
+    g = rows_grid(rows)
+    out = Grid(g.w + 2, g.h + 2)
+    ink = [(x, y) for y in range(g.h) for x in range(g.w) if g.c[y][x] == "#"]
+    for x, y in ink:
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                out.c[y + 1 + dy][x + 1 + dx] = "."
+    for x, y in ink:
+        out.c[y + 1][x + 1] = "#"
+    return out
+
+
+BOLT = ["___###", "__###_", "_###__", "_##___", "######", "___##_", "__###_", "__##__", "_##___", "_#____"]
+
+
+def mirrored(half):
+    """Rows of a left-right symmetric sprite from their left halves."""
+    return [r.ljust(len(half[0])) + r.ljust(len(half[0]))[::-1] for r in half]
 
 
 def s_clock():
@@ -154,33 +186,42 @@ def s_clock():
     g.put(5, 17, ["#"]).put(4, 18, ["#"]).put(14, 17, ["#"]).put(15, 18, ["#"])
     g.put(9, 7, ["#", "#", "#", "#"]).put(10, 10, ["###"])
     g.put(9, 5, ["=="]).put(14, 10, ["="]).put(9, 16, ["=="]).put(5, 10, ["="])
-    return g.image()
+    return g
 
 
 def s_heart():
-    """Favorites: a heart."""
-    return rows_image([
-        "   ###     ###   ",
-        "  #===#   #===#  ",
-        " #=..==# #=====# ",
-        "#=..====#=======#",
-        "#=.============+#",
-        "#=============++#",
-        "#=============+=#",
-        " #===========+=# ",
-        "  #===========#  ",
-        "   #=========#   ",
-        "    #=======#    ",
-        "     #=====#     ",
-        "      #===#      ",
-        "       #=#       ",
-        "        #        ",
-    ])
+    """Favorites: a heart, shaded on the right, with a shine on its left lobe."""
+    g = rows_grid(mirrored([
+        "  #####   ",
+        " #=====#  ",
+        "#=======# ",
+        "#========#",
+        "#=========",
+        "#=========",
+        "#=========",
+        "#=========",
+        " #========",
+        " #========",
+        "  #=======",
+        "   #======",
+        "    #=====",
+        "     #====",
+        "      #===",
+        "       #==",
+        "        #=",
+        "         #",
+    ]))
+    for y in range(3, 17):
+        x = max(i for i in range(g.w) if g.c[y][i] == "#") - 1
+        g.c[y][x] = "+"
+        if 4 <= y <= 9:
+            g.c[y][x - 1] = "+"
+    return g.put(2, 2, ["_**", "**", "*"])
 
 
 def s_pad():
     """Games: a gamepad."""
-    return rows_image([
+    return rows_grid([
         "   ################   ",
         "  #................#  ",
         " #..................# ",
@@ -200,7 +241,7 @@ def s_pad():
 
 def s_handheld():
     """Emulators: a pocket console."""
-    return rows_image([
+    return rows_grid([
         " ############# ",
         "#.............#",
         "#.===========.#",
@@ -227,11 +268,11 @@ def s_handheld():
 
 def s_joystick():
     """Expert: an arcade stick."""
-    return rows_image([
+    return rows_grid([
         "      ######      ",
-        "     #=..===#     ",
-        "    #=..=====#    ",
-        "    #=.======#    ",
+        "     #=**===#     ",
+        "    #=**=====#    ",
+        "    #=*======#    ",
         "    #========#    ",
         "    #=======+#    ",
         "     #=====+#     ",
@@ -260,7 +301,7 @@ def s_apps():
     g.fill(lambda x, y: (x - 15.5) ** 2 + (y - 4.5) ** 2 <= 4.6 ** 2)
     g.outline()
     g.fill(lambda x, y: 12 < x < 19 and 12 < y < 19, "=")
-    return g.image()
+    return g
 
 
 def s_gear(n=20, teeth=8, r0=6.7, r1=9.7, hole=2.6):
@@ -290,11 +331,35 @@ def s_gear(n=20, teeth=8, r0=6.7, r1=9.7, hole=2.6):
                 g.c[y][x] = "="
             elif g.c[y][x] == "." and dx + dy > 6:
                 g.c[y][x] = "+"
-    return g.image()
+    return g
 
 
-# Inverting a sprite turns its shine dark; these keep paper where they shine.
-FOCUS_MAP = {"favorite": {D0: L0, D1: L1, L1: D1, L0: L0}}
+def s_palette():
+    """Themes app: a paint palette with a thumb notch and four wells."""
+    g = Grid(22, 18)
+    g.fill(lambda x, y: ((x - 11) / 10.6) ** 2 + ((y - 9) / 8.6) ** 2 <= 1 and (x - 21.6) ** 2 + (y - 11.2) ** 2 > 3.4 ** 2, "+")
+    g.outline(shade=False)
+    for x, y in ((4, 8), (6, 4), (11, 3), (7, 12)):
+        g.put(x, y, ["##", "##"])
+    return g
+
+
+def s_picture():
+    """Gallery app: a framed picture, a sun and two peaks."""
+    g = Grid(22, 18).fill(lambda x, y: True, "+").outline(shade=False)
+    g.put(16, 3, ["##", "##"])
+    for y in range(4, 17):
+        for x in range(1, 21):
+            if y - 4 >= abs(x - 7) or y - 8 >= abs(x - 15):
+                g.c[y][x] = "#" if g.c[y - 1][x] == "+" or y == 4 else "="
+    return g
+
+
+# Selected tiles invert their sprite; these turn the light shading into the dark body instead,
+# so the clock face and the gear stay whole.
+SOLID = {D0: L0, D1: L1, L1: D0, L0: D0}
+FOCUS_MAP = {"recent": SOLID, "setting": SOLID}
+APP_SPRITES = {"retroarch": s_joystick, "themes": s_palette, "gallery": s_picture}
 SPRITES = {"recent": s_clock, "favorite": s_heart, "game": s_pad, "emulators": s_handheld,
            "retroarch": s_joystick, "app": s_apps, "setting": s_gear}
 
@@ -345,7 +410,9 @@ class Theme(Style):
     muted = D0
     glyph_n = D0
     glyph_f = L0
-    panel = L0
+    # MainUI fills the pop-up title strip with the panel colour darkened by 20 %: this gives
+    # exactly the light shade. Toasts show it as is, a touch brighter than the paper.
+    panel = (0xAE, 0xD7, 0x13)
     panel_alpha = 255
     bar = L1
 
@@ -370,8 +437,7 @@ class Theme(Style):
         p = Px(640, 60)
         p.rect(0, 0, 319, 26, L1)
         p.rect(0, 27, 319, 27, D0)
-        for x in range(0, 320, 2):
-            p.rect(x, 28, x, 28, D1)
+        p.rect(0, 28, 319, 28, D1)
         return p.out()
 
     def footer_bar(self):
@@ -389,16 +455,17 @@ class Theme(Style):
 
     # ---- lists ------------------------------------------------------------------------------
     def selection(self, h):
-        """A light bar with an inverted tab holding the cursor; ends kept, middle stretched."""
+        """A light bar with an inverted tab holding the cursor; ends kept, middle stretched.
+        Inset 8 px so it sits inside the pop-up's double rule."""
         p = Px(640, h)
         ch = p.ch
-        p.box(2, 2, 318, ch - 1, D1, 2)
-        p.frame(1, 1, 317, ch - 2, D0, L1, r=2)
-        p.box(1, 1, 7, ch - 2, D0, 2)
-        p.rect(5, 1, 7, ch - 2, D0)
+        p.box(5, 2, 315, ch - 1, D1, 2)
+        p.frame(4, 1, 314, ch - 2, D0, L1, r=2)
+        p.box(4, 1, 8, ch - 2, D0, 2)
+        p.rect(7, 1, 8, ch - 2, D0)
         cy = ch // 2
         for i, n in enumerate((1, 2, 3, 2, 1)):
-            p.rect(3, cy - 3 + i, 3 + n - 1, cy - 3 + i, L0)
+            p.rect(5, cy - 2 + i, 5 + n - 1, cy - 2 + i, L0)
         return p.out()
 
     def divider(self):
@@ -439,17 +506,19 @@ class Theme(Style):
         return p.out()
 
     def tile_glyph(self, key, focused):
-        sp = SPRITES[key]()
-        if focused:
-            sp = remap(sp, FOCUS_MAP.get(key, INVERT))
-        sp = scale(sp, 4)
+        sp = scale(SPRITES[key]().image(FOCUS_MAP.get(key, INVERT) if focused else None), 4)
         im = Image.new("RGBA", (156, 278), CLEAR)
         x0, y0, x1, y1 = (v * 2 for v in self.TILE_SCREEN)
         im.alpha_composite(sp, ((156 - sp.width) // 2 // 2 * 2, ((y0 + y1 + 2) // 2 - sp.height // 2) // 2 * 2))
         return im
 
     def card(self, w, h, focused):
-        return self.window(w, h, focused).out()
+        """Games grid cell: the frame one cell further out than a tile's, clear of the name's box."""
+        p = Px(w, h)
+        x1, y1 = p.cw - 2, p.ch - 3
+        p.box(2, 2, x1 + 1, y1 + 1, D1, 2)
+        p.frame(1, 1, x1, y1, D0, D0 if focused else L0, r=2)
+        return p.out()
 
     def preview_frame(self):
         p = Px(250, 360)
@@ -495,13 +564,19 @@ class Theme(Style):
         return p.out()
 
     def arrow(self, left, size=24):
+        """The 36 px ones (on MainUI's dark name bar) get a paper badge; the small ones a paper rim,
+        for the slot preview's dark strip."""
         p = Px(size, size)
-        n = size // 4
-        cy, x0 = p.ch // 2, (p.cw - n) // 2
-        for i in range(n):
-            half = i if left else n - 1 - i
-            p.rect(x0 + i, cy - half, x0 + i, cy + half, D0)
-        return p.out()
+        if size >= 36:
+            p.box(0, 0, 17, 17, D0, 3)
+            p.box(1, 1, 16, 16, L0, 2)
+            for i in range(5):
+                p.rect(6 + i, 8 - i, 6 + i, 9 + i, D0)
+        else:
+            tri = cutout(["".join("#" if abs(j - 4.5) <= i + 0.5 else "_" for i in range(5)) for j in range(10)])
+            p.paste(tri.image(), 2, 0)
+        im = p.out()
+        return im if left else im.transpose(Image.FLIP_LEFT_RIGHT)
 
     def panel_image(self, w, h):
         """A double-ruled window. Pop-up menus fill it; the dialog (640 wide) is inset with a shadow."""
@@ -538,27 +613,29 @@ class Theme(Style):
         return p.out()
 
     def favorite_mark(self):
-        p = Px(34, 39)
-        p.paste(s_heart(), 0, 2)
+        p = Px(40, 40)
+        p.paste(s_heart().image(), 0, 1)
         return p.out()
 
     def battery(self, level, charging=False):
-        p = Px(40, 40)
+        p = Px(36, 40)  # MainUI writes the percentage 5 px after the canvas
         p.frame(0, 6, 14, 14, D0, L0, 1)
         p.rect(15, 8, 16, 12, D0)
-        bars = 0 if level < 0.1 else (1 if level < 0.3 else (2 if level < 0.6 else (3 if level < 0.9 else 4)))
-        for i in range(4):
-            p.rect(2 + i * 3, 8, 3 + i * 3, 12, D0 if i < bars else L1)
         if charging:
-            p.rect(2, 8, 12, 12, L0)
-            p.paste(rows_image(["___##", "__##_", "_####", "_##__", "##___"]), 6, 8)
+            p.paste(cutout(BOLT).image(), 3, 4)
+            return p.out()
+        bars = 0 if level < 0.1 else (1 if level < 0.3 else (2 if level < 0.6 else (3 if level < 0.9 else 4)))
+        if not bars:  # empty: a '!' instead of four unlit segments
+            p.rect(7, 8, 7, 10, D0)
+            p.rect(7, 12, 7, 12, D0)
+        for i in range(4 if bars else 0):
+            p.rect(2 + i * 3, 8, 3 + i * 3, 12, D0 if i < bars else L1)
         return p.out()
 
     def key(self, focused):
         p = Px(64, 52)
-        if focused:
-            p.frame(0, 0, 31, 25, D0, L0, 1)
-            p.frame(2, 2, 29, 23, D0, D0, 1)
+        if focused:  # light rim on the outside: the long labels (19 px, set by MainUI) reach the sides
+            p.frame(0, 0, 31, 25, L0, D0, 1)
         else:
             p.frame(0, 0, 31, 25, D0, D1, 1)
         return p.out()
@@ -585,9 +662,9 @@ class Theme(Style):
     def app_icon(self, key):
         p = Px(96, 96, 3)
         p.frame(1, 1, 30, 30, D0, D0, 3)
-        if key == "retroarch":  # the Expert tile's joystick
-            sp = invert(s_joystick())
-            p.paste(sp, (32 - sp.width) // 2, (32 - sp.height) // 2 + 1)
+        if key in APP_SPRITES:  # drawn on cells, inverted like a selected tile
+            sp = APP_SPRITES[key]().image(INVERT)
+            p.paste(sp, (32 - sp.width) // 2, (33 - sp.height) // 2)
             return p.out()
         big = Image.new("RGBA", (96 * SS, 96 * SS), CLEAR)
         APPS[key](ImageDraw.Draw(big), 48, 48, 96 * 0.27, (255, 255, 255, 255), 96 * 0.06)
@@ -623,9 +700,10 @@ class Theme(Style):
         cfg = super().config()
         cfg["batteryPercentage"]["color"] = hexc(D0)
         cfg["grid"]["font"] = self.label_font
+        cfg["list"]["font"] = self.label_font  # MainUI fixes some list sizes (keyboard keys, values): the narrower face fits
         cfg["grid"]["color"] = hexc(D0)
         cfg["grid"]["selectedcolor"] = hexc(L0)
         cfg["currentpage"]["color"] = hexc(D0)
         cfg["total"]["color"] = hexc(D0)
-        cfg["mainui"] = {"accent": hexc(D0), "panel": hexa(L0, 255), "background": hexc(L0)}
+        cfg["mainui"] = {"accent": hexc(D0), "panel": hexa(self.panel, 255), "background": hexc(L0)}
         return cfg
