@@ -5,10 +5,9 @@ import random
 import struct
 import wave
 
-import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from theme_kit import (APPS, GLYPHS, SS, TILES, Pen, S, Style, canvas, circle, finish, g_folder, line, poly, rgba,
+from theme_kit import (APPS, BADGES, GLYPHS, SS, TILES, Pen, S, Style, canvas, circle, finish, g_folder, line, poly, rgba,
                        rrect)
 
 PLUM = (91, 42, 69)        # text
@@ -37,34 +36,62 @@ def place_center(dst, src, cx, cy):
     place(dst, src, cx - src.width / 2, cy - src.height / 2)
 
 
+def _lerp_luts(stops):
+    """Per-channel 256-entry LUTs for an L image whose value v stands for t = v / 255."""
+    ts = [t for t, _ in stops]
+    cs = [rgba(c) if len(c) == 3 else c for _, c in stops]
+    luts = [[], [], [], []]
+    for v in range(256):
+        t = v / 255
+        k = next((i for i in range(1, len(ts)) if t <= ts[i]), len(ts) - 1)
+        u = 0.0 if ts[k] == ts[k - 1] else min(1.0, max(0.0, (t - ts[k - 1]) / (ts[k] - ts[k - 1])))
+        for ch in range(4):
+            luts[ch].append(int(cs[k - 1][ch] + (cs[k][ch] - cs[k - 1][ch]) * u + 0.5))
+    return luts
+
+
+def _colorize(mask, stops):
+    return Image.merge("RGBA", [mask.point(lut) for lut in _lerp_luts(stops)])
+
+
 def lgrad(w, h, c0, c1, angle=90.0):
     """Linear RGBA gradient from c0 to c1; angle 90 = top to bottom, 0 = left to right."""
+    angle %= 360
+    if angle >= 180:
+        c0, c1, angle = c1, c0, angle - 180
     a = math.radians(angle)
-    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
-    p = xs * math.cos(a) + ys * math.sin(a)
-    t = (p - p.min()) / max(1e-6, p.max() - p.min())
-    c0, c1 = np.array(rgba(c0) if len(c0) == 3 else c0, np.float32), np.array(rgba(c1) if len(c1) == 3 else c1, np.float32)
-    arr = c0 + (c1 - c0) * t[..., None]
-    return Image.fromarray(np.clip(arr + 0.5, 0, 255).astype(np.uint8), "RGBA")
+    n = max(2, int(round(abs((w - 1) * math.cos(a)) + abs((h - 1) * math.sin(a)) + 1)))  # ramp length
+    side = int(math.ceil(math.hypot(w, h))) + 2
+    ramp = Image.new("L", (1, n))
+    ramp.putdata([int(i * 255 / (n - 1) + 0.5) for i in range(n)])
+    sq = Image.new("L", (side, side), 0)
+    top = (side - n) // 2
+    sq.paste(255, (0, top + n, side, side))
+    sq.paste(ramp.resize((side, n), Image.NEAREST), (0, top))
+    if angle == 0:
+        sq = sq.transpose(Image.Transpose.ROTATE_90)
+    elif angle != 90:
+        sq = sq.rotate(90 - angle, Image.BILINEAR)
+    x0, y0 = (side - w) // 2, (side - h) // 2
+    return _colorize(sq.crop((x0, y0, x0 + w, y0 + h)), [(0, c0), (1, c1)])
+
+
+_RADIAL = Image.radial_gradient("L")   # value = 1.414 x distance from (128, 128): 181 at 128 px
 
 
 def rgrad(w, h, cx, cy, r, stops):
     """Radial RGBA gradient; stops = [(t, rgba), ...] with t in 0..1 of [r]."""
-    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
-    t = np.clip(np.hypot(xs - cx, ys - cy) / r, 0, 1)
-    out = np.zeros((h, w, 4), np.float32)
-    ts = [s[0] for s in stops]
-    cs = [np.array(s[1], np.float32) for s in stops]
-    for ch in range(4):
-        out[..., ch] = np.interp(t, ts, [c[ch] for c in cs])
-    return Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8), "RGBA")
+    d = max(2, int(round(2 * r)))
+    m = Image.new("L", (w, h), 255)
+    m.paste(_RADIAL.resize((d, d), Image.BILINEAR), (int(round(cx - d / 2)), int(round(cy - d / 2))))
+    m = m.point(lambda v: min(255, int(v * 255 / 181.02 + 0.5)))
+    return _colorize(m, stops)
 
 
 def with_mask(fill, mask):
     """[fill] (RGBA) shown through [mask] (L), its own alpha kept."""
     out = fill.copy()
-    a = np.asarray(fill.getchannel("A"), np.float32) * np.asarray(mask, np.float32) / 255
-    out.putalpha(Image.fromarray(a.astype(np.uint8), "L"))
+    out.putalpha(ImageChops.multiply(fill.getchannel("A"), mask))
     return out
 
 
@@ -224,9 +251,9 @@ def blossom_lines(w, h, cx, cy, R, col, lw):
         md.polygon([(x * SS, y * SS) for x, y in pts], fill=255)
     # outline = (union grown by lw/2) minus (union shrunk by lw/2), via blur and two thresholds
     b = m.filter(ImageFilter.GaussianBlur(lw * SS / 2.38))
-    ring = np.asarray(b.point(lambda v: 255 if v > 30 else 0), np.int16) - np.asarray(b.point(lambda v: 255 if v > 225 else 0), np.int16)
+    ring = ImageChops.subtract(b.point(lambda v: 255 if v > 30 else 0), b.point(lambda v: 255 if v > 225 else 0))
     im = Image.new("RGBA", m.size, rgba(col[:3], 0))
-    im.paste(Image.new("RGBA", m.size, col), (0, 0), Image.fromarray(ring.clip(0, 255).astype(np.uint8)))
+    im.paste(Image.new("RGBA", m.size, col), (0, 0), ring)
     d = ImageDraw.Draw(im)
     d.ellipse([S(cx - 3.6), S(cy - 3.6), S(cx + 3.6), S(cy + 3.6)], fill=col)
     for k in range(5):
@@ -263,17 +290,22 @@ class Theme(Style):
     # (the builders below draw everything; these feed config.json and what MainUI draws itself)
     bg_bottom = (252, 232, 238)   # light, so MainUI's own fallbacks pick dark ink
     accent = RASP                 # toast edges, progress bars, fallbacks with white text
-    highlight = RASP              # current page number
+    highlight = (176, 52, 96)     # current page number (darker than RASP to read on the frosted footer)
     text = PLUM
     muted = MUTED
-    panel = (252, 214, 226)       # toasts; MainUI darkens it for pop-up titles
-    panel_alpha = 246
+    panel = (250, 196, 214)       # toasts; MainUI darkens it by 20% for the pop-up title band
+    panel_alpha = 255
 
     font_file = "VarelaRound-Regular.ttf"
     font_license = "OFL-VarelaRound.txt"
     title_size, hint_size, list_size, grid1x4, grid3x4, battery_size = 28, 27, 24, 23, 15, 18
     icon_quant = 64
     sel_icons = True    # white line art on the focused (pink) cells, like the menu tiles
+
+    def config(self):
+        cfg = super().config()
+        cfg["grid"]["selectedcolor"] = "#4A1E36"   # a deeper plum on the focused pink cells
+        return cfg
 
     # ---- background --------------------------------------------------------------------
     def background(self, w=640, h=480):
@@ -291,16 +323,28 @@ class Theme(Style):
         grow_limb(bd, rnd, -12, h - 26, -17, 230, 12, 2.5, 2, tips_lo, rgba(BARK))
         bg.alpha_composite(fade(finish(br).filter(ImageFilter.GaussianBlur(0.6)), 0.2))
 
-        # blossoms and buds along them, softer than the loose ones in front
+        # blossoms and buds along them, softer than the loose ones in front; plainer and fainter
+        # where list text runs over them
         cl = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        quiet = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+
+        def in_text(x, y):
+            return x < 460 and 64 < y < 420
+
         for tx, ty in tips_hi + tips_lo:
             for _ in range(rnd.randint(1, 3)):
-                place_center(cl, blossom_img(rnd.uniform(7, 13), rnd.uniform(0, 72)), tx + rnd.uniform(-11, 11),
-                             ty + rnd.uniform(-9, 9))
+                r, rot = rnd.uniform(7, 13), rnd.uniform(0, 72)
+                x, y = tx + rnd.uniform(-11, 11), ty + rnd.uniform(-9, 9)
+                if in_text(x, y):
+                    place_center(quiet, blossom_img(r, rot, heart=(242, 170, 192, 255), stamens=False, center=False), x, y)
+                else:
+                    place_center(cl, blossom_img(r, rot), x, y)
             if rnd.random() < 0.6:
-                place_center(cl, bud_img(rnd.uniform(4, 6), rnd.uniform(-60, 60) + 180), tx + rnd.uniform(-12, 12),
-                             ty + rnd.uniform(4, 12))
+                b = bud_img(rnd.uniform(4, 6), rnd.uniform(-60, 60) + 180)
+                x, y = tx + rnd.uniform(-12, 12), ty + rnd.uniform(4, 12)
+                place_center(quiet if in_text(x, y) else cl, b, x, y)
         bg.alpha_composite(fade(cl, 0.72))
+        bg.alpha_composite(fade(quiet, 0.5))
 
         def spot():
             # petals gather towards the edges; the middle (where list text runs) stays calmer
@@ -377,12 +421,12 @@ class Theme(Style):
         r = min(24, (h - 9) / 2)
         box = (7, 4, w - 7, h - 5)
         m = rr_mask(w, h, box, r)
-        body = with_mask(lgrad(w, h, (251, 196, 212), (245, 168, 190), angle=0), m)
-        out = soft_shadow(body, alpha=55, blur=2.5, dy=2)
+        body = with_mask(lgrad(w, h, (246, 172, 196), (238, 142, 174), angle=0), m)
+        out = soft_shadow(body, alpha=60, blur=2.5, dy=2)
         out.alpha_composite(body)
         gl = canvas(w, h)
         gd = ImageDraw.Draw(gl)
-        rrect(gd, box, r, rgba(DEEP, 150), 1.4)
+        rrect(gd, box, r, rgba(DEEP, 230), 2.0)
         line(gd, [(box[0] + r, box[1] + 2.2), (box[2] - r, box[1] + 2.2)], (255, 255, 255, 150), 1.4)
         out.alpha_composite(finish(gl))
         # kept clear of the arrows, toggles and marks MainUI ends at x 620
@@ -403,7 +447,7 @@ class Theme(Style):
     def _card(self, w, h, focused, box, r):
         m = rr_mask(w, h, box, r)
         if focused:
-            fill = lgrad(w, h, (249, 186, 206), (238, 132, 166))
+            fill = lgrad(w, h, (246, 170, 195), (238, 132, 166))
         else:
             fill = lgrad(w, h, (255, 255, 255, 250), (255, 248, 250, 250))
         body = with_mask(fill, m)
@@ -427,7 +471,8 @@ class Theme(Style):
 
     def card(self, w, h, focused):
         r = min(22, w / 4, h / 4)
-        return self._card(w, h, focused, (6, 5, w - 6, h - 8), r)
+        # grid cells sit 155 apart: a 6 px gap leaves room for long names like 'Game Boy Advance'
+        return self._card(w, h, focused, (3, 5, w - 3, h - 8) if w == 155 else (6, 5, w - 6, h - 8), r)
 
     def tile_base(self, focused):
         im = self._card(156, 278, focused, (7, 6, 149, 266), 24)
@@ -490,7 +535,7 @@ class Theme(Style):
         d = ImageDraw.Draw(e)
         ring = self._flower_shape(n * SS, n * SS / 2, (n / 2 + 0.5) * SS, 25 * SS)
         edge = ring.filter(ImageFilter.MinFilter(1 + 2 * int(SS * (1.0 if primary else 1.6))))
-        edge = Image.fromarray((np.asarray(ring, np.int16) - np.asarray(edge, np.int16)).clip(0, 255).astype(np.uint8))
+        edge = ImageChops.subtract(ring, edge)
         e.paste(Image.new("RGBA", e.size, (255, 255, 255, 170) if primary else rgba(ROSE, 255)), (0, 0), edge)
         d.text((S(n / 2), S(n / 2 + 1.5)), label, font=self.font(25), fill=rgba(WHITE if primary else PLUM), anchor="mm")
         out.alpha_composite(finish(e))
@@ -545,9 +590,12 @@ class Theme(Style):
 
     # ---- panels ----------------------------------------------------------------------------
     def panel_image(self, w, h):
-        r = 22 if w > 500 else 18
-        box = (3, 3, w - 3, h - 4)
+        menu = w == 400   # pop-up menus: MainUI puts a square 400-wide title band right on top
+        r = 18 if menu else 22
+        box = (0, 0, w, h - 4) if menu else (3, 3, w - 3, h - 4)
         m = rr_mask(w, h, box, r)
+        if menu:
+            ImageDraw.Draw(m).rectangle((0, 0, w, r), fill=255)
         body = with_mask(lgrad(w, h, (255, 252, 253, 250), (255, 240, 245, 250)), m)
         out = soft_shadow(body, alpha=60, blur=3, dy=2)
         out.alpha_composite(body)
@@ -558,7 +606,14 @@ class Theme(Style):
                                      edge=None, stamens=False), w - R * 0.45, h - R * 0.4)
         out.alpha_composite(with_mask(fade(wm, 0.7), m))
         e = canvas(w, h)
-        rrect(ImageDraw.Draw(e), box, r, rgba(PINK, 255), 2)
+        ed = ImageDraw.Draw(e)
+        pink = rgba(PINK, 255)
+        rrect(ed, box, r, pink, 2)
+        if menu:   # square top: straight sides up to a pink rule under the title band
+            ed.rectangle((0, 0, S(w), S(r) - 1), fill=(0, 0, 0, 0))
+            ed.rectangle((0, 0, S(2) - 1, S(r)), fill=pink)
+            ed.rectangle((S(w - 2), 0, S(w), S(r)), fill=pink)
+            ed.rectangle((0, 0, S(w), S(2) - 1), fill=pink)
         out.alpha_composite(finish(e))
         return out
 
@@ -571,19 +626,25 @@ class Theme(Style):
         return finish(im)
 
     def key(self, focused):
-        w, h = 64, 52
-        box = (3, 3, w - 3, h - 4)
-        m = rr_mask(w, h, box, 12)
+        """At the letter keys' own size (52x38), so they draw 1:1 and wide keys only stretch sideways."""
+        w, h = 52, 38
+        box = (2, 2, w - 2, h - 3)
+        m = rr_mask(w, h, box, 9)
         fill = lgrad(w, h, (206, 84, 126), (172, 52, 94)) if focused else lgrad(w, h, (160, 90, 124), (136, 72, 104))
         body = with_mask(fill, m)
-        out = soft_shadow(body, alpha=60, blur=2, dy=1.5)
+        out = soft_shadow(body, alpha=60, blur=1.6, dy=1.2)
         out.alpha_composite(body)
         e = canvas(w, h)
         d = ImageDraw.Draw(e)
         if focused:
-            rrect(d, box, 12, (255, 255, 255, 230), 2)
+            # a white ring with thinner sides: wide keys (up to 3.5x) stretch it sideways only
+            ring = Image.new("L", e.size, 0)
+            rd = ImageDraw.Draw(ring)
+            rd.rounded_rectangle([S(v) for v in box], radius=S(9), fill=230)
+            rd.rounded_rectangle([S(box[0] + 1.0), S(box[1] + 1.6), S(box[2] - 1.0), S(box[3] - 1.6)], radius=S(7.8), fill=0)
+            e.paste((255, 255, 255, 255), (0, 0), ring)
         else:
-            line(d, [(box[0] + 10, box[1] + 1.8), (box[2] - 10, box[1] + 1.8)], (255, 255, 255, 70), 1.2)
+            line(d, [(box[0] + 8, box[1] + 1.6), (box[2] - 8, box[1] + 1.6)], (255, 255, 255, 70), 1.1)
         out.alpha_composite(finish(e))
         return out
 
@@ -630,16 +691,52 @@ class Theme(Style):
         return finish(im)
 
     # ---- system and app icons ---------------------------------------------------------------
+    def _android_lines(self, col, cy):
+        """GLYPHS['android'] fills its head and body solid; outline them instead, like every other icon."""
+        solid, thin = canvas(120, 130), canvas(120, 130)
+
+        class SplitPen(Pen):   # its antennas (pen lines) go on their own layer
+            def ln(self, *pts, w=None):
+                Pen(ImageDraw.Draw(thin), self.cx, self.cy, col, self.ss, self.w).ln(*pts, w=w)
+
+        pen = SplitPen(ImageDraw.Draw(solid), 60, cy, col, SS, w=3.2)
+        GLYPHS["android"](pen)
+        b = solid.getchannel("A").filter(ImageFilter.GaussianBlur(3.2 * SS / 2.38))
+        ring = ImageChops.subtract(b.point(lambda v: 255 if v > 30 else 0), b.point(lambda v: 255 if v > 225 else 0))
+        out = Image.new("RGBA", solid.size, rgba(col, 0))
+        out.paste(Image.new("RGBA", solid.size, col), (0, 0), ring)
+        d = ImageDraw.Draw(out)
+        for ex in (-13, 13):
+            d.ellipse([*pen.p(ex - 3.6, -11.6), *pen.p(ex + 3.6, -4.4)], fill=col)
+        out.alpha_composite(thin)
+        return finish(out)
+
     def icon_picture(self, sid, selected, cy):
-        im = canvas(120, 130)
-        pen = Pen(ImageDraw.Draw(im), 60, cy, rgba(WHITE if selected else INK), SS, w=3.2)
-        pen.soft_c = rgba(ROSE, 150)
-        (GLYPHS.get(sid) or GLYPHS["fallback"])(pen)
-        if sid == "android":   # its eyes are drawn in a fixed navy
-            for ex in (-13, 13):
-                pen.d.ellipse([*pen.p(ex - 4.5, -12.5), *pen.p(ex + 4.5, -3.5)], fill=rgba(DEEP if selected else WHITE))
-        lines = finish(im)
-        return self._duotone(lines, (214, 92, 133, 190) if selected else rgba(PINK, 140), (3, 3))
+        col = rgba(WHITE if selected else INK)
+        if sid == "android":
+            lines = self._android_lines(col, cy)
+        else:
+            im = canvas(120, 130)
+            pen = Pen(ImageDraw.Draw(im), 60, cy, col, SS, w=3.2)
+            pen.soft_c = rgba(ROSE, 150)
+            (GLYPHS.get(sid) or GLYPHS["fallback"])(pen)
+            lines = finish(im)
+        if not selected:
+            return self._duotone(lines, rgba(PINK, 140), (3, 3))
+        # white on the focused pink cell: a rose body and a plum shadow keep fine details readable
+        out = Image.new("RGBA", lines.size, (0, 0, 0, 0))
+        place(out, _solid(lines.size, DEEP, silhouette(lines.getchannel("A")).point(lambda v: v * 220 // 255)), 3, 3)
+        out.alpha_composite(soft_shadow(lines, (170, 50, 96), 90, 1.2, 1.2))
+        out.alpha_composite(lines)
+        return out
+
+    def system_icon(self, sid, selected):
+        # the kit's labels for these two spell brand names
+        label = {"segacd": "SCD", "xbox": "XB"}.get(sid, BADGES.get(sid, sid[:7].upper()))
+        out = self.icon_picture(sid, selected, 52 if label else 62)
+        if label:
+            out = Image.alpha_composite(out, self.badge(label, selected))
+        return out
 
     def badge(self, label, selected):
         im = canvas(120, 130)

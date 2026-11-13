@@ -18,10 +18,14 @@ VIOLET = (160, 96, 255)
 GOLD = (255, 196, 64)
 TEXT = (255, 242, 252)
 MUTED = (238, 182, 228)
-# The sun: gold at its top (which sits between two list rows' text), then deep enough for list text
-SUN = [(0.0, (255, 208, 86)), (0.1, (240, 130, 48)), (0.26, (228, 80, 60)), (0.55, (220, 42, 116)), (1.0, (168, 24, 150))]
+# The sun: a thin gold rim, then deep enough for white list text wherever 'cover' scaling puts a row
+SUN = [(0.0, (250, 190, 80)), (0.07, (236, 116, 46)), (0.2, (206, 52, 70)), (0.5, (204, 34, 112)), (1.0, (160, 22, 146))]
+LOGO_SUN = [(0.0, (255, 214, 92)), (0.32, (255, 128, 56)), (0.68, (240, 50, 120)), (1.0, (196, 30, 160))]
 HORIZON = 300
 GRID_K = 0.6                 # floor line strength, kept low for list text over it
+# Glass alpha down a tile / card: the sun shows through the top, the label band stays dark
+TILE_GLASS = ((0, 128), (0.62, 215), (1, 244))
+CARD_GLASS = ((0, 150), (0.6, 215), (1, 240))
 
 
 # ---- small image helpers (PIL only) --------------------------------------------------------
@@ -100,9 +104,68 @@ def _lighter(c, k):
     return tuple(int(c[i] + (255 - c[i]) * k) for i in range(3))
 
 
-def _neon(a_ss, color, core=0.75, halo=((2.2, 1.1), (7, 0.9)), body=1.0, blobs=0):
-    """A glowing tube from a supersampled shape mask (L): halo, coloured body, a light core inside.
-    [blobs] (odd, 1x px): parts thicker than that keep most of their colour instead of a pale core."""
+def _mix(a, b, t):
+    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
+
+
+def _edge_fade(w, h, n=8, sides="lrtb"):
+    """L mask: 0 on the canvas border, 255 from [n] px inside, so a glow fades out instead of being cut."""
+    def ramp(m, lo, hi):
+        out = []
+        for i in range(m):
+            d = min(i if lo else n, m - 1 - i if hi else n)
+            t = min(1.0, d / n)
+            out.append(int(round(255 * t * t * (3 - 2 * t))))
+        return out
+    row = Image.new("L", (w, 1))
+    row.putdata(ramp(w, "l" in sides, "r" in sides))
+    col = Image.new("L", (1, h))
+    col.putdata(ramp(h, "t" in sides, "b" in sides))
+    return ImageChops.multiply(row.resize((w, h), Image.NEAREST), col.resize((w, h), Image.NEAREST))
+
+
+def _halo(m, layers, fade=None, cut=None):
+    """Blurred copies of mask [m] added up ((radius, gain) each), faded at the canvas edge, minus [cut]."""
+    out = Image.new("L", m.size, 0)
+    for r, k in layers:
+        out = ImageChops.add(out, _blur(m, r).point(lambda v: min(255, int(v * k))))
+    if fade is not None:
+        out = ImageChops.multiply(out, fade)
+    if cut is not None:
+        out = ImageChops.subtract(out, cut)
+    return out
+
+
+def _faded(im, n=4):
+    """[im] with its alpha faded out towards the canvas border."""
+    out = im.copy()
+    out.putalpha(ImageChops.multiply(im.split()[3], _edge_fade(im.width, im.height, n)))
+    return out
+
+
+def _clean(im, cut=16):
+    """Faint pixels cleared to (0, 0, 0, 0): a palette PNG would average them into the transparent
+    pixels of the same colour and leave a faint box around the picture."""
+    out = _clear(im.width, im.height)
+    out.paste(im, (0, 0), im.split()[3].point(lambda v: 255 if v >= cut else 0))
+    return out
+
+
+def _erode(m, n):
+    """[n] passes of a 3x3 minimum: removes n px from every edge."""
+    for _ in range(n):
+        m = m.filter(ImageFilter.MinFilter(3))
+    return m
+
+
+def _snap(m, steps):
+    """Alpha [m] snapped to fixed levels ((threshold, level), high to low): the icon palette keeps them as clean rings."""
+    lut = [next((lv for t, lv in steps if v >= t), 0) for v in range(256)]
+    return m.point(lut)
+
+
+def _neon(a_ss, color, core=0.75, halo=((2.2, 1.1), (7, 0.9)), body=1.0):
+    """A glowing tube from a supersampled shape mask (L): halo, coloured body, a light core inside."""
     w, h = a_ss.width // SS, a_ss.height // SS
     a = a_ss.resize((w, h), Image.LANCZOS)
     out = _clear(w, h)
@@ -112,9 +175,6 @@ def _neon(a_ss, color, core=0.75, halo=((2.2, 1.1), (7, 0.9)), body=1.0, blobs=0
     if core:
         solid = a_ss.point(lambda v: 255 if v > 200 else 0)
         c = _blur(solid.filter(ImageFilter.MinFilter(SS + 1)).resize((w, h), Image.LANCZOS), 0.35)
-        if blobs:
-            thick = a.point(lambda v: 255 if v > 200 else 0).filter(ImageFilter.MinFilter(blobs)).filter(ImageFilter.MaxFilter(blobs))
-            c = ImageChops.subtract(c, _blur(thick, 1.2).point(lambda v: v * 3 // 4))
         out = Image.alpha_composite(out, _paint(c, _lighter(color, core)))
     return out
 
@@ -170,11 +230,11 @@ def _sun_gaps(top, bottom, n=5, zone=0.5):
     return out
 
 
-def _sun(w, h, cx, cy, r, bottom, n=5):
-    """The sun's mask (L, 1x), cut off at [bottom]."""
+def _sun(w, h, cx, cy, r, bottom, n=5, gaps=None):
+    """The sun's mask (L, 1x), cut off at [bottom]; gaps=[] gives the whole disc."""
     m = Image.new("L", (w * SS, h * SS), 0)
     d = ImageDraw.Draw(m)
-    _sun_disc(d, cx, cy, r, _sun_gaps(cy - r, bottom, n))
+    _sun_disc(d, cx, cy, r, _sun_gaps(cy - r, bottom, n) if gaps is None else gaps)
     d.rectangle([0, S(bottom), S(w), S(h)], fill=0)
     return m.resize((w, h), Image.LANCZOS)
 
@@ -230,12 +290,12 @@ class Theme(Style):
         sky = _over(sky, _paint(_blur(stars.split()[3], 1.5), (255, 150, 240), 0.7), stars)
 
         cy, r = hz - 12, 122
-        disc = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(disc).ellipse((cx - r, cy - r, cx + r, cy + r), fill=255)
-        ImageDraw.Draw(disc).rectangle((0, hz, w, h), fill=0)
-        sky = _over(sky, _paint(_blur(disc, 26), (255, 40, 150), 0.65))
-        sun = _sun(w, h, cx, cy, r, hz).point(lambda v: v * 238 // 255)
-        sky = _over(sky, _masked(_vgrad(w, h, SUN, int(cy - r), hz), sun))
+        disc = _sun(w, h, cx, cy, r, hz, gaps=[])
+        sun = _sun(w, h, cx, cy, r, hz)
+        # the gaps are cut back to the night sky, or the disc's own glow fills them in
+        sky = _over(sky, _paint(_blur(disc, 26), (255, 40, 150), 0.65),
+                    _paint(ImageChops.subtract(disc, sun), (60, 10, 92), 0.85))
+        sky = _over(sky, _masked(_vgrad(w, h, SUN, int(cy - r), hz), sun.point(lambda v: v * 238 // 255)))
 
         mnt = canvas(w, h)
         md = ImageDraw.Draw(mnt)
@@ -247,12 +307,12 @@ class Theme(Style):
             poly(md, pts, fill=(26, 5, 52, 255))
             line(rd, pts, (255, 255, 255, 255), 1.3)
         ridge = finish(ridge).split()[3]
-        sky = _over(sky, finish(mnt), _paint(_blur(ridge, 2.5), MAGENTA, 0.8), _paint(ridge, (255, 120, 210), 0.9))
+        sky = _over(sky, finish(mnt), _paint(_blur(ridge, 2.5), MAGENTA, 0.8), _paint(ridge, (215, 60, 165), 0.75))
 
         # the sun's reflection on the floor
         refl = Image.new("L", (w, h), 0)
         ImageDraw.Draw(refl).ellipse((cx - 90, hz - 6, cx + 90, hz + 70), fill=255)
-        sky = _over(sky, _paint(_blur(refl, 22), (255, 60, 150), 0.32))
+        sky = _over(sky, _paint(_blur(refl, 22), (255, 60, 150), 0.064))
 
         gl = canvas(w, h)
         gd = ImageDraw.Draw(gl)
@@ -267,39 +327,40 @@ class Theme(Style):
         for i in range(-14, 15):
             line(vd, [(cx + i * 3.0, hz + 1), (cx + i * 74 * 1.6, hz + 180 * 1.6)], (255, 255, 255, 255), 1.4)
         vl = finish(vl).split()[3]
-        fade = _vgrad(w, h, [(0, (0, 0, 0, 0)), (0.12, (0, 0, 0, 160)), (0.5, (0, 0, 0, 255)), (1, (0, 0, 0, 255))],
-                      hz, h).split()[3]
+        # dim near the horizon, where the lines bunch up into a bright band behind list text
+        fade = _vgrad(w, h, [(0, (0, 0, 0, 0)), (0.12, (0, 0, 0, 80)), (30 / (h - hz), (0, 0, 0, 128)),
+                             (0.3, (0, 0, 0, 230)), (0.5, (0, 0, 0, 255)), (1, (0, 0, 0, 255))], hz, h).split()[3]
         hl, vl = ImageChops.multiply(hl, fade), ImageChops.multiply(vl, fade)
         k = GRID_K
         sky = _over(sky, _paint(_blur(hl, 3), MAGENTA, 0.9 * k), _paint(_blur(vl, 3), CYAN, 0.7 * k),
                     _paint(hl, (255, 90, 200), 0.85 * k), _paint(vl, (90, 220, 255), 0.7 * k))
 
         hzl = canvas(w, h)
-        line(ImageDraw.Draw(hzl), [(-5, hz), (w + 5, hz)], (255, 255, 255, 255), 1.6)
+        line(ImageDraw.Draw(hzl), [(-5, hz), (w + 5, hz)], (255, 255, 255, 255), 1.2)
         hzl = finish(hzl).split()[3]
-        sky = _over(sky, _paint(_blur(hzl, 4), MAGENTA, 1.4), _paint(hzl, (255, 170, 230)))
+        sky = _over(sky, _paint(_blur(hzl, 4), MAGENTA, 1.4), _paint(hzl, (228, 76, 186)))
         return sky.convert("RGB").convert("RGBA")
 
     # ---- bars ----------------------------------------------------------------------------
-    def _bar_line(self, w, h, y):
+    def _bar_line(self, w, h, y, side):
         ln = canvas(w, h)
         line(ImageDraw.Draw(ln), [(0, y), (w, y)], (255, 255, 255, 255), 1.6)
         m = finish(ln).split()[3]
         col = _hgrad(w, h, [(0, CYAN), (0.5, MAGENTA), (1, VIOLET)])
-        return _over(_masked(col, _blur(m, 3).point(lambda v: min(255, v * 2))), _masked(col, m))
+        return _over(_masked(col, _halo(m, ((2.5, 2.2),), _edge_fade(w, h, 4, side))), _masked(col, m))
 
     def header_bar(self):
-        return _over(_vgrad(640, 60, [(0, (6, 1, 18, 236)), (1, (16, 3, 38, 214))]), self._bar_line(640, 60, 58.5))
+        return _over(_vgrad(640, 60, [(0, (6, 1, 18, 236)), (1, (16, 3, 38, 214))]), self._bar_line(640, 60, 56.5, "b"))
 
     def footer_bar(self):
-        return _over(_vgrad(640, 60, [(0, (14, 3, 34, 214)), (1, (6, 1, 18, 238))]), self._bar_line(640, 60, 1.5))
+        return _over(_vgrad(640, 60, [(0, (14, 3, 34, 214)), (1, (6, 1, 18, 238))]), self._bar_line(640, 60, 3.5, "t"))
 
     # ---- logo ----------------------------------------------------------------------------
     def logo(self):
         w, h = 256, 42
-        sm = _sun(w, h, 19, 21, 15.5, 36.5, 3)
-        sun = _over(_paint(_blur(sm, 3), MAGENTA, 0.9), _masked(_vgrad(w, h, SUN, 6, 36), sm))
-        tm = _text_mask(w, h, "SYNTHWAVE", self.font(27), 44, 22, spacing=0.5, slant=0.2)
+        sm = _sun(w, h, 21, 21, 15.5, 34.5, gaps=[(24.2, 1.2), (28.6, 2.0)])
+        sun = _over(_paint(_blur(sm, 3), MAGENTA, 0.9), _masked(_vgrad(w, h, LOGO_SUN, 6, 34), sm))
+        tm = _text_mask(w, h, "SYNTHWAVE", self.font(27), 46, 22, spacing=0.5, slant=0.2)
         bb = tm.getbbox()
         chrome = _vgrad(w, h, [(0, (252, 253, 255)), (0.38, (150, 214, 255)), (0.5, (64, 96, 200)),
                                (0.53, (30, 12, 70)), (0.62, (160, 34, 150)), (0.84, (255, 128, 206)),
@@ -312,18 +373,18 @@ class Theme(Style):
         poly(ImageDraw.Draw(gl), [(gx, gy - 6), (gx + 1, gy - 1), (gx + 6, gy), (gx + 1, gy + 1), (gx, gy + 6),
                                   (gx - 1, gy + 1), (gx - 6, gy), (gx - 1, gy - 1)], fill=(255, 255, 255, 255))
         gl = finish(gl)
-        return _over(out, _paint(_blur(gl.split()[3], 1.5), (200, 240, 255), 1.2), gl)
+        return _faded(_over(out, _paint(_blur(gl.split()[3], 1.5), (200, 240, 255), 1.2), gl))
 
     # ---- lists ---------------------------------------------------------------------------
     def selection(self, h):
         w = 640
-        box = (7, 6, w - 7, h - 6)
+        box = (12, 7, w - 12, h - 7)   # inside MainUI's 24 px end caps, clear of a pop-up's own ring
         r = 10 if h < 70 else 14
         fill = _masked(_hgrad(w, h, [(0, (70, 14, 110, 200)), (0.5, (44, 8, 84, 170)), (1, (30, 6, 66, 150))]),
                        _rr_mask(w, h, box, r))
         ring = _rr_mask(w, h, box, r, 2.0)
         col = _hgrad(w, h, [(0, CYAN), (0.45, MAGENTA), (1, (255, 80, 190))])
-        glow = _masked(col, _blur(ring, 3.2).point(lambda v: min(255, int(v * 2.2))))
+        glow = _masked(col, _halo(ring, ((2.4, 2.2),), _edge_fade(w, h, 6)))
         core = _masked(_hgrad(w, h, [(0, ICE), (0.45, (255, 190, 236)), (1, (255, 200, 240))]), _rr_mask(w, h, box, r, 0.8))
         return _over(fill, glow, _masked(col, ring), core)
 
@@ -334,24 +395,27 @@ class Theme(Style):
         return _masked(col, finish(im).split()[3])
 
     # ---- tiles ---------------------------------------------------------------------------
-    def _panel(self, w, h, box, r, focused, glass=(176, 244), grid=False, glow=1.0):
-        """Dark glass with a neon edge: dim magenta, or bright cyan with a strong glow when focused."""
+    def _panel(self, w, h, box, r, focused, glass=CARD_GLASS, grid=False, glow=1.0, ring_w=(2.2, 1.6)):
+        """Dark glass with a neon edge: dim magenta, or bright cyan with a strong glow when focused.
+        The glow stays outside the glass and fades out before the canvas edge."""
         shape = _rr_mask(w, h, box, r)
-        if focused:
-            body = _vgrad(w, h, [(0, (44, 14, 92, glass[0] + 8)), (1, (26, 6, 60, glass[1] + 8))])
-        else:
-            body = _vgrad(w, h, [(0, (26, 7, 56, glass[0])), (1, (16, 4, 38, glass[1]))])
+        top, bottom = ((44, 14, 92), (26, 6, 60)) if focused else ((26, 7, 56), (16, 4, 38))
+        lift = 8 if focused else 0
+        body = _vgrad(w, h, [(t, _mix(top, bottom, t) + (min(255, a + lift),)) for t, a in glass], box[1], box[3])
         warm = _vgrad(w, h, [(0, (255, 40, 160, 0)), (0.62, (255, 40, 160, 0)), (1, (255, 40, 160, 46 if focused else 26))])
         sheen = _vgrad(w, h, [(0, (255, 255, 255, 22)), (0.18, (255, 255, 255, 0)), (1, (255, 255, 255, 0))])
         out = _over(_masked(body, shape), _masked(warm, shape), _masked(sheen, shape))
         if grid:
             out = _over(out, self._mini_grid(w, h, box, focused))
-        ring = _rr_mask(w, h, box, r, 2.2 if focused else 1.6)
+        ring = _rr_mask(w, h, box, r, ring_w[0] if focused else ring_w[1])
+        fade, outside = _edge_fade(w, h), ImageChops.invert(shape)
         if focused:
+            halo = ImageChops.multiply(_halo(ring, ((6 * glow, 3.4), (2.5 * glow, 2.0)), fade), outside)
             inner = ImageChops.multiply(_blur(ring, 5 * glow), shape)
-            halo = _over(_paint(_blur(ring, 9 * glow), CYAN, 1.3), _paint(_blur(ring, 3.5 * glow), CYAN, 1.6))
-            return _over(halo, out, _paint(inner, CYAN, 0.5), _paint(ring, CYAN), _paint(_rr_mask(w, h, box, r, 0.9), ICE))
-        return _over(_paint(_blur(ring, 3 * glow), MAGENTA, 0.7), out, _paint(ring, (210, 50, 160), 0.85))
+            return _over(_paint(halo, CYAN), out, _paint(inner, CYAN, 0.5), _paint(ring, CYAN),
+                         _paint(_rr_mask(w, h, box, r, 0.9), ICE))
+        halo = ImageChops.multiply(_halo(ring, ((3 * glow, 0.8),), fade), outside)
+        return _over(_paint(halo, MAGENTA), out, _paint(ring, (210, 50, 160), 0.85))
 
     def _mini_grid(self, w, h, box, focused):
         """A small perspective floor in the bottom of a tile, below its label."""
@@ -374,10 +438,10 @@ class Theme(Style):
         return _over(_paint(_blur(m, 2), c, 0.6), _paint(m, c, 0.55 if focused else 0.4))
 
     def card(self, w, h, focused):
-        return self._panel(w, h, (7, 6, w - 7, h - 6), 12, focused)
+        return self._panel(w, h, (10, 10, w - 10, h - 10), 12, focused)
 
     def tile_base(self, focused):
-        return self._panel(156, 278, (10, 10, 146, 268), 16, focused, grid=True)
+        return self._panel(156, 278, (13, 12, 143, 266), 16, focused, TILE_GLASS, grid=True)
 
     def tile_glyph(self, key, focused):
         def draw(d, c):
@@ -397,19 +461,19 @@ class Theme(Style):
         n = 54
         c = self.BUTTON_COLORS.get(label, CYAN)
         base = canvas(n, n)
-        circle(ImageDraw.Draw(base), n / 2, n / 2, 20.5, fill=rgba(INK, 235))
+        circle(ImageDraw.Draw(base), n / 2, n / 2, 20, fill=rgba(INK, 235))
         ring = canvas(n, n)
-        circle(ImageDraw.Draw(ring), n / 2, n / 2, 20.5, (255, 255, 255, 255), 2.6)
-        ring = _neon(ring.split()[3], c, 0.6, ((2.2, 1.2), (4.5, 0.6)))
+        circle(ImageDraw.Draw(ring), n / 2, n / 2, 20, (255, 255, 255, 255), 2.6)
+        ring = _faded(_neon(ring.split()[3], c, 0.6, ((2.2, 1.2), (4, 0.6))))
         tm = _text_mask(n, n, label, self.font(24), n / 2, n / 2 + 1, anchor="mm")
         return _over(finish(base), ring, _paint(_blur(tm, 2), c, 1.0), _paint(tm, _lighter(c, 0.8)))
 
     def pill(self, label, w, h=48):
-        box = (4, 9, w - 4, h - 9)
+        box = (6, 9, w - 6, h - 9)
         r = (box[3] - box[1]) / 2
         ring = _rr_mask(w, h, box, r, 1.8)
         tm = _text_mask(w, h, label, self.font(h * 0.3), w / 2, h / 2 + 0.5, anchor="mm")
-        return _over(_paint(_blur(ring, 2.5), VIOLET, 1.2), _paint(_rr_mask(w, h, box, r), INK, 0.92),
+        return _over(_paint(_halo(ring, ((2.5, 1.2),), _edge_fade(w, h, 6)), VIOLET), _paint(_rr_mask(w, h, box, r), INK, 0.92),
                      _paint(ring, (186, 140, 255)), _paint(_blur(tm, 1.5), VIOLET, 0.7), _paint(tm, TEXT))
 
     def dot(self, active):
@@ -442,22 +506,22 @@ class Theme(Style):
         return _tube(size, size, draw, CYAN, core=0.75, halo=((1.4 * k, 1.3),))
 
     def panel_image(self, w, h):
-        box = (4, 4, w - 4, h - 4)
+        box = (6, 6, w - 6, h - 6)
         r = 16
         shape = _rr_mask(w, h, box, r)
         body = _masked(_vgrad(w, h, [(0, (30, 8, 62, 246)), (1, (16, 4, 36, 246))]), shape)
         warm = _masked(_vgrad(w, h, [(0, (255, 40, 160, 0)), (0.7, (255, 40, 160, 0)), (1, (255, 40, 160, 30))]), shape)
         ring = _rr_mask(w, h, box, r, 2.0)
-        col = _hgrad(w, h, [(0, CYAN), (0.5, MAGENTA), (1, VIOLET)])
+        col = _hgrad(w, h, [(0, VIOLET), (0.5, MAGENTA), (1, CYAN)])  # reversed: a selected row's ends stay distinct
         inner = ImageChops.multiply(_blur(ring, 4), shape)
-        return _over(_masked(col, _blur(ring, 2.5).point(lambda v: min(255, v * 2))), body, warm,
+        return _over(_masked(col, _halo(ring, ((2.5, 2.0),), _edge_fade(w, h, 6))), body, warm,
                      _masked(col, inner.point(lambda v: v // 2)), _masked(col, ring))
 
     def folder_icon(self):
         return _tube(60, 60, lambda d, c: g_folder(d, 30, 31, 19, c, 3.4), GOLD, core=0.6, halo=((2, 1.2), (4.5, 0.5)))
 
     def favorite_mark(self):
-        return _tube(34, 39, lambda d, c: g_star(d, 17, 20, 12.5, c, 2.6), GOLD, core=0.7, halo=((1.8, 1.3), (4, 0.5)))
+        return _faded(_tube(34, 39, lambda d, c: g_star(d, 17, 20, 12.5, c, 2.6), GOLD, core=0.7, halo=((1.8, 1.3), (4, 0.5))))
 
     def battery(self, level, charging=False):
         c = (255, 70, 110) if level <= 0.2 else CYAN
@@ -483,7 +547,7 @@ class Theme(Style):
 
     def preview_frame(self):
         w, h = 250, 360
-        im = self._panel(w, h, (6, 6, w - 6, h - 6), 14, False, glass=(170, 190))
+        im = self._panel(w, h, (8, 8, w - 8, h - 8), 14, False, glass=((0, 170), (1, 190)))
         br = canvas(w, h)
         d = ImageDraw.Draw(br)
         n = 22
@@ -492,20 +556,37 @@ class Theme(Style):
         return _over(im, _neon(br.split()[3], CYAN, 0.7, ((2, 1.2),)))
 
     def key(self, focused):
-        im = self._panel(64, 52, (5, 5, 59, 47), 9, focused, glow=0.25)
+        # small radius and a tight halo: MainUI stretches the key up to 3x wider
+        im = self._panel(64, 52, (6, 6, 58, 46), 5, focused, glass=((0, 200), (1, 236)), glow=0.28, ring_w=(1.4, 1.4))
         if focused:  # lit glass: the key under the cursor stands out among dozens
-            im = _over(im, _paint(_rr_mask(64, 52, (6, 6, 58, 46), 8), CYAN, 0.22))
+            im = _over(im, _paint(_rr_mask(64, 52, (7, 7, 57, 45), 4), CYAN, 0.22))
         return im
 
     def input_box(self):
         w, h = 560, 60
-        box = (5, 6, w - 5, h - 6)
+        box = (7, 7, w - 7, h - 7)
         ring = _rr_mask(w, h, box, 10, 2.0)
-        return _over(_paint(_blur(ring, 3), CYAN, 1.4), _paint(_rr_mask(w, h, box, 10), (10, 3, 26), 0.94),
-                     _paint(ring, CYAN), _paint(_rr_mask(w, h, box, 10, 0.8), ICE))
+        return _over(_paint(_halo(ring, ((2.5, 1.6),), _edge_fade(w, h, 6)), CYAN),
+                     _paint(_rr_mask(w, h, box, 10), (10, 3, 26), 0.94), _paint(ring, CYAN), _paint(_rr_mask(w, h, box, 10, 0.8), ICE))
 
     # ---- system and app icons --------------------------------------------------------------
     ICON_K = 0.92   # drawings shrunk a little so their glow stays inside the icon
+    # Icon palettes keep only ~20 colours, so the glow is drawn as a few flat rings that survive that:
+    # (threshold on the blurred tube, alpha, colour) from the tube outwards.
+    HALO_N = ((150, 150, PINK), (80, 104, (250, 70, 186)), (36, 68, MAGENTA), (14, 40, (200, 40, 170)))
+    HALO_S = ((150, 196, CYAN), (80, 144, CYAN), (36, 96, (60, 200, 255)), (14, 52, (70, 150, 255)))
+
+    def _hollow(self, tube_ss):
+        """Parts thicker than about 7 px keep a 2.5 px tube outline around a glass core."""
+        small = tube_ss.resize((120, 130), Image.BOX).point(lambda v: 255 if v > 128 else 0)
+        if not small.filter(ImageFilter.MinFilter(7)).getbbox():
+            return tube_ss, None
+        n = 7 * SS // 2
+        thick = _erode(tube_ss, n).filter(ImageFilter.MaxFilter(3))
+        for _ in range(n - 1):
+            thick = thick.filter(ImageFilter.MaxFilter(3))
+        core = _erode(thick, int(2.5 * SS))
+        return ImageChops.subtract(tube_ss, core), core.resize((120, 130), Image.LANCZOS)
 
     def icon_picture(self, sid, selected, cy):
         """Neon tubes for the strokes, tinted glass for the drawing's soft fills."""
@@ -514,17 +595,34 @@ class Theme(Style):
         draw = GLYPHS.get(sid) or GLYPHS["fallback"]
         draw(Pen(ImageDraw.Draw(im), 60 / k, cy / k, (255, 255, 255, 255), SS * k, w=3.0))
         a = im.split()[3]
-        tube = a.point(lambda v: 255 if v > 160 else 0)
         soft = a.point(lambda v: 255 if 20 < v <= 160 else 0).resize((120, 130), Image.LANCZOS)
+        tube_ss, glass = self._hollow(a.point(lambda v: 255 if v > 160 else 0))
+        if glass is not None:
+            soft = ImageChops.lighter(soft, glass)
+        tube = tube_ss.resize((120, 130), Image.LANCZOS)
+        # outside (reached from the corner) glows in rings; enclosed areas get one flat tint instead,
+        # where overlapping glows would otherwise break into blotches
+        flood = tube.point(lambda v: 255 if v > 128 else 0)
+        ImageDraw.floodfill(flood, (0, 0), 128)
+        outside = flood.point(lambda v: 255 if v == 128 else 0)
+        inside = flood.point(lambda v: 255 if v == 0 else 0)
+        c, steps = (CYAN, self.HALO_S) if selected else (PINK, self.HALO_N)
+        spread = _halo(tube, ((1.6, 1.6), (4.5, 1.6)))
+        out = _clear(120, 130)
+        out.paste(rgba(c, 44 if selected else 30), (0, 0), inside)
+        for t, lv, col in steps[::-1]:
+            out.paste(rgba(col, lv), (0, 0), ImageChops.multiply(spread.point(lambda v: 255 if v >= t else 0), outside))
+        near = ImageChops.multiply(spread.point(lambda v: 255 if v >= steps[0][0] else 0), inside)
+        out.paste(rgba(steps[1][2], steps[1][1]), (0, 0), near)
         if selected:
-            return _over(_paint(soft, MAGENTA, 0.5), _neon(tube, CYAN, 0.8, ((1.8, 1.4), (5, 1.1)), blobs=5))
-        return _over(_paint(soft, VIOLET, 0.55), _neon(tube, PINK, 0.55, ((1.6, 0.9), (4.5, 0.55)), blobs=5))
+            out = _over(out, _paint(soft, MAGENTA, 0.5))
+        else:
+            out = _over(out, _paint(soft, VIOLET, 0.55))
+        return _over(out, _neon(tube_ss, c, 0.8 if selected else 0.55, ()))
 
     def system_icon(self, sid, selected):
         # MainUI writes each system's name next to its icon, so the picture goes without a badge
-        im = self.icon_picture(sid, selected, 65)
-        im.putalpha(im.split()[3].point(lambda v: 0 if v < 16 else v))  # palette PNGs turn faint glow into a box
-        return im
+        return _clean(self.icon_picture(sid, selected, 65))
 
     APP_COLORS = {"themes": MAGENTA, "pacman": GOLD, "gameswitcher": CYAN, "search": CYAN, "gallery": VIOLET,
                   "activity": GOLD, "retroarch": MAGENTA, "tweaks": VIOLET, "download": CYAN, "folder": GOLD}
@@ -537,7 +635,7 @@ class Theme(Style):
         body = _masked(_vgrad(n, n, [(0, (36, 10, 74, 245)), (1, (16, 4, 38, 245))]), _rr_mask(n, n, box, 20))
         g = _tube(n, n, lambda d, col: APPS[key](d, n / 2, n / 2, n * 0.25, col, n * 0.05), c, core=0.7,
                   halo=((1.8, 1.2), (4, 0.6)))
-        return _over(_paint(_blur(ring, 3), c, 1.0), body, _paint(ring, c, 0.9), g)
+        return _clean(_over(_paint(_halo(ring, ((3, 1.0),), _edge_fade(n, n, 6)), c), body, _paint(ring, c, 0.9), g))
 
     # ---- sound -------------------------------------------------------------------------------
     def sound(self, path):

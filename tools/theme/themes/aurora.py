@@ -4,9 +4,10 @@ import random
 import struct
 import wave
 
+import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from theme_kit import APPS, GLYPHS, SS, TILES, Pen, S, Style, canvas, finish, g_folder, g_star, hexc, line, rgba
+from theme_kit import APPS, BADGES, GLYPHS, SS, TILES, Pen, S, Style, canvas, finish, g_folder, g_star, hexc, line, rgba
 
 TEAL = (59, 232, 196)
 VIOLET = (142, 108, 255)
@@ -14,13 +15,21 @@ MINT = (176, 255, 234)
 INK = (10, 11, 32)
 WHITE = (255, 255, 255)
 CORAL = (255, 112, 140)
+UI_ACCENT = (124, 92, 240)
+SEL_LABEL = (198, 255, 241)
+SKY = (120, 200, 250)
+ICON_COLOURS = 40   # per system icon, chosen by _kquant
+ALPHA_GAMMA = 0.6
+FROST = (22, 22, 54)
+# the kit's badges for these spell brand names; no badge centres the picture
+BADGE_FIX = {"xbox": None, "segacd": "MD-CD"}
 
 # gradient stops (t, rgb) for edges, fills and glyph lines
 AURORA = [(0.0, TEAL), (1.0, VIOLET)]
-GLYPH_GRAD = [(0.0, (150, 250, 224)), (0.55, (150, 210, 250)), (1.0, (186, 160, 255))]
+GLYPH_GRAD = [(0.0, (150, 250, 224)), (0.45, (140, 190, 255)), (1.0, (165, 125, 255))]
 
 
-# ---- fast gradient and mask helpers (PIL only) -------------------------------------------
+# ---- gradient, mask and palette helpers ---------------------------------------------------
 
 _RAMPS = {}
 
@@ -103,6 +112,9 @@ def _over(*layers):
 
 
 def _blur(im, r):
+    # premultiplied, so faint halo pixels keep their colour instead of fading to black
+    if im.mode == "RGBA":
+        return im.convert("RGBa").filter(ImageFilter.GaussianBlur(r)).convert("RGBA")
     return im.filter(ImageFilter.GaussianBlur(r))
 
 
@@ -122,6 +134,79 @@ def _hfade_mask(w, h, edge=0.18, floor=0.0):
     return m.resize((w, h))
 
 
+def _edge_fade(w, h, n=4):
+    """L mask: 0 on the outer pixel ring, rising to full over [n] px, so halos never hit the edge."""
+    def prof(k):
+        return [int(255 * min(1.0, min(i, k - 1 - i) / n)) for i in range(k)]
+    hx, vy = Image.new("L", (w, 1)), Image.new("L", (1, h))
+    hx.putdata(prof(w))
+    vy.putdata(prof(h))
+    return ImageChops.darker(hx.resize((w, h)), vy.resize((w, h)))
+
+
+def _hl_line(w, h, x0, x1, y, k):
+    """A 1 px light line from x0 to x1 that fades in and out over a quarter of its length."""
+    im = canvas(w, h)
+    ImageDraw.Draw(im).line([x0 * SS, y * SS, x1 * SS, y * SS], fill=(255, 255, 255, 255), width=SS)
+    span = max(1.0, (x1 - x0) * 0.25)
+    m = Image.new("L", (w, 1))
+    m.putdata([int(255 * max(0.0, min(1.0, (x - x0) / span, (x1 - x) / span))) for x in range(w)])
+    return _mask(finish(im), m.resize((w, h)), k)
+
+
+def _kquant(im, n, seed=1, iters=6, sample=3500):
+    """[im] reduced to at most [n] RGBA colours by k-means in premultiplied space, so soft
+    glows keep smooth alpha steps (the kit's octree quantizer turns them into blotches)."""
+    a = np.asarray(im.convert("RGBA"), dtype=np.float32).reshape(-1, 4)
+    vis = a[:, 3] > 0
+    # alpha on a gamma curve so faint halo levels get their share of the palette
+    ag = 255 * (a[vis, 3:4] / 255) ** ALPHA_GAMMA
+    X = np.concatenate([a[vis, :3] * (ag / 255), ag], 1)
+    if len(X) == 0:
+        return im
+    rng = np.random.default_rng(seed)
+    smp = X[rng.choice(len(X), sample, replace=False)] if len(X) > sample else X
+    k = min(n - 1, len(np.unique(smp, axis=0)))
+
+    def nearest(P, C):  # plain differences, no BLAS: the same labels on every machine
+        return ((P[:, None, :] - C[None, :, :]) ** 2).sum(2).argmin(1)
+    C = [smp[rng.integers(len(smp))]]
+    d2 = ((smp - C[0]) ** 2).sum(1)
+    for _ in range(1, k):
+        C.append(smp[rng.choice(len(smp), p=d2 / d2.sum())] if d2.sum() > 0 else smp[rng.integers(len(smp))])
+        d2 = np.minimum(d2, ((smp - C[-1]) ** 2).sum(1))
+    C = np.array(C)
+    for _ in range(iters):
+        lab = nearest(smp, C)
+        cnt = np.bincount(lab, minlength=k)
+        for c in range(4):
+            sums = np.bincount(lab, weights=smp[:, c], minlength=k)
+            C[:, c] = np.where(cnt > 0, sums / np.maximum(cnt, 1), C[:, c])
+    ag = np.clip(C[:, 3], 1, 255)
+    alpha = 255 * (ag / 255) ** (1 / ALPHA_GAMMA)
+    pal = np.concatenate([np.clip(C[:, :3] * 255 / ag[:, None], 0, 255), alpha[:, None]], 1).round().astype(np.uint8)
+    out = np.zeros(a.shape, dtype=np.uint8)
+    out[vis] = pal[nearest(X, C)]
+    return Image.fromarray(out.reshape(im.height, im.width, 4), "RGBA")
+
+
+_BAYER = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]], np.float32) / 16 - 15 / 32
+
+
+def _dither(im, amp=12):
+    """Ordered dither on RGB: the kit's octree quantizer merges colours closer than 16 levels,
+    which turns smooth gradients into blotches; a fine pattern survives it and reads smooth."""
+    a = np.asarray(im.convert("RGBA")).astype(np.float32)
+    t = np.tile(_BAYER, (im.height // 4 + 1, im.width // 4 + 1))[:im.height, :im.width]
+    a[..., :3] = np.clip(a[..., :3] + t[..., None] * amp, 0, 255)
+    return Image.fromarray(a.round().astype(np.uint8), "RGBA")
+
+
+def _smooth(t):
+    t = max(0.0, min(1.0, t))
+    return t * t * (3 - 2 * t)
+
+
 def _sparkle(d, cx, cy, r, c, waist=0.18):
     """Four-pointed star (polar star) as a filled polygon on a supersampled canvas."""
     pts = []
@@ -138,7 +223,7 @@ def _curtain(w, h, seed, base, height, power, cols, x_fade=None, hem=0.55):
     rr = random.Random(seed)
     rays = [0.0] * w
     for _ in range(w // 7):
-        c, s, a = rr.uniform(-20, w + 20), rr.uniform(1.2, 6.5), rr.uniform(0.15, 0.75)
+        c, s, a = rr.uniform(-20, w + 20), rr.uniform(1.2, 6.5), rr.uniform(0.1, 0.45)
         for x in range(max(0, int(c - 3 * s)), min(w, int(c + 3 * s) + 2)):
             rays[x] += a * math.exp(-((x - c) / s) ** 2)
     ph = [rr.uniform(0, 6.28) for _ in range(4)]
@@ -148,7 +233,7 @@ def _curtain(w, h, seed, base, height, power, cols, x_fade=None, hem=0.55):
         t = i / (n - 1)               # 0 = top of the rays, 1 = below the hem
         cut = max(0.0, 1 - (t - 0.95) / 0.05) ** 1.3 if t > 0.95 else 1.0
         body.append(0.62 * t ** 2.2 * cut)
-        hemp.append(math.exp(-((t - 0.95) / 0.028) ** 2) * cut)
+        hemp.append(math.exp(-((t - 0.95) / 0.032) ** 2) * cut)
     prof_b, prof_h, col = Image.new("L", (1, n)), Image.new("L", (1, n)), Image.new("RGB", (1, n))
     for i in range(n):
         prof_b.putpixel((0, i), int(255 * body[i] / 0.62))
@@ -156,13 +241,13 @@ def _curtain(w, h, seed, base, height, power, cols, x_fade=None, hem=0.55):
         col.putpixel((0, i), tuple(int(c) for c in _stop(cols, 1 - i / (n - 1))))
     layer = Image.new("RGB", (w, h), (0, 0, 0))
     for x in range(w):
-        r = min(1.0, 0.18 + rays[x])
+        r = min(1.0, 0.3 + rays[x])
         fold = 0.75 + 0.25 * math.sin(x / 57 + ph[0]) * math.sin(x / 23 + ph[1])
         env = power(x) * fold * (1.0 if x_fade is None else x_fade(x))
         kb = max(0.0, min(1.0, env * r * 0.62 / (0.62 + hem)))
         kh = max(0.0, min(1.0, env * hem / (0.62 + hem) * (0.6 + 0.4 * math.sin(x / 29 + ph[2]) * math.sin(x / 11 + ph[3]))
                           * (0.7 + 0.3 * r)))
-        hh = max(8, int(height(x) * (0.6 + 0.6 * min(1.0, rays[x]))))
+        hh = max(8, int(height(x) * (0.72 + 0.45 * min(1.0, rays[x]))))
         y0 = int(base(x) - hh)
         ys = max(0, y0)
         if ys >= h or env <= 0:
@@ -171,7 +256,7 @@ def _curtain(w, h, seed, base, height, power, cols, x_fade=None, hem=0.55):
                            prof_h.resize((1, hh), Image.BILINEAR).point(lambda v: int(v * kh)))
         strip = ImageChops.multiply(col.resize((1, hh), Image.BILINEAR), Image.merge("RGB", (p, p, p)))
         layer.paste(strip.crop((0, ys - y0, 1, hh)), (x, ys))
-    soft = layer.resize((w, h // 2), Image.BOX).resize((w, h), Image.BILINEAR).filter(ImageFilter.GaussianBlur(1.3))
+    soft = layer.resize((w // 3, h), Image.BOX).resize((w, h), Image.BILINEAR).filter(ImageFilter.GaussianBlur(1.2))
     wide = layer.filter(ImageFilter.GaussianBlur(14)).point(lambda v: int(v * 0.9))
     haze = layer.filter(ImageFilter.GaussianBlur(36)).point(lambda v: min(255, int(v * 1.5)))
     return ImageChops.add(ImageChops.add(soft, wide), haze)
@@ -209,10 +294,11 @@ class Theme(Style):
     font_license = "OFL-Quicksand.txt"
     title_size, hint_size, list_size, grid1x4, grid3x4, battery_size = 28, 26, 24, 23, 17, 18
 
-    icon_quant = 128
+    icon_quant = 64     # system icons arrive reduced by _kquant, app icons dithered (see both)
+    sel_icons = True
 
     # ---- glass ---------------------------------------------------------------------------
-    def glass(self, w, h, r, focused, pad=6, body=None, glow=5, tint=34, smoke=None):
+    def glass(self, w, h, r, focused, pad=6, body=None, glow=5, tint=34, smoke=None, frost=None):
         """A frosted glass card: translucent white body darkening towards the bottom, a soft
         sheen, a light edge; focused, brighter, with a teal-to-violet edge and a glow around it."""
         box = (pad, pad, w - pad, h - pad)
@@ -221,9 +307,13 @@ class Theme(Style):
         diag = _grad(w, h, AURORA, 1, 1)
         if focused and glow:
             ring = _rr_mask(w, h, box, r, 3)
-            halo = _blur(_mask(diag, ring), glow)
-            layers += [_fade(halo, 1.4), _fade(_blur(_mask(diag, ring), glow * 0.45), 0.8)]
-        top, bot = body or ((50, 24) if focused else (30, 13))
+            halo = _over(_fade(_blur(_mask(diag, ring), glow), 1.4), _fade(_blur(_mask(diag, ring), glow * 0.45), 0.8))
+            layers.append(_mask(halo, _edge_fade(w, h)))
+        # frost: a flat night-sky veil flattens what shows through before the white body lifts it
+        frost = (48 if focused else 64) if frost is None else frost
+        if frost:
+            layers.append(_mask(_solid(w, h, FROST, frost), shape))
+        top, bot = body or ((50, 24) if focused else (34, 18))
         layers.append(_mask(_grad(w, h, [(0, WHITE + (top,)), (1, WHITE + (bot,))]), shape))
         # smoke in the lower part keeps labels readable over the brightest aurora
         sm = (40 if focused else 52) if smoke is None else smoke
@@ -243,13 +333,9 @@ class Theme(Style):
             layers.append(_mask(diag, ring))
         else:
             layers.append(_mask(_grad(w, h, [(0, WHITE + (88,)), (1, WHITE + (34,))]), ring))
-        # inner highlight just inside the top edge
-        hl_d = canvas(w, h)
-        dd = ImageDraw.Draw(hl_d)
-        dd.line([(box[0] + r) * SS, (box[1] + ew + 0.8) * SS, (box[2] - r) * SS, (box[1] + ew + 0.8) * SS],
-                fill=(255, 255, 255, 255), width=SS)
-        hl_d = finish(hl_d)
-        layers.append(_mask(hl_d, _hfade_mask(w, h, 0.3), 0.32 if focused else 0.2))
+        # inner highlight just inside the top edge (too fussy on small keys)
+        if w >= 80:
+            layers.append(_hl_line(w, h, box[0] + r, box[2] - r, box[1] + ew + 0.8, 0.32 if focused else 0.2))
         return _over(*layers)
 
     def aurora_line(self, w, h, y, x0, x1, thick=2.0, glow=3):
@@ -293,17 +379,17 @@ class Theme(Style):
 
         # aurora curtains, added as light
         ribs = [
-            _curtain(w, h, 11, lambda x: 194 - 0.13 * x + 20 * math.sin(x / 92 + 0.6) + 7 * math.sin(x / 33 + 2.0),
-                     lambda x: 96 + 24 * math.sin(x / 70 + 1.0), lambda x: 0.9,
-                     [(0, (70, 255, 205)), (0.12, (50, 220, 190)), (0.5, (60, 170, 220)), (1, (130, 90, 240))]),
-            _curtain(w, h, 23, lambda x: 110 + 0.1 * x + 14 * math.sin(x / 64 + 1.7),
-                     lambda x: 72 + 18 * math.sin(x / 50), lambda x: 0.5,
-                     [(0, (110, 170, 255)), (0.4, (120, 110, 250)), (1, (160, 80, 230))],
-                     lambda x: min(1.0, x / 140) * min(1.0, (w - x) / 120 + 0.25), hem=0.35),
-            _curtain(w, h, 37, lambda x: 292 - 0.08 * x + 10 * math.sin(x / 48 + 0.3),
-                     lambda x: 60, lambda x: 0.36,
-                     [(0, (60, 230, 190)), (1, (90, 110, 220))],
-                     lambda x: max(0.0, 1 - x / 330), hem=0.4),
+            _curtain(w, h, 11, lambda x: 172 - 0.13 * x + 38 * math.sin(x / 130 + 0.6) + 7 * math.sin(x / 33 + 2.0),
+                     lambda x: 96 + 24 * math.sin(x / 70 + 1.0), lambda x: 0.62,
+                     [(0, (70, 255, 205)), (0.12, (50, 220, 190)), (0.5, (60, 170, 220)), (1, (130, 90, 240))], hem=0.34),
+            _curtain(w, h, 23, lambda x: 84 + 0.17 * x + 16 * math.sin(x / 75 + 1.2),
+                     lambda x: 72 + 18 * math.sin(x / 50), lambda x: 0.55,
+                     [(0, (120, 150, 255)), (0.4, (140, 100, 250)), (1, (175, 80, 230))],
+                     lambda x: _smooth(min(x / 150, (420 - x) / 100)), hem=0.35),
+            _curtain(w, h, 37, lambda x: 262 + 0.16 * x + 8 * math.sin(x / 48 + 0.3),
+                     lambda x: 56, lambda x: 0.3,
+                     [(0, (60, 230, 190)), (1, (110, 100, 230))],
+                     lambda x: _smooth(1.25 - x / 240), hem=0.4),
         ]
         light = ribs[0]
         for r_ in ribs[1:]:
@@ -315,21 +401,23 @@ class Theme(Style):
         hz = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         ImageDraw.Draw(hz).ellipse((-60, 360, w + 60, 420), fill=(40, 170, 160, 36))
         out = _over(out, _blur(hz, 18))
-        rr = random.Random(5)
-
-        def ridge(y0, a1, f1, a2, f2, jitter, fill, rim, rim_a):
-            pts = [(x, y0 - a1 * math.sin(x / f1 + 0.8) - a2 * math.sin(x / f2 + 2.2) + rr.uniform(-jitter, jitter))
-                   for x in range(0, w + 9, 8)]
+        def ridge(y0, k, ph, fill, rim, rim_a):
+            # rolling sines plus |sin| cusps for peaks, no random jitter
+            def y(x):
+                return y0 - k * (16 * math.sin(x / 140 + ph) + 8 * math.sin(x / 61 + 2.1 * ph)
+                                 + 10 * (1 - abs(math.sin(x / 41 + 3.3 * ph))) + 2.5 * math.sin(x / 13 + 5.1 * ph)
+                                 + math.sin(x / 5 + 7 * ph))
+            pts = [(x, y(x)) for x in range(0, w + 3, 2)]
             m = Image.new("L", (w * SS, h * SS), 0)
-            ImageDraw.Draw(m).polygon([(x * SS, y * SS) for x, y in pts + [(w + 8, h), (0, h)]], fill=255)
+            ImageDraw.Draw(m).polygon([(x * SS, y * SS) for x, y in pts + [(w + 2, h), (0, h)]], fill=255)
             edge = Image.new("L", (w * SS, h * SS), 0)
             ImageDraw.Draw(edge).line([(x * SS, y * SS) for x, y in pts], fill=255, width=int(1.2 * SS))
             m, edge = m.resize((w, h), Image.LANCZOS), edge.resize((w, h), Image.LANCZOS)
             lit = _mask(fill, m)
             return _over(lit, _mask(_solid(w, h, rim), _blur(edge, 3), rim_a * 1.3), _mask(_solid(w, h, rim), edge, rim_a))
 
-        far = ridge(384, 16, 120, 10, 47, 2.5, _grad(w, h, [(0.74, (22, 24, 56)), (0.9, (11, 12, 31))]), (90, 230, 205), 0.2)
-        near = ridge(410, 12, 90, 6, 31, 2, _solid(w, h, (6, 7, 18)), (150, 130, 245), 0.16)
+        far = ridge(384, 1.0, 0.9, _grad(w, h, [(0.74, (22, 24, 56)), (0.9, (11, 12, 31))]), (90, 230, 205), 0.2)
+        near = ridge(410, 0.75, 2.4, _solid(w, h, (6, 7, 18)), (150, 130, 245), 0.16)
         return _over(out, far, near)
 
     def _bar(self, top_line):
@@ -365,20 +453,18 @@ class Theme(Style):
     # ---- lists ----------------------------------------------------------------------------
     def selection(self, h):
         w = 640
-        box = (6, 4, w - 6, h - 4)
-        r = 14 if h < 70 else 18
+        box = (8, 7, w - 8, h - 7)
+        r = 13 if h < 70 else 17
         shape = _rr_mask(w, h, box, r)
         ring = _rr_mask(w, h, box, r, 1.6)
-        g = _grad(w, h, [(0, TEAL), (0.55, (110, 150, 245)), (1, VIOLET)], 1, 0)
+        g = _grad(w, h, [(0, TEAL), (0.4, (110, 150, 245)), (1, VIOLET)], 1, 0)
         body = _over(_mask(_solid(w, h, INK, 84), shape),
                      _mask(_grad(w, h, [(0, WHITE + (40,)), (1, WHITE + (20,))]), shape),
-                     _mask(_grad(w, h, [(0, TEAL + (46,)), (0.5, (110, 150, 245, 16)), (1, VIOLET + (26,))], 1, 0), shape))
-        hl = canvas(w, h)
-        ImageDraw.Draw(hl).line([(box[0] + r) * SS, (box[1] + 2.2) * SS, (box[2] - r) * SS, (box[1] + 2.2) * SS],
-                                fill=(255, 255, 255, 255), width=SS)
-        hl = _mask(finish(hl), _hfade_mask(w, h, 0.25), 0.3)
+                     _mask(_grad(w, h, [(0, TEAL + (44,)), (0.45, (110, 150, 245, 22)), (1, VIOLET + (52,))], 1, 0), shape))
+        hl = _hl_line(w, h, box[0] + r, box[2] - r, box[1] + 2.2, 0.3)
         edge = _mask(g, ring)
-        return _over(Image.new("RGBA", (w, h), (0, 0, 0, 0)), _fade(_blur(edge, 3.5), 1.5), body, hl, edge)
+        halo = _mask(_fade(_blur(edge, 2.5), 1.5), _edge_fade(w, h))
+        return _over(Image.new("RGBA", (w, h), (0, 0, 0, 0)), halo, body, hl, edge)
 
     def divider(self):
         w, h = 640, 4
@@ -389,20 +475,19 @@ class Theme(Style):
 
     # ---- tiles ----------------------------------------------------------------------------
     def card(self, w, h, focused):
-        return self.glass(w, h, 16 if min(w, h) > 100 else 10, focused, pad=6 if min(w, h) > 100 else 3,
-                          glow=4 if min(w, h) > 100 else 2)
+        big = min(w, h) > 100
+        return self.glass(w, h, 16 if big else 10, focused, pad=7 if big else 5,
+                          glow=3 if big else 1.5)
 
     def tile_base(self, focused):
         w, h = 156, 278
-        im = self.glass(w, h, 22, focused, pad=7, glow=5)
+        pad = 8
+        im = self.glass(w, h, 22, focused, pad=pad, glow=4)
         if focused:
-            shape = _rr_mask(w, h, (7, 7, w - 7, h - 7), 22)
-            blob = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-            bd = ImageDraw.Draw(blob)
-            bd.ellipse((20, 60, 126, 150), fill=TEAL + (78,))
-            bd.ellipse((40, 90, 136, 170), fill=VIOLET + (70,))
-            im = _over(im, _mask(_blur(blob, 18), shape))
-            im = _over(im, self.aurora_line(w, h, 228, 60, 96, 3.0, 3))
+            # an aurora band inside the glass (vertical only: far cheaper as PNG than blurred blobs)
+            shape = _rr_mask(w, h, (pad, pad, w - pad, h - pad), 22)
+            wash = _grad(w, h, [(0.14, TEAL + (0,)), (0.36, TEAL + (70,)), (0.56, VIOLET + (64,)), (0.8, VIOLET + (0,))])
+            im = _over(im, _mask(wash, shape), self.aurora_line(w, h, 228, 60, 96, 3.0, 3))
         return im
 
     def glyph_layer(self, w, h, draw, y0, y1, focused, stops=GLYPH_GRAD):
@@ -445,13 +530,19 @@ class Theme(Style):
         ImageDraw.Draw(txt).text((S(cx), S(cy + 0.5)), label, font=self.font(25), fill=(255, 255, 255, 255), anchor="mm")
         txt = finish(txt)
         if primary:
-            fill = _mask(_grad(n, n, [(0, (120, 248, 220)), (0.5, TEAL), (1, (110, 150, 245))], 1, 1), disc)
-            hl = _mask(_grad(n, n, [(0, WHITE + (90,)), (0.5, WHITE + (0,)), (1, WHITE + (0,))]), disc)
-            return _over(Image.new("RGBA", (n, n), (0, 0, 0, 0)), _fade(_blur(_tinted(fill, TEAL), 3), 0.9), fill, hl,
-                         _tinted(txt, INK))
-        body = _mask(_grad(n, n, [(0, WHITE + (44,)), (1, WHITE + (16,))]), disc)
-        return _over(Image.new("RGBA", (n, n), (0, 0, 0, 0)), _mask(_solid(n, n, INK, 120), disc), body,
-                     _mask(diag, ring, 0.9), _tinted(txt, self.text))
+            # the disc spans t 0.2..0.8 of the canvas diagonal: violet fills its lower-right third
+            fill = _mask(_grad(n, n, [(0.2, (120, 248, 220)), (0.42, TEAL), (0.78, VIOLET)], 1, 1), disc)
+            hl = _mask(_grad(n, n, [(0, WHITE + (50,)), (0.45, WHITE + (0,)), (1, WHITE + (0,))]), disc)
+            sp = canvas(n, n)
+            _sparkle(ImageDraw.Draw(sp), cx - 10.5, cy - 10.5, 4.6, (255, 255, 255, 255), 0.2)
+            sp = finish(sp)
+            return _over(Image.new("RGBA", (n, n), (0, 0, 0, 0)), _fade(_blur(fill, 3), 0.9), fill, hl,
+                         _fade(_blur(sp, 1.5), 0.8), sp, _tinted(txt, INK))
+        body = _over(_mask(_solid(n, n, INK, 120), disc),
+                     _mask(_grad(n, n, [(0.2, VIOLET + (0,)), (1, VIOLET + (78,))]), disc),
+                     _mask(_grad(n, n, [(0, WHITE + (40,)), (1, WHITE + (10,))]), disc))
+        edge = _mask(_grad(n, n, [(0, (206, 196, 255)), (1, VIOLET)]), ring)
+        return _over(Image.new("RGBA", (n, n), (0, 0, 0, 0)), body, edge, _tinted(txt, self.text))
 
     def pill(self, label, w, h=48):
         box = (3, 9, w - 3, h - 9)
@@ -461,8 +552,9 @@ class Theme(Style):
         txt = canvas(w, h)
         ImageDraw.Draw(txt).text((S(w / 2), S(h / 2 + 0.5)), label, font=self.font(15), fill=rgba(self.text), anchor="mm")
         return _over(_mask(_solid(w, h, INK, 130), shape),
-                     _mask(_grad(w, h, [(0, WHITE + (44,)), (1, WHITE + (16,))]), shape),
-                     _mask(_grad(w, h, AURORA, 1, 0), ring, 0.9), finish(txt))
+                     _mask(_grad(w, h, [(0.2, VIOLET + (0,)), (1, VIOLET + (70,))]), shape),
+                     _mask(_grad(w, h, [(0, WHITE + (40,)), (1, WHITE + (10,))]), shape),
+                     _mask(_grad(w, h, [(0, (206, 196, 255)), (1, VIOLET)]), ring, 0.95), finish(txt))
 
     def dot(self, active):
         w, h = 24, 14
@@ -508,11 +600,8 @@ class Theme(Style):
         gd = ImageDraw.Draw(glow)
         gd.ellipse((w * 0.55, -h * 0.6, w * 1.2, h * 0.5), fill=VIOLET + (40,))
         gd.ellipse((-w * 0.2, -h * 0.5, w * 0.45, h * 0.35), fill=TEAL + (26,))
-        hl = canvas(w, h)
-        ImageDraw.Draw(hl).line([(box[0] + r) * SS, (box[1] + 2) * SS, (box[2] - r) * SS, (box[1] + 2) * SS],
-                                fill=(255, 255, 255, 255), width=SS)
         return _over(_mask(body, shape), _mask(_blur(glow, 40), shape),
-                     _mask(finish(hl), _hfade_mask(w, h, 0.3), 0.22), _mask(_grad(w, h, AURORA, 1, 0.4), ring))
+                     _hl_line(w, h, box[0] + r, box[2] - r, box[1] + 2, 0.22), _mask(_grad(w, h, AURORA, 1, 0.4), ring))
 
     def folder_icon(self):
         n = 60
@@ -571,7 +660,7 @@ class Theme(Style):
         return self.glass(250, 360, 18, False, pad=4)
 
     def key(self, focused):
-        return self.glass(64, 52, 10, focused, pad=3, glow=2, body=(64, 36) if focused else (34, 18), tint=84, smoke=0)
+        return self.glass(64, 52, 10, focused, pad=5, glow=1.5, body=(64, 36) if focused else (34, 18), tint=84, smoke=0)
 
     def input_box(self):
         w, h = 560, 60
@@ -592,14 +681,22 @@ class Theme(Style):
         soft = a.point(lambda v: 255 if 0 < v <= 150 else 0)
         ramp = Image.new("L", (1, h * SS))
         for y in range(h * SS):
-            ramp.putpixel((0, y), int(255 * min(1, max(0, (y / SS - (cy - 44)) / 88))))
+            ramp.putpixel((0, y), int(255 * min(1, max(0, (y / SS - (cy - 44)) / 74))))
         ramp = ramp.resize((w * SS, h * SS))
         grad = _colorize(ramp, GLYPH_GRAD)
         pic = finish(_over(_mask(grad, soft, 0.34), _mask(grad, lines)))
-        glow = _tinted(_blur(pic, 2.2), TEAL, 0.42)
+        # single-hue glows: the palette quantizer turns multi-hue soft alpha into blotches
         if selected:
-            glow = _over(_tinted(_blur(pic, 7), VIOLET, 1.0), _tinted(_blur(pic, 3), TEAL, 1.2))
-        return _over(Image.new("RGBA", (w, h), (0, 0, 0, 0)), glow, pic)
+            glow = _over(_tinted(_blur(pic, 6), VIOLET, 1.4), _tinted(_blur(pic, 2.5), SKY, 1.3))
+            core = _over(pic, _tinted(pic, WHITE, 0.35))
+            return _over(Image.new("RGBA", (w, h), (0, 0, 0, 0)), glow, core)
+        return _over(Image.new("RGBA", (w, h), (0, 0, 0, 0)), _tinted(_blur(pic, 2.2), SKY, 0.45), pic)
+
+    def system_icon(self, sid, selected):
+        label = BADGE_FIX[sid] if sid in BADGE_FIX else BADGES.get(sid, sid[:7].upper())
+        out = self.icon_picture(sid, selected, 52 if label else 62)
+        out = _over(out, self.badge(label, selected)) if label else out
+        return _kquant(out, ICON_COLOURS)
 
     def badge(self, label, selected):
         w, h = 120, 130
@@ -627,12 +724,15 @@ class Theme(Style):
         sheen = _mask(_grad(n, n, [(0, WHITE + (40,)), (0.5, WHITE + (0,)), (1, WHITE + (0,))]), shape)
         art = self.glyph_layer(n, n, lambda d: APPS[key](d, n / 2, n / 2, n * 0.26, (255, 255, 255, 255), n * 0.045),
                                20, 76, True)
-        return _over(Image.new("RGBA", (n, n), (0, 0, 0, 0)), body, sheen,
-                     _mask(_grad(n, n, [(0, WHITE + (130,)), (1, WHITE + (40,))]), ring), art)
+        return _dither(_over(Image.new("RGBA", (n, n), (0, 0, 0, 0)), body, sheen,
+                             _mask(_grad(n, n, [(0, WHITE + (130,)), (1, WHITE + (40,))]), ring), art))
 
     def config(self):
         cfg = super().config()
-        cfg["mainui"]["background"] = hexc(self.sky_mid)  # what MainUI fills behind its own screens
+        cfg["grid"]["selectedcolor"] = hexc(SEL_LABEL)
+        # MainUI fills its own icons and tiles in this accent under white (4.5:1), next to the violet app icons
+        cfg["mainui"]["accent"] = hexc(UI_ACCENT)
+        cfg["mainui"]["background"] = hexc(self.sky_mid)
         return cfg
 
     # ---- sound ----------------------------------------------------------------------------

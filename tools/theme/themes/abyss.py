@@ -65,6 +65,14 @@ def scale_alpha(im, f):
     return out
 
 
+def clear_border(im):
+    """[im] with its outermost pixel ring transparent: pieces MainUI lays edge to edge must not
+    show blur or resampling residue along the seams."""
+    a = Image.new("L", im.size, 0)
+    a.paste(255, (1, 1, im.width - 1, im.height - 1))
+    return masked(im, a)
+
+
 def circle_mask(w, h, cx, cy, r):
     m = Image.new("L", (w * SS, h * SS), 0)
     ImageDraw.Draw(m).ellipse([S(cx - r), S(cy - r), S(cx + r), S(cy + r)], fill=255)
@@ -102,32 +110,26 @@ def bubble(d, cx, cy, r, a=1.0):
         circle(d, cx - r * 0.35, cy - r * 0.35, r * 0.35, fill=rgba(FOAM, int(200 * a)))
 
 
-def caustic_web(w, h, cell, seed, edge=1.4):
-    """Worley-style cell edges on warped coordinates: the bright net light makes under water (L)."""
-    rnd = random.Random(seed)
-    cols, rows = w // cell + 3, h // cell + 3
-    pts = {(i, j): ((i + rnd.uniform(0.15, 0.85)) * cell, (j + rnd.uniform(0.15, 0.85)) * cell)
-           for i in range(-1, cols) for j in range(-1, rows)}
+def caustic_light(w, h, scale, t0=23.0, sy=1.0, sharp=8, rows_used=None):
+    """Wavy filaments of focused light (L): an iterated domain warp, as in the well-known
+    tileable water caustic shader. [scale] px per radian, [sy] squashes it vertically."""
     im = Image.new("L", (w, h))
     px = im.load()
-    for y in range(h):
+    ts = [t0 * (1.0 - 3.5 / (n + 1)) for n in range(5)]
+    inten = 0.005
+    for y in range(min(h, rows_used or h)):
         for x in range(w):
-            u = x + 3.2 * math.sin(y / 9.0 + 0.8) + 2.0 * math.sin(x / 13.0)
-            v = y + 3.2 * math.sin(x / 10.0 + 2.1) + 2.0 * math.sin(y / 7.0)
-            ci, cj = int(u // cell), int(v // cell)
-            f1 = f2 = 1e9
-            for i in (ci - 1, ci, ci + 1):
-                for j in (cj - 1, cj, cj + 1):
-                    p = pts.get((i, j))
-                    if p is None:
-                        continue
-                    dd = (u - p[0]) ** 2 + (v - p[1]) ** 2
-                    if dd < f1:
-                        f1, f2 = dd, f1
-                    elif dd < f2:
-                        f2 = dd
-            e = math.sqrt(f2) - math.sqrt(f1)
-            px[x, y] = int(255 * max(0.0, 1 - e / edge) ** 1.6)
+            # a slow, non-periodic drift so the pattern does not repeat every 2 pi [scale]
+            p_x = x / scale - 250.0 + 0.9 * math.sin(y * sy / (scale * 3.7) + 1.3) + 0.6 * math.sin(x / (scale * 5.3))
+            py = y * sy / scale - 250.0 + 0.8 * math.sin(x / (scale * 4.1)) + 0.5 * math.sin(y * sy / (scale * 2.9))
+            ix, iy = p_x, py
+            c = 1.0
+            for t in ts:
+                ix, iy = p_x + math.cos(t - ix) + math.sin(t + iy), py + math.sin(t - iy) + math.cos(t + ix)
+                a, b = math.sin(ix + t) or 1e-9, math.cos(iy + t) or 1e-9
+                c += 1.0 / (math.hypot(p_x * inten / a, py * inten / b) + 1e-9)
+            c = 1.17 - (c / 5) ** 1.4
+            px[x, y] = min(255, int(255 * abs(c) ** sharp))
     return im
 
 
@@ -201,6 +203,21 @@ def _pad_pts(cx, cy, s):
             (cx - s * 1.05, cy + s * 0.45)]
 
 
+INVADER = ["..X.....X..", "...X...X...", "..XXXXXXX..", ".XX.XXX.XX.", "XXXXXXXXXXX",
+           "X.XXXXXXX.X", "X.X.....X.X", "...XX.XX..."]
+
+
+def invader(d, cx, cy, s, grow, fill):
+    """g_expert's pixel invader with every pixel grown by [grow] px (shrunk when negative)."""
+    px = s * 2 / 11
+    x0, y0 = cx - px * 5.5, cy - px * 4
+    for j, row in enumerate(INVADER):
+        for i, ch in enumerate(row):
+            if ch == "X":
+                rrect(d, (x0 + i * px - grow, y0 + j * px - grow, x0 + (i + 1) * px + grow,
+                          y0 + (j + 1) * px + grow), px * 0.22 + max(0, grow) * 0.4, fill=fill)
+
+
 def duo_fill(d, key, cx, cy, s, fill, deep):
     """The aqua areas under menu glyph [key] (same geometry as make_mainui_theme's)."""
     if key == "recent":
@@ -214,15 +231,15 @@ def duo_fill(d, key, cx, cy, s, fill, deep):
         rrect(d, (cx - s * 0.42, cy - s * 0.78, cx + s * 0.42, cy - s * 0.08), s * 0.06, fill=deep)
     elif key == "app":
         h = s * 0.36
-        for dx, dy in ((-1, -1), (1, 1)):
+        for dx, dy in ((-1, -1), (1, 1), (-1, 1)):
             x, y = cx + dx * s * 0.52, cy + dy * s * 0.52
             rrect(d, (x - h, y - h, x + h, y + h), h * 0.35, fill=fill)
         circle(d, cx + s * 0.52, cy - s * 0.52, h, fill=fill)
     elif key == "setting":
         poly(d, _gear_pts(cx, cy, s), fill=fill)
         circle(d, cx, cy, s * 0.3, fill=deep)
-    elif key == "retroarch":
-        TILES["retroarch"](d, cx + s * 0.09, cy + s * 0.09, s, fill, 0)
+    elif key == "retroarch":    # g_expert's pixels grown until they merge into one body
+        invader(d, cx, cy, s, 1.0, fill)
 
 
 # ---- the theme ----------------------------------------------------------------------------
@@ -245,13 +262,13 @@ class Theme(Style):
     icon_quant = 96
 
     # tile geometry (156 x 278): a capsule with a porthole where the picture goes
-    CAP = (10, 18, 146, 266)
+    CAP = (7, 18, 149, 266)
     PORT = (78, 96)
     GLASS_R, RING_R = 53, 61
 
     # ---- big pictures ---------------------------------------------------------------------
     def water(self, w, h):
-        return vgrad(w, h, [(0.0, rgba(SURF)), (0.12, (11, 92, 116, 255)), (0.27, (6, 58, 88, 255)),
+        return vgrad(w, h, [(0.0, rgba(SURF)), (0.11, (10, 86, 112, 255)), (0.25, (5, 52, 84, 255)),
                             (0.5, (4, 34, 66, 255)), (0.76, (3, 18, 44, 255)), (1.0, rgba(NAVY))])
 
     def background(self, w=W, h=H):
@@ -267,13 +284,13 @@ class Theme(Style):
         # the sun above the surface, top right
         sun = Image.new("L", (w, h), 0)
         ImageDraw.Draw(sun).ellipse((w * 0.32, -h * 0.5, w * 1.02, h * 0.3), fill=255)
-        im = light(sun.filter(ImageFilter.GaussianBlur(60)), (120, 235, 236), 30)
+        im = light(sun.filter(ImageFilter.GaussianBlur(60)), (120, 235, 236), 24)
 
         # the underside of the surface: bright, squashed ripples along the top
-        top = caustic_web(w // 3, 64, 11, seed=5, edge=2.2).resize((w, 80), Image.BICUBIC)
+        top = caustic_light(w, 80, 30, t0=31.0, sy=2.4, sharp=6)
         rip = Image.new("L", (w, h), 0)
         rip.paste(top.filter(ImageFilter.GaussianBlur(0.8)), (0, 0))
-        im = light(ImageChops.multiply(rip, fade([(0.0, 255), (0.08, 140), (0.165, 0), (1.0, 0)])), (220, 255, 250), 42)
+        im = light(ImageChops.multiply(rip, fade([(0.0, 255), (0.08, 140), (0.165, 0), (1.0, 0)])), (220, 255, 250), 55)
 
         # light rays fanning down from the sun, fading with depth
         rays = Image.new("L", (w, h), 0)
@@ -291,14 +308,13 @@ class Theme(Style):
         im = light(rays, (200, 255, 248), 34)
 
         # caustic streaks in patches below the surface
-        web = caustic_web(w // 2, h // 2, 21, seed=11, edge=1.1).resize((w, h), Image.BICUBIC)
-        web = web.filter(ImageFilter.GaussianBlur(0.7))
+        web = caustic_light(w, h, 38, t0=40.0, sharp=7, rows_used=int(h * 0.56))
         patches = Image.new("L", (7, 6))
         patches.putdata([rnd.choice((0, 0, 90, 200, 255)) for _ in range(42)])
         patches = patches.resize((w, h), Image.BICUBIC).filter(ImageFilter.GaussianBlur(30))
         web = ImageChops.multiply(ImageChops.multiply(web, patches),
-                                  fade([(0.0, 255), (0.15, 230), (0.38, 90), (0.55, 0), (1.0, 0)]))
-        im = light(web, (170, 250, 240), 24)
+                                  fade([(0.0, 200), (0.13, 170), (0.27, 190), (0.42, 80), (0.56, 0), (1.0, 0)]))
+        im = light(web, (170, 250, 240), 34)
 
         # kelp at both edges: a far, hazy layer and a near, dark one
         for layer, (col, blur) in enumerate((((14, 78, 100, 120), 2.4), ((1, 16, 30, 225), 0.0))):
@@ -314,11 +330,12 @@ class Theme(Style):
                 k = k.filter(ImageFilter.GaussianBlur(blur))
             im = Image.alpha_composite(im, k)
 
-        # marine snow and rising bubbles, kept off the page dots and where list text starts
+        # marine snow, and rising bubbles kept to the margins: list text, the favourite mark,
+        # toggles and arrows cover x 14-618 between the bars, the page dots sit at y 372-420
         def clear(x, y, r=0):
-            dots = 150 < x < 490 and 372 - r < y < 420 + r
-            text = 14 - r < x < 430 + r and 56 < y < 424
-            return not (dots or text)
+            dots = 150 - r < x < 490 + r and 372 - r < y < 420 + r
+            rows = 14 - r < x < 618 + r and 56 < y < 424
+            return not (dots or rows)
 
         b = canvas(w, h)
         bd = ImageDraw.Draw(b)
@@ -326,20 +343,20 @@ class Theme(Style):
             x, y = rnd.uniform(0, w), rnd.uniform(h * 0.2, h)
             if not (150 < x < 490 and 372 < y < 420):
                 circle(bd, x, y, rnd.uniform(0.5, 1.0), fill=(200, 240, 250, rnd.randint(20, 60)))
-        for sx_, sy_, n in ((6, 470, 10), (608, 466, 9), (566, 372, 5), (476, 300, 4)):
+        for sx_, sy_, n, amp in ((6, 470, 10, 4), (630, 470, 9, 2.5), (627, 300, 5, 2)):
             y = sy_
             for i in range(n):
-                r = 1.3 + i * 0.5 + rnd.uniform(-0.3, 0.4)
-                x = sx_ + 4 * math.sin(i * 1.3 + sx_) + rnd.uniform(-1.5, 1.5)
+                r = min(4.8, 1.3 + i * 0.45 + rnd.uniform(-0.3, 0.4))
+                x = sx_ + amp * math.sin(i * 1.3 + sx_) + rnd.uniform(-1, 1)
                 bubble(bd, x, y, r, 0.5 + 0.45 * (1 - y / h))
                 y -= 13 + i * 5 + rnd.uniform(0, 8)
         n = 0
         while n < 12:
-            x, y, r = rnd.uniform(436, w - 8), rnd.uniform(70, h - 70), rnd.uniform(1.2, 3.0)
-            if clear(x, y, 6):
+            x, y, r = rnd.uniform(4, w - 4), rnd.uniform(62, h - 62), rnd.uniform(1.2, 3.0)
+            if clear(x, y, r + 2) and 0 < x - r and x + r < w:
                 bubble(bd, x, y, r, rnd.uniform(0.35, 0.7))
                 n += 1
-        for x, y, r in ((4, 300, 10), (614, 228, 7), (586, 404, 12), (520, 112, 4), (462, 168, 3)):
+        for x, y, r in ((4, 300, 10), (629, 228, 7), (628, 384, 9)):
             bubble(bd, x, y, r, 0.85)
         im = Image.alpha_composite(im, finish(b))
         # vignette
@@ -351,7 +368,7 @@ class Theme(Style):
 
     def header_bar(self):
         w, h = 640, 60
-        wave_y = [56 + 1.6 * math.sin(x / 21.0) + 0.9 * math.sin(x / 7.3 + 1.1) for x in range(w + 1)]
+        wave_y = [54 + 1.6 * math.sin(x / 21.0) + 0.9 * math.sin(x / 7.3 + 1.1) for x in range(w + 1)]
         body = vgrad(w, h, [(0.0, (0, 30, 50, 170)), (1.0, (0, 38, 62, 150))])
         m = canvas(w, h)
         poly(ImageDraw.Draw(m), [(0, 0), (w, 0)] + [(x, wave_y[x]) for x in range(w, -1, -4)], fill=(255, 255, 255))
@@ -360,7 +377,7 @@ class Theme(Style):
         d = ImageDraw.Draw(sh)
         line(d, [(x, wave_y[x]) for x in range(0, w + 1, 2)], rgba(AQUA, 230), 1.5)
         line(d, [(x, wave_y[x] - 3.5) for x in range(0, w + 1, 2)], rgba(FOAM, 40), 1)
-        return Image.alpha_composite(im, glow(finish(sh), rgba(AQUA, 140), 2.5))
+        return Image.alpha_composite(im, glow(finish(sh), rgba(AQUA, 140), 2))
 
     def footer_bar(self):
         w, h = 640, 60
@@ -396,18 +413,32 @@ class Theme(Style):
 
     # ---- lists --------------------------------------------------------------------------
     def selection(self, h):
+        """A glass capsule filled with water: a wavy waterline near the top, bubbles in its right
+        end (MainUI keeps the 24 px ends unstretched)."""
         w = 640
         r = min(20, (h - 10) / 2)
         box = (4, 5, w - 4, h - 5)
         m = mask_rrect(w, h, box, r)
-        out = solid((w, h), (2, 18, 38, 150), m)
-        fill = vgrad(w, h, [(0.0, rgba(AQUA, 112)), (1.0, rgba(AQUA_DEEP, 150))])
+        out = solid((w, h), (2, 18, 38, 185), m)
+        wave_y = [11 + 1.6 * math.sin(x / 17.0) for x in range(w + 1)]
+        water = canvas(w, h)
+        poly(ImageDraw.Draw(water), [(x, wave_y[x]) for x in range(0, w + 1, 2)] + [(w, h), (0, h)],
+             fill=(255, 255, 255, 255))
+        water_m = ImageChops.multiply(m, finish(water).getchannel("A"))
+        fill = vgrad(w, h, [(0.0, rgba(AQUA, 120)), (1.0, rgba(AQUA_DEEP, 150))])
         side = Image.new("L", (w, 1))
         for x in range(w):
-            side.putpixel((x, 0), int(255 * (1 - 0.35 * x / w)))
-        out.alpha_composite(masked(fill, ImageChops.multiply(m, side.resize((w, h)))))
-        hi = crescent(w, h, box, r, 0, 3)
-        out.alpha_composite(solid((w, h), (230, 255, 255, 120), hi))
+            side.putpixel((x, 0), int(255 * (1 - 0.3 * x / w)))
+        out.alpha_composite(masked(fill, ImageChops.multiply(water_m, side.resize((w, h)))))
+        e = canvas(w, h)
+        d = ImageDraw.Draw(e)
+        line(d, [(x, wave_y[x] + 2.2) for x in range(0, w + 1, 2)], rgba(AQUA, 70), 3)
+        line(d, [(x, wave_y[x]) for x in range(0, w + 1, 2)], rgba(FOAM, 190), 1.3)
+        for x, y, rb in ((624, h * 0.68, 2.6), (629.5, h * 0.5, 1.9), (624.5, h * 0.35, 1.4)):
+            circle(d, x, y, rb, fill=rgba(AQUA, 50))
+            circle(d, x, y, rb, rgba(FOAM, 190), 0.9)
+            circle(d, x - rb * 0.38, y - rb * 0.38, rb * 0.32, fill=rgba(FOAM, 230))
+        out = Image.alpha_composite(out, masked(finish(e), m))
         e = canvas(w, h)
         rrect(ImageDraw.Draw(e), box, r, rgba(AQUA, 235), 1.5)
         return Image.alpha_composite(out, finish(e))
@@ -421,17 +452,21 @@ class Theme(Style):
         return finish(im)
 
     # ---- tiles --------------------------------------------------------------------------
-    def capsule(self, w, h, box, r, focused):
-        """Glass capsule body: deep fill, glass crescent, aqua rim; focused it is lit and glows."""
+    def capsule(self, w, h, box, r, focused, halo=5.0):
+        """Glass capsule body: deep fill, glass crescent, aqua rim; focused it is lit and glows,
+        outwards by [halo] px, or (halo 0, for pieces laid edge to edge) only inside its rim."""
         m = mask_rrect(w, h, box, r)
         out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         if focused:
-            halo = solid((w, h), rgba(AQUA), m).filter(ImageFilter.GaussianBlur(5))
-            out = Image.alpha_composite(out, scale_alpha(halo, 0.85))
+            if halo:
+                glow_ = solid((w, h), rgba(AQUA), m).filter(ImageFilter.GaussianBlur(halo))
+                out = Image.alpha_composite(out, scale_alpha(glow_, 0.85))
             fill = vgrad(w, h, [(0.0, (22, 150, 166, 240)), (0.5, (8, 80, 110, 242)), (1.0, (4, 40, 70, 246))])
         else:
             fill = vgrad(w, h, [(0.0, (14, 64, 94, 140)), (0.5, (6, 34, 62, 165)), (1.0, (3, 18, 40, 185))])
         out.alpha_composite(masked(fill, m))
+        if focused and not halo:
+            out.alpha_composite(self.inner_glow(w, h, box, r, m, 3, 2.5, 150))
         hi = crescent(w, h, box, r, 4, 5).filter(ImageFilter.GaussianBlur(0.8))
         out.alpha_composite(solid((w, h), (220, 255, 255, 110 if focused else 60), hi))
         e = canvas(w, h)
@@ -440,6 +475,14 @@ class Theme(Style):
         else:
             rrect(ImageDraw.Draw(e), box, r, (130, 220, 232, 85), 1.3)
         return Image.alpha_composite(out, finish(e))
+
+    @staticmethod
+    def inner_glow(w, h, box, r, m, width, blur, alpha):
+        """Aqua light spilling inwards from the rim of [box], clipped to mask [m]."""
+        g = canvas(w, h)
+        rrect(ImageDraw.Draw(g), box, r, rgba(AQUA), width)
+        g = finish(g).getchannel("A").filter(ImageFilter.GaussianBlur(blur))
+        return solid((w, h), rgba(AQUA, alpha), ImageChops.multiply(g, m))
 
     def porthole(self, im, cx, cy, focused):
         """A riveted ring with dark glass inside, on [im] (156 x 278)."""
@@ -467,12 +510,12 @@ class Theme(Style):
 
     def tile_base(self, focused):
         w, h = 156, 278
-        im = self.capsule(w, h, self.CAP, 68, focused)
+        im = self.capsule(w, h, self.CAP, 68, focused, halo=3.2)
         self.porthole(im, *self.PORT, focused)
-        if focused:     # bubbles rising under the label
+        if focused:     # bubbles rising below the label (and the row view's game count at y 222)
             b = canvas(w, h)
             d = ImageDraw.Draw(b)
-            for x, y, r in ((72, 248, 3.6), (84, 233, 4.6), (75, 220, 2.4)):
+            for x, y, r in ((70, 256, 3.0), (82, 246, 3.8), (75, 238, 2.0)):
                 bubble(d, x, y, r, 1.0)
             im.alpha_composite(finish(b))
         return im
@@ -489,43 +532,49 @@ class Theme(Style):
         g = masked(vgrad(w, h, [(0, hi), (top, hi), (bot, lo), (1, lo)]), finish(f).getchannel("A"))
         ln = canvas(w, h)
         ink, width = (rgba(FOAM), 4.6) if focused else (rgba(GLYPH_N, 235), 4.4)
-        TILES[key](ImageDraw.Draw(ln), cx, cy, s, ink, width)
+        if key == "retroarch":     # the invader's pixels as lit dots on its aqua body
+            invader(ImageDraw.Draw(ln), cx, cy, s, -0.9, ink)
+        else:
+            TILES[key](ImageDraw.Draw(ln), cx, cy, s, ink, width)
         g = Image.alpha_composite(g, finish(ln))
         return glow(g, rgba(AQUA, 170), 6) if focused else g
 
     # ---- cards --------------------------------------------------------------------------
     def card(self, w, h, focused):
-        im = self.capsule(w, h, (5, 4, w - 5, h - 4), min(34, w / 4), focused)
-        if w == 155:    # games grid: a pool of light behind the system picture
-            cy = 8 + 62 * 124 / 130
-            light = radial_fill(w, h, w / 2, cy, 62, (60, 200, 210, 70 if focused else 34), (60, 200, 210, 0))
-            im.alpha_composite(masked(light, mask_rrect(w, h, (5, 4, w - 5, h - 4), 34)))
-        return im
+        """Games grid cell: cells touch, so it glows only inwards; the rim runs straight past
+        the name (centred at y 148, up to 147 px wide)."""
+        box, r = (1.5, 2, w - 1.5, h - 2), 16
+        im = self.capsule(w, h, box, r, focused, halo=0)
+        cy = 8 + 62 * 124 / 130     # a pool of light behind the system picture
+        light = radial_fill(w, h, w / 2, cy, 62, (60, 200, 210, 70 if focused else 34), (60, 200, 210, 0))
+        im.alpha_composite(masked(light, mask_rrect(w, h, box, r)))
+        return clear_border(im)
 
     def preview_frame(self):
+        """A thin bezel: MainUI draws it only 6 px larger than the picture on each side."""
         w, h = 250, 360
-        im = self.capsule(w, h, (4, 4, w - 4, h - 4), 26, False)
-        d = canvas(w, h)
-        dd = ImageDraw.Draw(d)
-        for x, y in ((18, 18), (w - 18, 18), (18, h - 18), (w - 18, h - 18)):
-            circle(dd, x, y, 2.2, fill=(2, 14, 30, 200))
-            circle(dd, x - 0.4, y - 0.4, 1.5, fill=(170, 220, 230, 150))
-        return Image.alpha_composite(im, finish(d))
+        box = (1, 1, w - 1, h - 1)
+        im = canvas(w, h)
+        d = ImageDraw.Draw(im)
+        rrect(d, box, 5, fill=(3, 18, 40, 235))
+        rrect(d, box, 5, rgba(AQUA, 200), 2)
+        rrect(d, (6, 6, w - 6, h - 6), 2, (2, 14, 30, 220), 1)
+        return finish(im)
 
     def key(self, focused):
         w, h = 64, 52
         im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        box = (4, 4, w - 4, h - 4)
+        box = (3, 3, w - 3, h - 3)
         m = mask_rrect(w, h, box, 14)
         if focused:
-            im.alpha_composite(scale_alpha(solid((w, h), rgba(AQUA), m).filter(ImageFilter.GaussianBlur(3)), 0.8))
             im.alpha_composite(masked(vgrad(w, h, [(0, (18, 130, 148, 250)), (1, (6, 70, 98, 250))]), m))
+            im.alpha_composite(self.inner_glow(w, h, box, 14, m, 3, 2.2, 150))
         else:
             im.alpha_composite(masked(vgrad(w, h, [(0, (12, 58, 88, 225)), (1, (4, 28, 54, 235))]), m))
         im.alpha_composite(solid((w, h), (220, 255, 255, 120 if focused else 50), crescent(w, h, box, 14, 0, 2)))
         e = canvas(w, h)
         rrect(ImageDraw.Draw(e), box, 14, rgba(AQUA) if focused else (130, 220, 232, 80), 2 if focused else 1.2)
-        return Image.alpha_composite(im, finish(e))
+        return clear_border(Image.alpha_composite(im, finish(e)))
 
     def input_box(self):
         w, h = 560, 60
@@ -538,19 +587,22 @@ class Theme(Style):
         return Image.alpha_composite(im, finish(e))
 
     # ---- buttons and small parts ----------------------------------------------------------
-    def sphere(self, n, cx, cy, r, primary):
-        """A glass bubble button."""
+    def sphere(self, n, cx, cy, r, primary, hi=(0.74, 200, 250)):
+        """A glass bubble button; [hi] = the glint arc's radius (x r) and angles."""
         im = Image.new("RGBA", (n, n), (0, 0, 0, 0))
         m = circle_mask(n, n, cx, cy, r)
         if primary:
             fill = radial_fill(n, n, cx - r * 0.35, cy - r * 0.4, r * 1.6, (150, 255, 246, 255), (14, 150, 160, 255))
-        else:
-            fill = radial_fill(n, n, cx - r * 0.35, cy - r * 0.4, r * 1.6, (24, 104, 130, 255), (4, 34, 58, 255))
+        else:   # an air bubble: clear in the middle, lit towards its rim
+            fill = radial_fill(n, n, cx + r * 0.1, cy + r * 0.12, r * 1.05, (3, 26, 48, 245), (26, 120, 142, 245))
         im.alpha_composite(masked(fill, m))
         g = canvas(n, n)
         d = ImageDraw.Draw(g)
-        circle(d, cx, cy, r, rgba(FOAM, 170) if primary else rgba(AQUA, 220), 1.6)
-        arc(d, cx, cy, r * 0.74, 200, 250, rgba(FOAM, 200 if primary else 150), r * 0.13)
+        circle(d, cx, cy, r, rgba(FOAM, 170) if primary else rgba(FOAM, 150), 1.6 if primary else 1.4)
+        if not primary:
+            circle(d, cx, cy, r - 1.4, rgba(AQUA, 120), 1)
+            arc(d, cx, cy, r * 0.8, 25, 65, rgba(FOAM, 90), r * 0.07)
+        arc(d, cx, cy, r * hi[0], hi[1], hi[2], rgba(FOAM, 200 if primary else 170), r * 0.13)
         return Image.alpha_composite(im, finish(g))
 
     def button(self, label, primary):
@@ -565,11 +617,12 @@ class Theme(Style):
         box = (2, 7, w - 2, h - 7)
         r = (h - 14) / 2
         m = mask_rrect(w, h, box, r)
-        im = masked(vgrad(w, h, [(0, (20, 100, 126, 255)), (1, (4, 38, 62, 255))]), m)
-        im.alpha_composite(solid((w, h), (220, 255, 255, 110), crescent(w, h, box, r, 0, 2.5)))
+        im = masked(vgrad(w, h, [(0, (6, 40, 64, 245)), (1, (3, 24, 46, 245))]), m)
+        im.alpha_composite(self.inner_glow(w, h, box, r, m, 3, 2.5, 120))
+        im.alpha_composite(solid((w, h), (220, 255, 255, 120), crescent(w, h, box, r, 0, 2.5)))
         t = canvas(w, h)
         d = ImageDraw.Draw(t)
-        rrect(d, box, r, rgba(AQUA, 220), 1.5)
+        rrect(d, box, r, rgba(FOAM, 150), 1.4)
         d.text((S(w / 2), S(h / 2 + 1)), label, font=self.font(h * 0.36), fill=rgba(FOAM), anchor="mm")
         return Image.alpha_composite(im, finish(t))
 
@@ -577,10 +630,9 @@ class Theme(Style):
         im = canvas(24, 14)
         d = ImageDraw.Draw(im)
         if active:
-            rrect(d, (2, 2.5, 22, 11.5), 4.5, fill=rgba(AQUA))
-            line(d, [(6, 5), (12, 5)], rgba(FOAM, 220), 1.4)
-            out = finish(im)
-            return glow(out, rgba(AQUA, 160), 2)
+            rrect(d, (4, 4, 20, 10), 3, fill=rgba(AQUA))
+            line(d, [(7, 5.6), (12, 5.6)], rgba(FOAM, 220), 1.1)
+            return glow(finish(im), rgba(AQUA, 160), 1.5)
         circle(d, 12, 7, 4, fill=rgba(MUTED, 50))
         circle(d, 12, 7, 4, rgba(MUTED, 200), 1.3)
         circle(d, 10.8, 5.8, 1, fill=rgba(FOAM, 220))
@@ -621,20 +673,32 @@ class Theme(Style):
 
     def panel_image(self, w, h):
         r = 22
-        box = (2, 2, w - 2, h - 2)
-        m = mask_rrect(w, h, box, r)
-        im = masked(vgrad(w, h, [(0.0, (10, 50, 78, 254)), (0.3, (6, 32, 58, 254)), (1.0, (3, 16, 38, 254))]), m)
-        im.alpha_composite(solid((w, h), (220, 255, 255, 70), crescent(w, h, box, r, 0, 3)))
         b = canvas(w, h)
         d = ImageDraw.Draw(b)
-        rnd = random.Random(w * 7 + h)
-        for i in range(5):
-            bubble(d, w - 22 - rnd.uniform(0, 26), h - 14 - i * 9 - rnd.uniform(0, 4), 1.2 + i * 0.5, 0.45)
-        rrect(d, box, r, rgba(AQUA, 190), 1.6)
-        if w == 640:    # dialogs: riveted like the portholes
-            for x, y in ((16, 16), (w - 16, 16), (16, h - 16), (w - 16, h - 16)):
+        if w == 640:    # dialog: a floating riveted plate
+            box = (28, 8, w - 28, h - 8)
+            m = mask_rrect(w, h, box, r)
+            im = masked(vgrad(w, h, [(0.0, (10, 50, 78, 254)), (0.3, (6, 32, 58, 254)), (1.0, (3, 16, 38, 254))]), m)
+            im.alpha_composite(solid((w, h), (220, 255, 255, 70), crescent(w, h, box, r, 0, 3)))
+            rrect(d, box, r, rgba(AQUA, 190), 1.6)
+            for x, y in ((box[0] + 14, box[1] + 14), (box[2] - 14, box[1] + 14),
+                         (box[0] + 14, box[3] - 14), (box[2] - 14, box[3] - 14)):
                 circle(d, x, y, 2.4, fill=(2, 14, 30, 220))
                 circle(d, x - 0.4, y - 0.4, 1.6, fill=(170, 220, 230, 170))
+        else:
+            # pop-up menu: MainUI draws a square title strip in darken(panel, 0.2) right above it,
+            # so the top is square, unrimmed and starts in the strip's colour
+            box = (0.5, -2 * r, w - 0.5, h - 2)
+            m = mask_rrect(w, h, box, r)
+            strip = tuple(int(c * 0.8) for c in PANEL)
+            im = masked(vgrad(w, h, [(0.0, rgba(strip, 254)), (min(0.5, 40 / h), (6, 32, 58, 254)),
+                                     (1.0, (3, 16, 38, 254))]), m)
+            rrect(d, box, r, rgba(AQUA, 190), 1.6)
+            line(d, [(0.5, 0.75), (w - 0.5, 0.75)], rgba(AQUA, 120), 1.5)
+            if h != 250:    # bg-pop-menu-4 is stretched for longer menus: no round bubbles there
+                rnd = random.Random(w * 7 + h)
+                for i in range(5):
+                    bubble(d, w - 22 - rnd.uniform(0, 26), h - 14 - i * 9 - rnd.uniform(0, 4), 1.2 + i * 0.5, 0.45)
         return Image.alpha_composite(im, finish(b))
 
     def folder_icon(self):
@@ -671,10 +735,11 @@ class Theme(Style):
         rrect(d, (5, 15, 41, 33), 9, (2, 14, 30, 120), 4)
         if level > 0:
             col = rgba(CORAL) if level <= 0.2 else rgba(AQUA)
-            x1 = 9 + 28 * level
+            x1 = 9 + max(3.0, 28 * level)
             fill = canvas(48, 48)
             fd = ImageDraw.Draw(fill)
-            pts = [(9, 18.5)] + [(x1 + 1.2 * math.sin(i * 1.3), 18.5 + i * 1.1) for i in range(11)] + [(9, 29.5)]
+            pts = [(9, 18.5)] + [(x1 + 0.9 * math.sin(2 * math.pi * i / 23), 18.5 + i * 11 / 23)
+                                 for i in range(24)] + [(9, 29.5)]
             poly(fd, pts, fill=col)
             m = Image.new("L", (48 * SS, 48 * SS), 0)
             ImageDraw.Draw(m).rounded_rectangle([S(9), S(18.5), S(37), S(29.5)], radius=S(5.5), fill=255)
@@ -702,7 +767,7 @@ class Theme(Style):
 
     def app_icon(self, key):
         n = 96
-        im = self.sphere(n, n / 2, n / 2, n / 2 - 5, False)
+        im = self.sphere(n, n / 2, n / 2, n / 2 - 5, False, hi=(0.86, 205, 240))
         g = canvas(n, n)
         APPS[key](ImageDraw.Draw(g), n / 2, n / 2 + 1, n * 0.25, rgba(FOAM), n * 0.05)
         g = duo_body(finish(g), (60, 214, 214, 150))
@@ -719,7 +784,7 @@ class Theme(Style):
             t = i / rate
             f = 520 + 1100 * (t / 0.06) ** 0.8
             ph += 2 * math.pi * f / rate
-            env = min(1.0, t / 0.003) * math.exp(-t * 60)
+            env = min(1.0, t / 0.003, (n - 1 - i) / 66) * math.exp(-t * 60)
             frames += struct.pack("<h", int(8500 * env * math.sin(ph)))
         path.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(path), "wb") as wv:

@@ -1,7 +1,7 @@
 """Slate: modern Material-style dark. Tonal surfaces, pill selection and filled-tonal lavender icons."""
 import math
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from theme_kit import (APPS, BADGES, GLYPHS, SS, Pen, S, Style, arc, canvas, circle, finish, hexa, hexc, line, poly,
                        rgba, rrect)
@@ -29,6 +29,7 @@ RED = (255, 118, 118)
 WHITE = (255, 255, 255)
 
 R_CARD = 22
+NO_BADGE = {"xbox", "wii", "segacd", "neogeo"}
 
 
 # ---- masks and layers -----------------------------------------------------------------------
@@ -109,6 +110,11 @@ def surface(w, h, box, r, fill, rim=20, shadow=(3, 6, 120), outline=None, ow=2.0
         dy, blur, a = shadow
         sh = _shift(m, 0, dy).filter(ImageFilter.GaussianBlur(blur))
         out = _over(out, _layer(sh, (0, 0, 0), a / 255))
+    if halo or shadow:
+        # fade the light out before the image edge, or MainUI shows a hard-edged rectangle
+        fade = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(fade).rectangle((4, 4, w - 5, h - 5), fill=255)
+        out.putalpha(ImageChops.multiply(out.getchannel("A"), fade.filter(ImageFilter.GaussianBlur(2))))
     if lift:
         body = _vgrad(w, h, _tone(fill, 1 + lift), _tone(fill, 1 - lift * 0.6))
         body.putalpha(m)
@@ -183,22 +189,66 @@ def g_favorite(d, cx, cy, s, c, f, w):
     poly(d, pts, c, w)
 
 
-def _pad_pts(cx, cy, s):
-    return [(cx - s, cy - s * 0.25), (cx - s * 0.75, cy - s * 0.55), (cx + s * 0.75, cy - s * 0.55),
-            (cx + s, cy - s * 0.25), (cx + s * 1.05, cy + s * 0.45), (cx + s * 0.75, cy + s * 0.62),
-            (cx + s * 0.45, cy + s * 0.3), (cx - s * 0.45, cy + s * 0.3), (cx - s * 0.75, cy + s * 0.62),
-            (cx - s * 1.05, cy + s * 0.45)]
+def _rrect_path(x0, y0, x1, y1, r, step=0.4):
+    """Closed outline of a rounded rect as points about [step] px apart (clockwise from top left)."""
+    pts = []
+    for (ax, ay), a0 in (((x1 - r, y0 + r), -90), ((x1 - r, y1 - r), 0), ((x0 + r, y1 - r), 90), ((x0 + r, y0 + r), 180)):
+        n = max(2, int(math.pi * r / 2 / step))
+        pts += [(ax + r * math.cos(math.radians(a0 + 90 * k / n)), ay + r * math.sin(math.radians(a0 + 90 * k / n)))
+                for k in range(n + 1)]
+    out = []
+    for p, q in zip(pts, pts[1:] + pts[:1]):  # fill the straight sides in
+        n = max(1, int(math.hypot(q[0] - p[0], q[1] - p[1]) / step))
+        out += [(p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n) for k in range(n)]
+    return out
+
+
+def _circle_path(cx, cy, r, step=0.4):
+    n = max(8, int(2 * math.pi * r / step))
+    return [(cx + r * math.cos(2 * math.pi * k / n), cy + r * math.sin(2 * math.pi * k / n)) for k in range(n)]
+
+
+def _in_rrect(x, y, box, r):
+    x0, y0, x1, y1 = box
+    qx, qy = min(max(x, x0 + r), x1 - r), min(max(y, y0 + r), y1 - r)
+    return math.hypot(x - qx, y - qy) < r - 0.05
+
+
+def _union_outline(d, paths, insides, c, w):
+    """Strokes the outline of a union of shapes: each shape's closed [paths] where no other shape covers it."""
+    for k, pts in enumerate(paths):
+        out = [not any(inside(x, y) for j, inside in enumerate(insides) if j != k) for x, y in pts]
+        if all(out):
+            line(d, pts + pts[:1], c, w)
+            continue
+        start = next(i for i in range(len(pts)) if out[i] and not out[i - 1])
+        run = []
+        for i in list(range(start, len(pts))) + list(range(start)):
+            if out[i]:
+                run.append(pts[i])
+            elif run:
+                line(d, run, c, w) if len(run) > 1 else None
+                run = []
+        if len(run) > 1:
+            line(d, run, c, w)
 
 
 def g_game(d, cx, cy, s, c, f, w):
-    pts = _pad_pts(cx, cy, s)
-    poly(d, pts, fill=f)
-    poly(d, pts, c, w)
-    x, y, k = cx - s * 0.55, cy - s * 0.06, s * 0.19
+    """A rounded pad body with two round grips, filled as one shape and outlined around the union."""
+    body = (cx - s, cy - s * 0.5, cx + s, cy + s * 0.26)
+    rb = s * 0.36
+    grips = [(cx + k * s * 0.68, cy + s * 0.3, s * 0.33) for k in (-1, 1)]
+    rrect(d, body, rb, fill=f)
+    for x, y, r in grips:
+        circle(d, x, y, r, fill=f)
+    _union_outline(d, [_rrect_path(*body, rb)] + [_circle_path(*g) for g in grips],
+                   [lambda x, y: _in_rrect(x, y, body, rb)]
+                   + [lambda x, y, g=g: math.hypot(x - g[0], y - g[1]) < g[2] - 0.05 for g in grips], c, w)
+    x, y, k = cx - s * 0.52, cy - s * 0.1, s * 0.2
     line(d, [(x - k, y), (x + k, y)], c, w * 0.85)
     line(d, [(x, y - k), (x, y + k)], c, w * 0.85)
-    circle(d, cx + s * 0.68, cy - s * 0.17, s * 0.11, fill=c)
-    circle(d, cx + s * 0.43, cy + s * 0.05, s * 0.11, fill=c)
+    circle(d, cx + s * 0.66, cy - s * 0.2, s * 0.11, fill=c)
+    circle(d, cx + s * 0.42, cy + s * 0.01, s * 0.11, fill=c)
 
 
 def g_emulators(d, cx, cy, s, c, f, w):
@@ -218,20 +268,32 @@ INVADER = ["..X.....X..", "...X...X...", "..XXXXXXX..", ".XX.XXX.XX.", "XXXXXXXX
 
 
 def g_expert(d, cx, cy, s, c, f, w):
-    """The pixel invader: edge pixels in line colour, inner ones tonal."""
+    """The pixel invader as one silhouette: a [w]-wide outline just inside its edge over a tonal fill."""
     px = s * 2.1 / 11
+    w = min(w, px * 0.5)  # (one-pixel legs and antennae come out solid)
     x0, y0 = cx - px * 5.5, cy - px * 4
+    cells = [(i, j) for j, row in enumerate(INVADER) for i, ch in enumerate(row) if ch == "X"]
 
     def on(i, j):
-        return 0 <= j < len(INVADER) and 0 <= i < 11 and INVADER[j][i] == "X"
-    for j, row in enumerate(INVADER):
-        for i, ch in enumerate(row):
-            if ch != "X":
-                continue
-            inner = on(i - 1, j) and on(i + 1, j) and on(i, j - 1) and on(i, j + 1)
-            g = px * 0.09
-            rrect(d, (x0 + i * px + g, y0 + j * px + g, x0 + (i + 1) * px - g, y0 + (j + 1) * px - g), px * 0.22,
-                  fill=rgba(f, min(255, f[3] * 2)) if inner else c)
+        return (i, j) in cells
+
+    def rect(box, fill):
+        if box[2] - box[0] > 0.5 and box[3] - box[1] > 0.5:
+            d.rectangle([S(v) for v in box], fill=fill)
+    for i, j in cells:
+        rect((x0 + i * px, y0 + j * px, x0 + (i + 1) * px, y0 + (j + 1) * px), c)
+    # (ImageDraw replaces pixels: the fill drawn over the line colour leaves only the outline)
+    for i, j in cells:
+        a, b = x0 + i * px, y0 + j * px
+        rect((a + (0 if on(i - 1, j) else w), b + (0 if on(i, j - 1) else w),
+              a + px - (0 if on(i + 1, j) else w), b + px - (0 if on(i, j + 1) else w)), f)
+    for i, j in cells:  # inner corners
+        for di in (-1, 1):
+            for dj in (-1, 1):
+                if on(i + di, j) and on(i, j + dj) and not on(i + di, j + dj):
+                    a = x0 + i * px + (px - w if di > 0 else 0)
+                    b = y0 + j * px + (px - w if dj > 0 else 0)
+                    rect((a, b, a + w, b + w), c)
 
 
 def g_app(d, cx, cy, s, c, f, w):
@@ -265,7 +327,6 @@ def g_setting(d, cx, cy, s, c, f, w):
 
 MENU = {"recent": g_recent, "favorite": g_favorite, "game": g_game, "emulators": g_emulators,
         "retroarch": g_expert, "app": g_app, "setting": g_setting}
-MENU_SCALE = {"emulators": 1.12, "retroarch": 1.08}  # (optical size: narrow / dotted glyphs look smaller)
 
 
 class _Pen(Pen):
@@ -342,7 +403,8 @@ class Theme(Style):
         d = ImageDraw.Draw(im)
         rrect(d, (4, 8, 30, 34), 9, fill=rgba(INDIGO))
         for i, (x, y) in enumerate(((10.5, 14.5), (18.5, 14.5), (10.5, 22.5), (18.5, 22.5))):
-            rrect(d, (x, y, x + 6.5, y + 6.5), 2, fill=rgba(WHITE, 255 if i == 1 else 150))
+            # (dim squares opaque: white at 59 % over the indigo; ImageDraw would punch holes)
+            rrect(d, (x, y, x + 6.5, y + 6.5), 2, fill=rgba(WHITE if i == 1 else (194, 201, 255)))
         f = self.font(21)
         d.text((S(39), S(22.5)), "Main", font=f, fill=rgba(ON), anchor="lm")
         tw = d.textlength("Main", font=f) / SS
@@ -355,7 +417,7 @@ class Theme(Style):
         box = (6, 6, w - 6, h - 6)
         r = (h - 12) / 2 if h < 70 else R_CARD
         m = _rr_mask(w, h, box, r)
-        return _over(_layer(m, INDIGO, 0.2), _layer(_ring_mask(w, h, box, r, 1.5), INDIGO, 0.85))
+        return _over(_layer(m, INDIGO, 0.26), _layer(_ring_mask(w, h, box, r, 1.75), INDIGO, 0.85))
 
     def divider(self):
         return Image.new("RGBA", (640, 4), (0, 0, 0, 0))
@@ -364,9 +426,9 @@ class Theme(Style):
     def card(self, w, h, focused, inset=6, r=R_CARD):
         box = (inset, inset, w - inset, h - inset)
         if focused:
-            return surface(w, h, box, r, SEL, rim=0, shadow=(3, 6, 110), outline=rgba(INDIGO), ow=2,
-                           halo=(INDIGO, 7, 60), lift=0.07)
-        return surface(w, h, box, r, SURFACE, rim=22, shadow=(3, 6, 110), lift=0.08)
+            return surface(w, h, box, r, SEL, rim=0, shadow=(2, 4, 100), outline=rgba(INDIGO), ow=2,
+                           halo=(INDIGO, 4, 64), lift=0.07)
+        return surface(w, h, box, r, SURFACE, rim=22, shadow=(2, 4, 100), lift=0.08)
 
     def tile_base(self, focused):
         return self.card(156, 278, focused, inset=7, r=26)
@@ -376,14 +438,14 @@ class Theme(Style):
         cy = 114
         pill = canvas(w, h)
         if focused:
-            rrect(ImageDraw.Draw(pill), (78 - 52, cy - 34, 78 + 52, cy + 34), 34, fill=rgba(INDIGO))
+            rrect(ImageDraw.Draw(pill), (78 - 58, cy - 38, 78 + 58, cy + 38), 38, fill=rgba(INDIGO))
             c, f = rgba(WHITE), rgba(WHITE, 72)
         else:
             c, f = rgba(LAV_DIM), rgba(LAV_DIM, 56)
         # (the glyph on its own layer: ImageDraw replaces pixels, so a tonal fill drawn straight
         # onto the pill would punch a hole in it)
         g = canvas(w, h)
-        MENU[key](ImageDraw.Draw(g), 78, cy, 27 * MENU_SCALE.get(key, 1.0), c, f, 3.5)
+        MENU[key](ImageDraw.Draw(g), 78, cy, 30, c, f, 3.8)
         return finish(Image.alpha_composite(pill, g))
 
     def home_tile(self, key, focused):
@@ -529,16 +591,17 @@ class Theme(Style):
     def badge(self, label, selected):
         im = canvas(120, 130)
         d = ImageDraw.Draw(im)
-        f = self.font(11.5)
-        tw = spaced_width(f, label, 0.6)
+        f = self.font(12.5)
+        tw = spaced_width(f, label, 0.5)
         bw = min(116, tw + 16)
         x0 = (120 - bw) / 2
-        rrect(d, (x0, 106, x0 + bw, 126), 10, fill=rgba(INDIGO_DEEP) if selected else rgba(LAV, 38))
-        spaced(d, (60 - tw / 2, 116.6), label, f, rgba(WHITE if selected else LAV), 0.6)
+        rrect(d, (x0, 105, x0 + bw, 126), 10.5, fill=rgba(INDIGO_DEEP) if selected else rgba(LAV, 38))
+        spaced(d, (60 - tw / 2, 116.1), label, f, rgba(WHITE if selected else LAV), 0.5)
         return finish(im)
 
     def system_icon(self, sid, selected):
-        label = BADGES.get(sid, sid[:7].upper())
+        # badges that would spell a brand name: picture alone, centred (MainUI writes the name below)
+        label = None if sid in NO_BADGE else BADGES.get(sid, sid[:7].upper())
         out = self.icon_picture(sid, selected, 52 if label else 62)
         if label:
             out = Image.alpha_composite(out, self.badge(label, selected))

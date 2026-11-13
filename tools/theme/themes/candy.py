@@ -20,9 +20,14 @@ SKY = (76, 201, 240)
 PURPLE = (155, 93, 229)
 ORANGE = (255, 138, 61)
 RED = (239, 71, 111)
-GRAPE = (139, 79, 224)  # deep enough for the white letters MainUI writes on keyboard keys
+GRAPE = (139, 79, 224)
+FOCUS = (255, 120, 162)      # list bars and the focused card: a lighter pink, so ink text on it reads
+RASPBERRY = (200, 35, 95)    # focused keyboard key (MainUI writes white letters on keys)
+SLATE = (66, 69, 100)
 CANDY = [PINK, YELLOW, MINT, SKY, PURPLE, ORANGE, RED]
 TILE_COLOR = dict(zip(MENU_TILES, CANDY))
+APP_COLOR = {"activity": YELLOW, "download": SKY, "folder": ORANGE, "gallery": PURPLE, "gameswitcher": PINK,
+             "pacman": MINT, "retroarch": RED, "search": SKY, "themes": YELLOW, "tweaks": MINT}
 # system pictures: body colours in the order systems.json lists them (pink and red kept apart),
 # and the second colour for their details
 ICON_BODY = [PINK, MINT, YELLOW, PURPLE, RED, SKY, ORANGE]
@@ -72,6 +77,15 @@ def grow(mask, r):
             a = 2 * math.pi * i / 20
             out = ImageChops.lighter(out, shift(mask, rad * math.cos(a), rad * math.sin(a)))
     return out
+
+
+def erode(mask, r):
+    return ImageChops.invert(grow(ImageChops.invert(mask), r))
+
+
+def area(mask):
+    """Covered pixels of an L mask (partly covered ones in part)."""
+    return sum(i * n for i, n in enumerate(mask.histogram())) / 255
 
 
 def block(im, box, r, fill, line=3.0, shadow=(5, 5)):
@@ -310,11 +324,28 @@ def candy_picture(w, h, cx, cy, draw_fn, body, detail, sc=1.0, k=1.3, drop=(3, 3
     # (pixels a drawing paints in its own colour, such as eyes, are holes in the line work)
     other = ImageChops.multiply(la, lines.convert("L").point(lambda v: 255 if v < 128 else 0))
     la = ImageChops.subtract(la, other)
+    # hairline seams between abutting squares (pixel art) closed
+    la = la.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(5))
     inside = enclosed(ImageChops.lighter(la, other), w, h)
     every = ImageChops.lighter(ImageChops.lighter(la, inside), soft)
+    rim = None
+    if area(ImageChops.subtract(ImageChops.lighter(inside, soft), la)) < 0.05 * area(every):
+        # almost no colour: solid shapes get the body colour inside an ink outline...
+        n = 2 * round(3 * SS) + 1
+        solid = la.filter(ImageFilter.MinFilter(n)).filter(ImageFilter.MaxFilter(n))
+        core = erode(solid, 4.2 * sc)
+        if area(core) > 0.25 * area(la):
+            la = ImageChops.subtract(la, core)
+            inside = ImageChops.lighter(inside, core)
+        else:  # ...bare lines a candy rim
+            rim = grow(la, 3.6)
+            every = ImageChops.lighter(every, rim)
+            drop = (2, 2)
     out = clear(w, h)
     if drop:
         out = layer(out, INK, shift(every, *drop))
+    if rim is not None:
+        out = layer(out, body, rim)
     out = layer(out, body, inside)
     out = layer(out, detail, soft)
     out = layer(out, WHITE, other)
@@ -329,7 +360,7 @@ class Theme(Style):
 
     bg_top = CREAM
     bg_bottom = CREAM
-    accent = INK               # MainUI's toasts, progress bars and its own fallbacks
+    accent = PINK              # MainUI's toasts, progress bars, row-view glow and its own fallbacks
     accent2 = INK
     highlight = GRAPE          # the page counter's current page
     text = INK
@@ -347,6 +378,8 @@ class Theme(Style):
 
     # ---- big pictures -------------------------------------------------------------------
     def background(self, w=640, h=480):
+        """Confetti. MainUI cover-scales the picture, so pieces can land anywhere under text on
+        screens that are not 4:3: those in the list area are pale and small."""
         im = Image.new("RGBA", (w * SS, h * SS), rgba(CREAM))
         d = ImageDraw.Draw(im)
         rnd = random.Random(11)
@@ -354,50 +387,53 @@ class Theme(Style):
         kinds = ["dot", "sprinkle", "tri", "squiggle", "ring", "sprinkle", "plus", "dot"]
         last = None
         tries = 0
-        while len(placed) < 56 and tries < 20000:
+        while len(placed) < 66 and tries < 20000:
             tries += 1
             x, y = rnd.uniform(6, w - 6), rnd.uniform(66, h - 66)
-            if any(math.hypot(x - px, y - py) < 40 for px, py in placed):
+            if any(math.hypot(x - px, y - py) < 36 for px, py in placed):
                 continue
-            # (the left part only between list rows, where no text is; none on the page dots)
-            if x < 340 and min(abs(y - 64 - 60 * i) for i in range(7)) > 6:
+            if 380 < y < 414 and 140 < x < 500:                          # page dots
                 continue
-            if 380 < y < 414 and 140 < x < 500:
+            if 552 < x < 616 and min(abs(y - 92 - 60 * i) for i in range(6)) < 21:  # favourite stars
                 continue
             placed.append((x, y))
             col = rnd.choice([c for c in CANDY if c != last])
             last = col
+            k = 1.0
+            if x < 560 and y > 75:
+                col, k = lerp(col, CREAM, 0.4), 0.8
             c = rgba(col)
             kind = kinds[len(placed) % len(kinds)]
             a = rnd.uniform(0, math.pi)
             if kind == "dot":
-                r = rnd.uniform(3.5, 5.5)
+                r = rnd.uniform(3.5, 5.5) * k
                 d.ellipse([S(x - r), S(y - r), S(x + r), S(y + r)], fill=c)
             elif kind == "ring":
-                r = rnd.uniform(5, 6.5)
-                d.ellipse([S(x - r), S(y - r), S(x + r), S(y + r)], outline=c, width=int(S(2.6)))
+                r = rnd.uniform(5, 6.5) * k
+                d.ellipse([S(x - r), S(y - r), S(x + r), S(y + r)], outline=c, width=int(S(2.6 * k)))
             elif kind == "sprinkle":
-                ln = rnd.uniform(6, 8)
+                ln = rnd.uniform(6, 8) * k
                 dx, dy = ln * math.cos(a), ln * math.sin(a)
-                d.line([S(x - dx), S(y - dy), S(x + dx), S(y + dy)], fill=c, width=int(S(4.6)))
+                d.line([S(x - dx), S(y - dy), S(x + dx), S(y + dy)], fill=c, width=int(S(4.6 * k)))
                 for ex, ey in ((x - dx, y - dy), (x + dx, y + dy)):
-                    d.ellipse([S(ex - 2.3), S(ey - 2.3), S(ex + 2.3), S(ey + 2.3)], fill=c)
+                    e = 2.3 * k
+                    d.ellipse([S(ex - e), S(ey - e), S(ex + e), S(ey + e)], fill=c)
             elif kind == "tri":
-                r = rnd.uniform(6, 8)
-                pts = [(S(x + r * math.cos(a + k * 2.094)), S(y + r * math.sin(a + k * 2.094))) for k in range(3)]
+                r = rnd.uniform(6, 8) * k
+                pts = [(S(x + r * math.cos(a + i * 2.094)), S(y + r * math.sin(a + i * 2.094))) for i in range(3)]
                 d.polygon(pts, fill=c)
             elif kind == "plus":
-                r = 5.5
+                r = 5.5 * k
                 for b in (a, a + math.pi / 2):
                     dx, dy = r * math.cos(b), r * math.sin(b)
-                    d.line([S(x - dx), S(y - dy), S(x + dx), S(y + dy)], fill=c, width=int(S(3)))
+                    d.line([S(x - dx), S(y - dy), S(x + dx), S(y + dy)], fill=c, width=int(S(3 * k)))
             elif kind == "squiggle":
                 pts = []
                 for i in range(15):
-                    t = (i / 14 - 0.5) * 26
-                    v = 3.6 * math.sin(i / 14 * 2 * math.pi * 1.5)
+                    t = (i / 14 - 0.5) * 26 * k
+                    v = 3.6 * k * math.sin(i / 14 * 2 * math.pi * 1.5)
                     pts.append((S(x + t * math.cos(a) - v * math.sin(a)), S(y + t * math.sin(a) + v * math.cos(a))))
-                d.line(pts, fill=c, width=int(S(3)), joint="curve")
+                d.line(pts, fill=c, width=int(S(3 * k)), joint="curve")
         return finish(im)
 
     def header_bar(self):
@@ -434,7 +470,7 @@ class Theme(Style):
     # ---- lists --------------------------------------------------------------------------
     def selection(self, h):
         w = 640
-        im = block(clear(w, h), (9, 5, 621, h - 7), 13, PINK, 3, (5, 5))
+        im = block(clear(w, h), (9, 5, 621, h - 7), 13, FOCUS, 3, (5, 5))
         return finish(im)
 
     def divider(self):
@@ -446,30 +482,49 @@ class Theme(Style):
 
     # ---- tiles --------------------------------------------------------------------------
     def plate(self, im, focused):
-        box = (17, 180, 139, 210)
+        box = (19, 180, 137, 210)
         if focused:
             return layer(im, INK, rr_mask(156, 278, box, 15))
         return block(im, box, 15, WHITE, 2.5, None)
 
-    def candy_tile(self, color, focused):
-        dy = -4 if focused else 0
-        box = (8, 10 + dy, 142, 262 + dy)
-        im = block(clear(156, 278), box, 18, color if focused else pale(color), 3.5, (6, 6 - dy))
-        # halftone dots fading up from the bottom edge
+    @staticmethod
+    def halftone(im, color, box, rows=6):
+        """Dots fading up from the bottom edge of the tile [box]."""
         dots = blank(156, 278)
         d = ImageDraw.Draw(dots)
-        for row in range(6):
+        for row in range(rows):
             y = box[3] - 7 - row * 6.5
             r = 2.5 - row * 0.4
-            for col in range(-1, 22):
+            for col in range(-1, 24):
                 x = box[0] + 4 + col * 6.5 + (3.25 if row % 2 else 0)
                 d.ellipse([S(x - r), S(y - r), S(x + r), S(y + r)], fill=255)
         inner = rr_mask(156, 278, (box[0] + 3.5, box[1] + 3.5, box[2] - 3.5, box[3] - 3.5), 14.5)
-        im = layer(im, lerp(color, INK, 0.12) if focused else pale(color, 0.45), ImageChops.multiply(dots, inner))
+        return layer(im, color, ImageChops.multiply(dots, inner))
+
+    def candy_tile(self, color, focused):
+        """Main menu tile: centred on x 78, where MainUI writes the label and the pictures sit."""
+        dy = -4 if focused else 0
+        box = (11, 10 + dy, 145, 262 + dy)
+        im = block(clear(156, 278), box, 18, color if focused else pale(color), 3.5, (6, 6 - dy))
+        im = self.halftone(im, lerp(color, INK, 0.12) if focused else pale(color, 0.45), box)
         return self.plate(im, focused)
 
+    def row_tile(self, focused):
+        """bg-home-tile: the system row's tile. MainUI fits system names into 142 px (two lines
+        for long ones, 170-204) and writes the game count at 222, so the tile is wider than the
+        main menu's and carries a full-width label band (ink when focused, for the white text)."""
+        dy = -4 if focused else 0
+        box = (5, 10 + dy, 150, 262 + dy)
+        im = block(clear(156, 278), box, 18, PINK if focused else pale(PINK), 3.5, (6, 6 - dy))
+        im = self.halftone(im, lerp(PINK, INK, 0.12) if focused else pale(PINK, 0.45), box, 3)
+        x0, x1 = box[0] + 3.5, box[2] - 3.5
+        if focused:
+            return layer(im, INK, rr_mask(156, 278, (x0, 162, x1, 235), 0))
+        im = layer(im, INK, rr_mask(156, 278, (x0, 162, x1, 235), 0))
+        return layer(im, PAPER, rr_mask(156, 278, (x0, 164.5, x1, 232.5), 0))
+
     def tile_base(self, focused):
-        return finish(self.candy_tile(PINK, focused))
+        return finish(self.row_tile(focused))
 
     def tile_glyph(self, key, focused):
         main = TILE_COLOR[key]
@@ -487,8 +542,9 @@ class Theme(Style):
         return finish(Image.alpha_composite(base, self.tile_glyph(key, focused)))
 
     def card(self, w, h, focused):
-        """Games grid cell: a white card with the name on a strip under the picture."""
-        im = block(clear(w, h), (5, 4, w - 10, h - 7), 14, PINK if focused else PAPER, 3,
+        """Games grid cell: a white card with the name on a strip under the picture. Its top
+        stays clear of the header line (the grid starts at y 55)."""
+        im = block(clear(w, h), (5, 9, w - 10, h - 7), 14, FOCUS if focused else PAPER, 3,
                    (7, 6) if focused else (5, 5))
         strip = (8, h - 34, w - 13, h - 10)
         im = layer(im, INK, rr_mask(w, h, (8, h - 37, w - 13, h - 34), 0))
@@ -552,7 +608,7 @@ class Theme(Style):
         return finish(st.im)
 
     def panel_image(self, w, h):
-        if h >= 200:  # dialog: a yellow title band over a white card
+        if w >= 600:  # pop-bg (dialogs): a yellow title band over a white card
             box = (40, 22, w - 46, h - 14)
             im = block(clear(w, h), box, 18, PAPER, 3.5, (6, 6))
             band = rr_mask(w, h, (box[0] + 3.5, box[1] + 3.5, box[2] - 3.5, 90), 14.5)
@@ -566,7 +622,8 @@ class Theme(Style):
             im = layer(im, INK, rr_mask(w, h, (box[0] + 3.5, 88, box[2] - 3.5, 90.5), 0))
             im = layer(im, INK, rr_mask(w, h, (box[0] + 3.5, 96, box[2] - 3.5, 99), 0))
             return finish(im)
-        # pop-up: square on top, where MainUI puts its title strip, the full width of it
+        # bg-pop-menu-N (stretched to 400 x 60N+10, and for the in-game menu to 314 wide):
+        # square on top, where MainUI puts its title strip, the full width of it
         im = clear(w, h)
         outer = rr_mask(w, h, (0, -30, w, h - 5), 14)
         im = layer(im, INK, shift(outer, 0, 5))
@@ -607,7 +664,16 @@ class Theme(Style):
         return finish(block(clear(250, 360), (2, 2, 242, 352), 16, PAPER, 3.5, (6, 6)))
 
     def key(self, focused):
-        return finish(block(clear(64, 52), (2, 2, 59, 46), 10, GRAPE if focused else (66, 69, 100), 3, (4, 4)))
+        """Drawn at about the real key size (52 x 38) with its shadow straight down, so the
+        stretch to wide keys (SPACE is 182) does not smear it."""
+        w, h = 52, 40
+        box = (1.5, 1.5, 50.5, 36.5)
+        outer = rr_mask(w, h, box, 7)
+        im = layer(clear(w, h), INK, shift(outer, 0, 3))
+        im = layer(im, YELLOW if focused else INK, outer)
+        t, ts = (3, 2.2) if focused else (2.5, 2)  # (thinner at the sides, which stretch)
+        return finish(layer(im, RASPBERRY if focused else SLATE,
+                            rr_mask(w, h, (box[0] + ts, box[1] + t, box[2] - ts, box[3] - t), 7 - t)))
 
     def input_box(self):
         return finish(block(clear(560, 60), (2, 3, 553, 54), 12, WHITE, 3, (5, 5)))
@@ -647,7 +713,7 @@ class Theme(Style):
 
     def app_icon(self, key):
         n = 96
-        col = CANDY[(list(APPS).index(key) * 3) % len(CANDY)]
+        col = APP_COLOR.get(key, PINK)
         im = block(clear(n, n), (5, 5, 86, 86), 22, col, 3.5, (5, 5))
         if key in APP_STICKERS:
             st = Sticker(im, 45.5, 45.5)
@@ -662,7 +728,7 @@ class Theme(Style):
 
     # ---- sound and config -----------------------------------------------------------------
     def sound(self, path):
-        """A short rising 'bloop'."""
+        """A short rising 'bloop', faded to silence at the end (no click)."""
         rate, length = 22050, 0.055
         frames = bytearray()
         ph = 0.0
@@ -670,7 +736,7 @@ class Theme(Style):
             t = i / rate
             f = 560 + 1100 * (t / length) ** 0.7
             ph += 2 * math.pi * f / rate
-            env = min(1.0, t / 0.003) * math.exp(-t * 60)
+            env = min(1.0, t / 0.003, (length - t) / 0.004) * math.exp(-t * 60)
             frames += struct.pack("<h", int(9000 * env * math.sin(ph)))
         path.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(path), "wb") as wv:
@@ -681,5 +747,5 @@ class Theme(Style):
 
     def config(self):
         cfg = super().config()
-        cfg["grid"]["selectedcolor"] = hexc(WHITE)  # (on the dark label plates)
+        cfg["grid"]["selectedcolor"] = hexc(WHITE)  # (on the ink plates, strips and bands)
         return cfg

@@ -28,7 +28,8 @@ INK = (36, 14, 8)
 MOLTEN = [(0.0, DEEP_RED), (0.35, EMBER_RED), (0.65, ORANGE), (0.85, AMBER), (1.0, YELLOW)]
 GOLD_LINE = [(0.0, (255, 214, 120)), (0.55, (255, 168, 64)), (1.0, (240, 104, 34))]
 HOT_LINE = [(0.0, WHITE_HOT), (0.6, (255, 236, 160)), (1.0, (255, 196, 84))]
-ICON_ZOOM = 1.1  # system pictures drawn a little larger: the badge is gone
+ICON_MAX_ZOOM = 1.1  # system pictures drawn a little larger: the badge is gone
+BAYER4 = ((0, 8, 2, 10), (12, 4, 14, 6), (3, 11, 1, 9), (15, 7, 13, 5))
 
 
 # ---- small image helpers ------------------------------------------------------------------
@@ -133,7 +134,7 @@ def chamfer_in(box, c, d):
 def poly_mask(w, h, pts):
     m = Image.new("L", (w * SS, h * SS), 0)
     ImageDraw.Draw(m).polygon([(x * SS, y * SS) for x, y in pts], fill=255)
-    return m.resize((w, h), Image.LANCZOS)
+    return m.resize((w, h), Image.BOX)   # (area coverage: no ringing past the edge)
 
 
 def ring_mask(w, h, box, c, width, inset=0.0):
@@ -182,8 +183,32 @@ def swirl(im, seed, amount, cells=(16, 12)):
 
 @lru_cache(maxsize=None)
 def edge_fade(w, h, d):
-    """L mask rising from 0 at the image's edges to 255 [d] px in."""
-    return field(w, h, lambda x, y: min(x, y, w - x, h - y) / d, step=1)
+    """L mask rising from 0 on the image's border pixels to 255 [d] px in."""
+    row, col = Image.new("L", (w, 1)), Image.new("L", (1, h))
+    row.putdata([int(255 * min(1.0, min(x, w - 1 - x) / d)) for x in range(w)])
+    col.putdata([int(255 * min(1.0, min(y, h - 1 - y) / d)) for y in range(h)])
+    return ImageChops.darker(row.resize((w, h), Image.NEAREST), col.resize((w, h), Image.NEAREST))
+
+
+@lru_cache(maxsize=None)
+def bayer(w, h, amp):
+    """L image of a 4x4 ordered-dither offset around 128 (+-amp/2)."""
+    tile = Image.new("L", (4, 4))
+    tile.putdata([int(round(128 + (BAYER4[y][x] / 16 - 0.47) * amp)) for y in range(4) for x in range(4)])
+    out = Image.new("L", (w + 3, h + 3))
+    for y in range(0, h, 4):
+        for x in range(0, w, 4):
+            out.paste(tile, (x, y))
+    return out.crop((0, 0, w, h))
+
+
+def dither(im, amp_rgb=10, amp_a=32):
+    """Ordered dither before the kit's palette quantization. Its octree maps every pixel through buckets
+    32 levels wide in alpha, red and blue (16 in green), which would band soft glows into flat plates."""
+    r, g, b, a = im.split()
+    oc, oa = bayer(*im.size, amp_rgb), bayer(*im.size, amp_a)
+    a2 = ImageChops.multiply(ImageChops.add(a, oa, 1, -128), a.point(lambda v: 255 if v else 0))
+    return Image.merge("RGBA", [ImageChops.add(c, oc, 1, -128) for c in (r, g, b)] + [a2])
 
 
 def glyph_mask(w, h, fn):
@@ -240,7 +265,7 @@ class Theme(Style):
 
     font_file = "Rajdhani-Bold.ttf"
     font_license = "OFL-Rajdhani.txt"
-    title_size, hint_size, list_size, grid1x4, grid3x4, battery_size = 32, 30, 27, 27, 18, 21
+    title_size, hint_size, list_size, grid1x4, grid3x4, battery_size = 32, 30, 27, 27, 17, 21
 
     # ---- background --------------------------------------------------------------------------
     def background(self, w=640, h=480):
@@ -333,14 +358,16 @@ class Theme(Style):
         m = finish(m).getchannel("A")
         col = hramp(w, h, [(0, (150, 26, 10, 120)), (0.3, (236, 76, 18, 230)), (0.5, (255, 168, 64, 255)),
                            (0.7, (236, 76, 18, 230)), (1, (150, 26, 10, 120))])
-        return comp(body, halo(m, (255, 96, 24), 4, 1.2), masked(col, m))
+        # the glow fades out before the open edge instead of being cut by it
+        open_edge = field(w, h, lambda x, y: (h - y if step > 0 else y) / 3.0, step=1)
+        return comp(body, masked(halo(m, (255, 96, 24), 3, 1.2), open_edge), masked(col, m))
 
     def header_bar(self):
-        return self._bar(vramp(640, 60, [(0, (9, 7, 7, 244)), (1, (18, 13, 12, 236))]), 53.5, 5)
+        return self._bar(vramp(640, 60, [(0, (9, 7, 7, 244)), (1, (18, 13, 12, 236))]), 52.5, 4)
 
     def footer_bar(self):
         fill = vramp(640, 60, [(0, (12, 9, 9, 236)), (0.6, (16, 11, 10, 222)), (1, (34, 12, 8, 200))])
-        return self._bar(fill, 6.5, -5)
+        return self._bar(fill, 7.5, -4)
 
     def _flame(self, w, h, cx, cy, fw, fh):
         outer = poly_mask(w, h, flame_pts(cx, cy, fw, fh, 0.22))
@@ -371,7 +398,7 @@ class Theme(Style):
         body = masked(fill, shape)
         rim = ring_mask(w, h, box, cut, 1.8)
         rim_col = hramp(w, h, [(0, YELLOW), (0.06, ORANGE), (0.5, (236, 84, 22)), (1, (190, 50, 16))])
-        out = comp(halo(rim, (255, 90, 20), 3.2, 1.3), body, masked(rim_col, rim))
+        out = comp(masked(halo(rim, (255, 90, 20), 3.2, 1.3), edge_fade(w, h, 4)), body, masked(rim_col, rim))
         # the left end glows like a bar pulled from the forge (inside the part kept when stretched)
         hot_end = ImageChops.multiply(shape, field(w, h, lambda x, y: 1 - (x - 4) / 16, step=2))
         out = comp(out, masked(hramp(w, h, [(0, (255, 236, 160)), (0.4, ORANGE), (1, (200, 50, 14, 0))], 4, 20), hot_end))
@@ -386,43 +413,58 @@ class Theme(Style):
         return masked(col, finish(m).getchannel("A"))
 
     # ---- slabs ----------------------------------------------------------------------------------
-    def slab(self, w, h, box, cut, focused, glow_r=6, under=True):
-        """A basalt slab: chamfered and rim-lit from below; molten edged and glowing when focused."""
+    def slab(self, w, h, box, cut, focused, glow_r=6, gap=None):
+        """A basalt slab: chamfered and rim-lit from below; molten edged and glowing when focused.
+        [gap]: (y0, y1) where the side rims fade out (a nameplate)."""
         bx0, by0, bx1, by1 = box
         shape = poly_mask(w, h, chamfer(*box, cut))
+        fade = edge_fade(w, h, max(1, min(bx0, by0, w - bx1, h - by1)))
         if focused:
             body = vramp(w, h, [(0, (50, 28, 24)), (0.55, (62, 26, 18)), (1, (112, 36, 14))], by0, by1)
         else:
             body = vramp(w, h, [(0, BASALT_HI), (0.6, BASALT), (1, (34, 21, 18))], by0, by1)
-        if under:  # heat reflected up from below
-            cx = (bx0 + bx1) / 2
-            hw, hh = (bx1 - bx0) * 0.75, (by1 - by0) * (0.5 if focused else 0.32)
-            f = field(w, h, lambda x, y: 1 - math.hypot((x - cx) / hw, (y - by1) / hh), step=4)
-            body = comp(body, masked(solid(w, h, (255, 92, 20) if focused else (200, 56, 16)),
-                                     f.point(lambda v: v * (120 if focused else 60) // 255)))
+        # heat reflected up from below
+        cx = (bx0 + bx1) / 2
+        hw, hh = (bx1 - bx0) * 0.75, (by1 - by0) * (0.5 if focused else 0.32)
+        f = field(w, h, lambda x, y: 1 - math.hypot((x - cx) / hw, (y - by1) / hh), step=4)
+        body = comp(body, masked(solid(w, h, (255, 92, 20) if focused else (200, 56, 16)),
+                                 f.point(lambda v: v * (120 if focused else 60) // 255)))
         out = masked(body, shape.point(lambda v: v * 250 // 255))
+        keep = None
+        if gap:
+            y0, y1 = gap
+            side = cut * 0.6
+            keep = field(w, h, lambda x, y: 1 - min(1.0, max(0.0, min(y - y0, y1 - y) / 3 + 1))
+                         * (x < bx0 + side or x > bx1 - side), step=1)
         # faint top bevel and an inner chamfer line
         top = ring_mask(w, h, box, cut, 1.0)
         out = comp(out, masked(vramp(w, h, [(0, (190, 150, 130, 70)), (0.3, (190, 150, 130, 0))], by0, by1), top))
         inner = ring_mask(w, h, box, cut, 1.0, inset=5)
+        if keep is not None:
+            inner = ImageChops.multiply(inner, keep)
         out = comp(out, masked(solid(w, h, (255, 170, 120, 16 if not focused else 26)), inner))
         if focused:
             rim = ring_mask(w, h, box, cut, 3.2)
+            if keep is not None:
+                rim = ImageChops.multiply(rim, keep)
             hot = field(w, h, lambda x, y: 0.62 * (y - by0) / (by1 - by0) + 0.38 * (x - bx0) / (bx1 - bx0), step=4)
             col = colorize(hot, MOLTEN)
             inside = ImageChops.multiply(rim.filter(ImageFilter.GaussianBlur(glow_r * 0.8)), shape)
-            outside = halo(rim, ORANGE, glow_r, 1.6)
+            outside = masked(halo(rim, ORANGE, glow_r, 1.6), fade)
             out = comp(outside, out, masked(solid(w, h, (255, 110, 30)), inside.point(lambda v: v * 120 // 255)),
                        masked(col, rim))
         else:
             rim = ring_mask(w, h, box, cut, 1.6)
+            if keep is not None:
+                rim = ImageChops.multiply(rim, keep)
             col = vramp(w, h, [(0, (150, 96, 76, 60)), (0.5, (214, 92, 40, 110)), (1, (255, 128, 44, 235))], by0, by1)
-            out = comp(halo(ImageChops.multiply(rim, field(w, h, lambda x, y: (y - by0) / (by1 - by0), step=4)),
-                            ORANGE, 3, 0.8), out, masked(col, rim))
+            lit = ImageChops.multiply(rim, field(w, h, lambda x, y: (y - by0) / (by1 - by0), step=4))
+            out = comp(masked(halo(lit, ORANGE, 3, 0.8), fade), out, masked(col, rim))
         return out
 
     def card(self, w, h, focused):
-        return self.slab(w, h, (6, 6, w - 6, h - 6), 14, focused, glow_r=4.5)
+        # the side rims open where MainUI writes the name (centred at y 148, up to 147 px wide)
+        return self.slab(w, h, (5, 5, w - 5, h - 5), 11, focused, glow_r=4.5, gap=(140, 157))
 
     def fissures(self, w, h, box, cut, focused, seed):
         """Hairline cracks near two corners of a slab, glowing from the heat inside."""
@@ -431,22 +473,33 @@ class Theme(Style):
         m = canvas(w, h)
         d = ImageDraw.Draw(m)
 
-        def crack(x, y, ang, n, width):
+        def crack(x, y, ang, n, width, ymin=-1e9):
             pts = [(x, y)]
             for _ in range(n):
                 ang += rnd.uniform(-0.55, 0.55)
                 step = rnd.uniform(4, 8)
                 x, y = x + step * math.cos(ang), y + step * math.sin(ang)
+                if y < ymin:
+                    break
                 pts.append((x, y))
                 if rnd.random() < 0.18 and n > 3:
-                    crack(x, y, ang + rnd.choice((-0.9, 0.9)), 2, width * 0.7)
-            d.line([(px * SS, py * SS) for px, py in pts], fill=(255, 255, 255, 255), width=max(1, int(width * SS)),
-                   joint="curve")
+                    crack(x, y, ang + rnd.choice((-0.9, 0.9)), 2, width * 0.7, ymin)
+            if len(pts) > 1:
+                d.line([(px * SS, py * SS) for px, py in pts], fill=(255, 255, 255, 255), width=max(1, int(width * SS)),
+                       joint="curve")
 
-        # up from the bottom edge (below the label band) and in from the top corner
-        crack(rnd.uniform(bx0 + cut + 4, bx0 + (bx1 - bx0) * 0.45), by1 + 1, -math.pi / 2 + rnd.uniform(0.2, 0.6),
-              rnd.randint(5, 7), 1.4)
-        crack(bx1 + 1, rnd.uniform(by0 + cut + 2, by0 + cut + 14), math.pi + rnd.uniform(0.15, 0.5), rnd.randint(3, 5), 1.1)
+        # up from the bottom edge, leaning outwards and stopping below the forge mark; in from the opposite top side
+        right = rnd.random() < 0.5
+        lean = rnd.uniform(0.1, 0.4)
+        if right:
+            crack(rnd.uniform(bx1 - cut - 16, bx1 - cut - 4), by1 + 1, -math.pi / 2 + lean, rnd.randint(5, 7), 1.4,
+                  by1 - 30)
+            crack(bx0 - 1, rnd.uniform(by0 + cut + 2, by0 + cut + 14), -rnd.uniform(0.15, 0.5), rnd.randint(3, 5), 1.1)
+        else:
+            crack(rnd.uniform(bx0 + cut + 4, bx0 + cut + 16), by1 + 1, -math.pi / 2 - lean, rnd.randint(5, 7), 1.4,
+                  by1 - 30)
+            crack(bx1 + 1, rnd.uniform(by0 + cut + 2, by0 + cut + 14), math.pi + rnd.uniform(0.15, 0.5),
+                  rnd.randint(3, 5), 1.1)
         mask = ImageChops.multiply(finish(m).getchannel("A"), poly_mask(w, h, chamfer(*box, cut)))
         if focused:
             return comp(halo(mask, ORANGE, 2.5, 1.6), masked(solid(w, h, (255, 200, 110)), mask))
@@ -489,14 +542,20 @@ class Theme(Style):
         return self.slab(250, 360, (4, 4, 246, 356), 18, False)
 
     def key(self, focused):
+        # small cuts: MainUI stretches the key up to 2.6x for SPACE
         w, h = 64, 52
         box = (3, 3, w - 3, h - 3)
         if not focused:
-            return self.slab(w, h, box, 8, False, under=False)
-        shape = poly_mask(w, h, chamfer(*box, 8))
+            shape = poly_mask(w, h, chamfer(*box, 5))
+            body = masked(vramp(w, h, [(0, BASALT_HI), (0.6, BASALT), (1, (36, 22, 19))], 3, h - 3), shape)
+            rim = ring_mask(w, h, box, 5, 1.4)
+            col = vramp(w, h, [(0, (150, 100, 80, 70)), (0.6, (190, 84, 40, 120)), (1, (220, 104, 44, 180))], 3, h - 3)
+            return comp(body, masked(col, rim))
+        shape = poly_mask(w, h, chamfer(*box, 5))
         body = masked(vramp(w, h, [(0, (96, 30, 12)), (1, (140, 40, 12))], 3, h - 3), shape)
-        rim = ring_mask(w, h, box, 8, 2.2)
-        return comp(halo(rim, ORANGE, 2.5, 1.4), body, masked(vramp(w, h, [(0, YELLOW), (1, ORANGE)]), rim))
+        rim = ring_mask(w, h, box, 5, 3.0)
+        col = vramp(w, h, [(0, WHITE_HOT), (0.12, YELLOW), (1, AMBER)], 3, h - 3)
+        return comp(masked(halo(rim, ORANGE, 2.5, 1.4), edge_fade(w, h, 3)), body, masked(col, rim))
 
     def input_box(self):
         w, h = 560, 60
@@ -506,18 +565,30 @@ class Theme(Style):
         shade = ring_mask(w, h, box, 10, 5)
         rim = ring_mask(w, h, box, 10, 1.6)
         rim_col = vramp(w, h, [(0, (120, 60, 40, 140)), (0.6, (230, 90, 30, 200)), (1, (255, 140, 50, 255))], 3, h - 3)
-        return comp(body, masked(solid(w, h, (0, 0, 0, 90)), shade.filter(ImageFilter.GaussianBlur(2))),
-                    halo(rim, ORANGE, 3, 0.6), masked(rim_col, rim))
+        shade = ImageChops.multiply(shade.filter(ImageFilter.GaussianBlur(2)), shape)
+        return comp(body, masked(solid(w, h, (0, 0, 0, 90)), shade),
+                    masked(halo(rim, ORANGE, 3, 0.6), edge_fade(w, h, 2)), masked(rim_col, rim))
 
     def panel_image(self, w, h):
-        cut = (6, 6, 16, 16) if h < 300 else 18
-        box = (2, 2, w - 2, h - 2)
+        if h > 250:  # pop-bg, a dialog drawn centred at its own size
+            box, cut = (2, 2, w - 2, h - 2), 18
+            shape = poly_mask(w, h, chamfer(*box, cut))
+            body = vramp(w, h, [(0, (34, 26, 24)), (0.75, (28, 21, 20)), (1, (52, 22, 15))])
+            rim = ring_mask(w, h, box, cut, 1.8)
+            col = vramp(w, h, [(0, (170, 90, 60, 110)), (0.5, (220, 86, 30, 170)), (1, (255, 140, 48, 255))])
+            return comp(masked(body, shape), masked(halo(rim, ORANGE, 3, 0.7), edge_fade(w, h, 2)), masked(col, rim))
+        # pop menus: MainUI draws the title as a flat strip of darken(panel, 0.2) right above, flush with the
+        # panel's sides (the in-game menu is flush with the screen's top), so the top is square and continues it.
+        # Small cuts: the in-game menu stretches bg-pop-menu-4 to about 314 x 448.
+        cut = (0, 0, 10, 10)
+        box = (0, 0, w, h - 2)
         shape = poly_mask(w, h, chamfer(*box, cut))
-        body = vramp(w, h, [(0, (34, 26, 24)), (0.75, (28, 21, 20)), (1, (52, 22, 15))])
-        out = masked(body, shape)
-        rim = ring_mask(w, h, box, cut, 1.8)
-        col = vramp(w, h, [(0, (170, 90, 60, 110)), (0.5, (220, 86, 30, 170)), (1, (255, 140, 48, 255))])
-        return comp(out, halo(rim, ORANGE, 3, 0.7), masked(col, rim))
+        body = vramp(w, h, [(0, (27, 20, 19)), (0.7, (28, 21, 20)), (1, (52, 22, 15))], 0, h - 2)
+        rim = ring_mask(w, h, box, cut, 1.4)
+        rim = ImageChops.multiply(rim, field(w, h, lambda x, y: y / 8, step=1))
+        col = vramp(w, h, [(0, (170, 90, 60, 110)), (0.5, (220, 86, 30, 170)), (1, (255, 140, 48, 255))], 0, h - 2)
+        glow = ImageChops.multiply(rim.filter(ImageFilter.GaussianBlur(3)), shape).point(lambda v: min(255, v * 2))
+        return comp(masked(body, shape), masked(solid(w, h, (255, 96, 24, 90)), glow), masked(col, rim))
 
     # ---- buttons and small parts ------------------------------------------------------------------
     def button(self, label, primary):
@@ -549,12 +620,14 @@ class Theme(Style):
     def dot(self, active):
         w, h = 24, 14
         if active:
-            m = poly_mask(w, h, chamfer(3, 3.5, 21, 10.5, 3))
-            return comp(halo(m, (10, 4, 2), 1.6, 2.2), halo(m, ORANGE, 2.5, 1.2),
-                        masked(hramp(w, h, [(0, YELLOW), (0.5, WHITE_HOT), (1, YELLOW)], 3, 21), m))
-        m = poly_mask(w, h, [(12, 3), (16, 7), (12, 11), (8, 7)])
-        inner = poly_mask(w, h, [(12, 5), (14, 7), (12, 9), (10, 7)])
-        return comp(masked(solid(w, h, (16, 10, 9, 230)), m), masked(solid(w, h, (176, 128, 108, 235)), inner))
+            m = poly_mask(w, h, chamfer(5, 4.5, 19, 9.5, 2.5))
+            glow = comp(halo(m, (10, 4, 2), 1.2, 2.2), halo(m, ORANGE, 1.8, 1.8))
+            return comp(masked(glow, edge_fade(w, h, 3)),
+                        masked(hramp(w, h, [(0, AMBER), (0.3, YELLOW), (0.5, WHITE_HOT), (0.7, YELLOW), (1, AMBER)], 5, 19),
+                               m))
+        m = poly_mask(w, h, [(12, 2), (17, 7), (12, 12), (7, 7)])
+        inner = poly_mask(w, h, [(12, 4), (15, 7), (12, 10), (9, 7)])
+        return comp(masked(solid(w, h, (16, 10, 9, 230)), m), masked(solid(w, h, (196, 140, 116, 240)), inner))
 
     def toggle(self, on):
         w, h = 92, 44
@@ -568,7 +641,7 @@ class Theme(Style):
         if on:
             body = masked(hramp(w, h, [(0, DEEP_RED), (0.5, ORANGE), (1, YELLOW)], 6, w - 6), track)
             k = masked(vramp(w, h, [(0, WHITE_HOT), (1, (255, 214, 150))], kbox[1], kbox[3]), knob)
-            return comp(halo(track, ORANGE, 3, 1.1), body, halo(knob, (60, 10, 0), 2, 0.8), k,
+            return comp(masked(halo(track, ORANGE, 3, 1.1), edge_fade(w, h, 4)), body, halo(knob, (60, 10, 0), 2, 0.8), k,
                         masked(solid(w, h, (150, 60, 20, 200)), kring))
         body = masked(vramp(w, h, [(0, (22, 17, 16)), (1, (36, 26, 24))], 11, h - 11), track)
         k = masked(vramp(w, h, [(0, (134, 112, 104)), (1, (92, 74, 68))], kbox[1], kbox[3]), knob)
@@ -580,7 +653,8 @@ class Theme(Style):
         if left:
             pts = [(1 - x, y) for x, y in pts]
         m = poly_mask(s, s, [(x * s, y * s) for x, y in pts])
-        return comp(halo(m, ORANGE, s * 0.08, 1.0), masked(vramp(s, s, [(0, YELLOW), (1, ORANGE)], s * 0.16, s * 0.84), m))
+        return comp(masked(halo(m, ORANGE, s * 0.08, 1.0), edge_fade(s, s, 3)),
+                    masked(vramp(s, s, [(0, YELLOW), (1, ORANGE)], s * 0.16, s * 0.84), m))
 
     def folder_icon(self):
         n = 60
@@ -602,7 +676,8 @@ class Theme(Style):
         m = poly_mask(w, h, pts)
         edge = ImageChops.subtract(m, m.filter(ImageFilter.MinFilter(3)))
         fill = vramp(w, h, [(0, WHITE_HOT), (0.35, YELLOW), (0.75, ORANGE), (1, EMBER_RED)], 7, 33)
-        return comp(halo(m, ORANGE, 3, 1.2), masked(fill, m), masked(solid(w, h, (120, 30, 8, 170)), edge))
+        return comp(masked(halo(m, ORANGE, 3, 1.2), edge_fade(w, h, 3)), masked(fill, m),
+                    masked(solid(w, h, (120, 30, 8, 170)), edge))
 
     def battery(self, level, charging=False):
         n = 48
@@ -625,19 +700,25 @@ class Theme(Style):
         return out
 
     # ---- system and app icons ------------------------------------------------------------------------
+    def _system_render(self, draw, cx, cy, zoom, full):
+        im = canvas(120, 130)
+        pen = Pen(ImageDraw.Draw(im), cx, cy, (255, 255, 255, 255), SS * zoom, w=3.4)
+        if full:
+            pen.soft_c = (255, 255, 255, 255)
+        draw(pen)
+        r, _, _, a = finish(im).split()
+        return ImageChops.multiply(a, r)   # (dark details, like android's eyes, cut through)
+
     def _system_masks(self, sid, cy):
-        """(silhouette, lines) masks of a system drawing: soft fills appear only in the silhouette."""
+        """(silhouette, lines) masks of a system drawing: soft fills appear only in the silhouette.
+        Each drawing is centred on its own bounds and zoomed up to ICON_MAX_ZOOM, keeping 4 px clear at the sides."""
         draw = GLYPHS.get(sid) or GLYPHS["fallback"]
-        out = []
-        for full in (True, False):
-            im = canvas(120, 130)
-            pen = Pen(ImageDraw.Draw(im), 60 / ICON_ZOOM, cy / ICON_ZOOM, (255, 255, 255, 255), SS * ICON_ZOOM, w=3.4)
-            if full:
-                pen.soft_c = (255, 255, 255, 255)
-            draw(pen)
-            r, _, _, a = finish(im).split()
-            out.append(ImageChops.multiply(a, r))   # (dark details, like android's eyes, cut through)
-        sil, both = out
+        x0, y0, x1, y1 = self._system_render(draw, 60, cy, 1.0, True).point(lambda v: 255 if v > 128 else 0).getbbox()
+        zoom = min(ICON_MAX_ZOOM, 112 / (x1 - x0), 118 / (y1 - y0))
+        gx, gy = (x0 + x1) / 2 - 60, (y0 + y1) / 2 - cy   # the drawing's centre in its own coordinates
+        sil, both = (self._system_render(draw, 60 / zoom - gx, cy / zoom - gy, zoom, full) for full in (True, False))
+        if sid == "android":   # a filled figure: outline it like the others
+            return sil, ImageChops.subtract(sil, sil.filter(ImageFilter.MinFilter(5)))
         soft = Pen(None, 0, 0, (255, 255, 255, 255), SS).soft_c[3] / 255
         lines = ImageChops.subtract(both, sil.point(lambda v: int(v * soft)), scale=1 - soft)
         return sil, lines
@@ -650,7 +731,7 @@ class Theme(Style):
 
     def system_icon(self, sid, selected):
         # no name badge: MainUI writes the system's name under every icon, so the picture is centred
-        return self.icon_picture(sid, selected, 65)
+        return dither(self.icon_picture(sid, selected, 65))
 
     def app_icon(self, key):
         n = 96
@@ -659,7 +740,7 @@ class Theme(Style):
         hot = ring_mask(n, n, box, 18, 2.4)
         out = comp(out, masked(vramp(n, n, [(0, (200, 80, 30, 120)), (1, AMBER)], 5, n - 5), hot))
         mask = glyph_mask(n, n, lambda d, c: APPS[key](d, n / 2, n / 2, n * 0.26, c, n * 0.058))
-        return comp(out, self._ink(mask, False, 22, 74))
+        return dither(comp(out, self._ink(mask, False, 22, 74)))
 
     # ---- sound --------------------------------------------------------------------------------------------
     def sound(self, path):
