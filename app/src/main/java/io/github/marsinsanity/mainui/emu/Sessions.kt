@@ -389,6 +389,15 @@ class SessionManager(
         return Root.exec("pidof ${s.pkg}").out.isNotBlank()
     }
 
+    /**
+     * [s]'s emulator says (State API) no game is running: it is at its own menus (the game was
+     * quit there, or never started), so bringing it back would show those instead of the game.
+     */
+    fun gameEnded(s: Session): Boolean {
+        val c = controllerFor(s) as? StandaloneController ?: return false
+        return c.direct && c.noGame()
+    }
+
     fun controllerFor(s: Session): GameController =
         if (s.isRetroArch) RetroArchController(emulators.raCommandPort, s.pkg, s.path)
         else StandaloneController(s.pkg, s.emuRef?.let { emulators.defFor(it) }) { markSaved(s.gameKey) }

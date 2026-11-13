@@ -660,7 +660,7 @@ class StandaloneController(
     }
 
     /** The State API says no game is running (the emulator at its own game list): nothing to save. */
-    private fun noGame(): Boolean =
+    fun noGame(): Boolean =
         StateApi.call(pkg, "status", timeoutMs = 3000).let { it.ok && it.extras?.getBoolean("running", true) == false }
 
     override fun save(slot: Int): Boolean {

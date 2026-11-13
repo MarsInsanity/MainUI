@@ -22,10 +22,10 @@ object Launch {
     fun game(host: SceneHost, game: Game) {
         val active = MainUI.sessions.active
         if (active != null && active.gameKey == game.key) {
-            // Only bring the emulator back if it is still running; otherwise
+            // Only bring the emulator back if it is still running the game; otherwise
             // relaunch the game (resuming a dead emulator would open it empty).
-            // Off the UI thread: both the running check and the resume use root.
-            host.io({ MainUI.sessions.isRunning(active) && MainUI.sessions.resume() }) { resumed ->
+            // Off the UI thread: the running checks and the resume use root or wait for an answer.
+            host.io({ MainUI.sessions.isRunning(active) && !MainUI.sessions.gameEnded(active) && MainUI.sessions.resume() }) { resumed ->
                 if (!resumed) launchFresh(host, game)
             }
             return
