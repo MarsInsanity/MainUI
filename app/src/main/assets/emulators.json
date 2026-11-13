@@ -95,7 +95,7 @@
       "id": "ppsspp", "name": "PPSSPP",
       "get": { "mainui": "MainUI-Android/ppsspp-mainui", "page": "https://www.ppsspp.org/download/", "play": "org.ppsspp.ppsspp" },
       "components": ["org.ppsspp.ppsspp.mainui/org.ppsspp.ppsspp.PpssppActivity", "org.ppsspp.ppssppgold/org.ppsspp.ppsspp.PpssppActivity", "org.ppsspp.ppsspp/.PpssppActivity"],
-      "action": "android.intent.action.VIEW", "category": "android.intent.category.DEFAULT", "data": "%ROMSAF%",
+      "action": "android.intent.action.VIEW", "category": "android.intent.category.DEFAULT", "data": "%ROMDOC%",
       "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F2", "load": "keys:KEYCODE_F4" }
     },

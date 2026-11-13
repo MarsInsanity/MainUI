@@ -391,6 +391,11 @@ folder: with root it reads the folders each emulator was given (`dumpsys activit
 uses the deepest one holding the game (`roms`, `roms/psx`, the whole storage...); without root it uses
 the ROMs folder (`roms`), so give the emulator that one.
 
+PPSSPP needs none of that: it is launched with `%ROMDOC%`, the game as a single document served by
+MainUI (`content://<MainUI>.roms/document/...`, the form a file manager uses), and MainUI grants it
+read access to that one file. (With `%ROMSAF%`, a PPSSPP that had never been given the rom folder
+opened its own menu instead of the game.)
+
 ### In-game menu: how it works
 
 1. An accessibility service watches which app is in front. Only while a game MainUI launched is
