@@ -91,15 +91,15 @@ class DuoPen(Pen):
     """A Pen drawn [sc] times bigger whose soft fills go to their own mask (a second tone)
     instead of the line layer, and that can punch holes no fill covers."""
 
-    def __init__(self, draw, soft_draw, cut_draw, cx, cy, w=3.4, sc=1.0):
+    def __init__(self, draw, soft_draw, cut_draw, cx, cy, w=3.4, sc=1.0, wm=1.0):
         super().__init__(draw, cx, cy, (255, 255, 255, 255), SS, w)
-        self.sd, self.cut, self.sc = soft_draw, cut_draw, sc
+        self.sd, self.cut, self.sc, self.wm = soft_draw, cut_draw, sc, wm
 
     def p(self, x, y):
         return ((self.cx + x * self.sc) * self.ss, (self.cy + y * self.sc) * self.ss)
 
     def _w(self, w):
-        return max(1, int(round((self.w if w is None else w) * self.sc * self.ss)))
+        return max(1, int(round((self.w if w is None else w) * self.sc * self.wm * self.ss)))
 
     def rr(self, x0, y0, x1, y1, r=3, w=None, fill=False, soft=False):
         rad = min(r, abs(x1 - x0) / 2, abs(y1 - y0) / 2) * self.sc * self.ss
@@ -163,16 +163,25 @@ def enclosed(walls, w, h):
     return inside.resize((w * SS, h * SS), Image.BILINEAR)
 
 
-def duo(w, h, cx, cy, draw_fn, ink, fill, soft, stroke=3.4, sc=1.0, holes=None):
+def duo(w, h, cx, cy, draw_fn, ink, fill, soft, stroke=3.4, sc=1.0, holes=None, rim=0, wm=1.0):
     """Line art from [draw_fn](pen) as duotone: [ink] lines over a [fill] body and [soft] details.
-    Returns the 1x image. [holes]: colour for pixels drawn in another colour than the pen's."""
+    Returns the 1x image. [holes]: colour for pixels drawn in another colour than the pen's.
+    [rim] (px): solid shapes and thick lines become [fill] inside an [ink] outline this wide.
+    [wm]: line width factor."""
     lines = Image.new("RGBA", (w * SS, h * SS), (0, 0, 0, 0))
     soft_m, cut = blank(w, h), blank(w, h)
-    draw_fn(DuoPen(ImageDraw.Draw(lines), ImageDraw.Draw(soft_m), ImageDraw.Draw(cut), cx, cy, stroke, sc))
+    draw_fn(DuoPen(ImageDraw.Draw(lines), ImageDraw.Draw(soft_m), ImageDraw.Draw(cut), cx, cy, stroke, sc, wm))
     la = lines.split()[3]
     other = ImageChops.multiply(la, lines.convert("L").point(lambda v: 255 if v < 128 else 0))
     la = ImageChops.subtract(la.point(lambda v: 255 if v > 1 else 0), other)
     body = ImageChops.subtract(enclosed(ImageChops.add(la, other), w, h), cut)
+    if rim:
+        # erode by [rim] (repeated 3 x 3 minimum: fast); what is left inside is body
+        inner = ImageChops.add(la, other)
+        for _ in range(max(1, int(round(rim * SS)))):
+            inner = inner.filter(ImageFilter.MinFilter(3))
+        body = ImageChops.add(body, inner)
+        la = ImageChops.subtract(la, inner)
     soft_m = ImageChops.subtract(soft_m, cut)
     out = layer(Image.new("RGBA", lines.size, (0, 0, 0, 0)), fill, body)
     out = layer(out, soft, soft_m)
@@ -225,7 +234,7 @@ def m_emulators(p):
     p.rr(-24, -40, 24, 0, 3, w=5)                          # cartridge going in
     p.rr(-15, -34, 15, -14, 2, w=3, soft=True)
     p.rr(-46, -6, 46, 32, 5, w=5.5)                        # console
-    p.ln((-46, 8), (46, 8), w=3.5)
+    p.ln((-43, 8), (43, 8), w=3.5)                         # (caps end inside the outline)
     p.rr(-36, 16, -24, 23, 2, fill=True)                   # power / reset
     p.rr(-18, 16, -6, 23, 2, fill=True)
     p.rr(14, 15, 38, 25, 2, w=3, soft=True)                # ports
@@ -241,7 +250,7 @@ def m_expert(p):
             if ch == "X":
                 xa, ya = x0 + i * c, y0 + j * c
                 p.tone_rr(xa + 2.5, ya + 2.5, xa + c + 2.5, ya + c + 2.5, 0)  # offset print shadow
-                p.rr(xa + 0.4, ya + 0.4, xa + c - 0.4, ya + c - 0.4, 1, fill=True)
+                p.rr(xa, ya, xa + c, ya + c, 0.5, fill=True)
 
 
 def m_apps(p):
@@ -303,8 +312,7 @@ class Theme(Style):
 
     font_file = "Bungee-Regular.ttf"
     font_license = "OFL-Bungee.txt"
-    list_font, list_license = "Righteous-Regular.ttf", "OFL-Righteous.txt"
-    title_size, hint_size, list_size, grid1x4, grid3x4, battery_size = 26, 22, 23, 17, 13, 16
+    title_size, hint_size, list_size, grid1x4, grid3x4, battery_size = 26, 22, 20, 17, 13, 16
     sel_icons = True
     icon_quant = 64
 
@@ -313,7 +321,7 @@ class Theme(Style):
         im = vgradient(w, h, rgba((244, 237, 222)), rgba((232, 221, 197)))
         ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(ov)
-        for y in range(62, h, 4):                          # moulded ribbing
+        for y in range(2, h, 4):                           # moulded ribbing
             d.line([(0, y), (w, y)], fill=(255, 255, 255, 70))
             d.line([(0, y + 1), (w, y + 1)], fill=SHADOW + (18,))
         im = Image.alpha_composite(im, ov)
@@ -322,14 +330,7 @@ class Theme(Style):
             m = Image.new("L", (64, 48), 0)
             ImageDraw.Draw(m).ellipse(box, fill=a)
             im = layer(im, col, m.filter(ImageFilter.GaussianBlur(10)).resize((w, h), Image.BILINEAR))
-        ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        d = ImageDraw.Draw(ov)
-        for i in range(6):                                 # the header's shadow
-            d.line([(0, 60 + i), (w, 60 + i)], fill=SHADOW + (50 - i * 8,))
-        d.rectangle((0, 411, w, 416), fill=rgba(RED))      # red stripe band over the footer
-        d.line([(0, 411), (w, 411)], fill=rgba(RED_HI))
-        d.rectangle((0, 418, w, 419), fill=rgba(RED))
-        return Image.alpha_composite(im, ov)
+        return im
 
     def header_bar(self):
         w, h = 640, 60
@@ -346,10 +347,14 @@ class Theme(Style):
         im = vgradient(w, h, rgba(INK_HI), rgba(INK_D))
         ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(ov)
-        for y in range(6, h, 3):                           # rubber texture
+        for y in range(14, h, 3):                          # rubber texture
             d.line([(0, y), (w, y)], fill=(0, 0, 0, 22))
-        d.rectangle((0, 0, w, 2), fill=rgba(GOLD))
-        d.line([(0, 3), (w, 3)], fill=(0, 0, 0, 110))
+        d.line([(0, 0), (w, 0)], fill=rgba(RED_HI))        # red double stripe
+        d.rectangle((0, 1, w, 4), fill=rgba(RED))
+        d.line([(0, 5), (w, 5)], fill=rgba(CREAM))
+        d.rectangle((0, 6, w, 7), fill=rgba(RED))
+        d.rectangle((0, 8, w, 9), fill=rgba(GOLD))
+        d.line([(0, 10), (w, 10)], fill=(0, 0, 0, 110))
         return Image.alpha_composite(im, ov)
 
     def logo(self):
@@ -410,14 +415,15 @@ class Theme(Style):
         d.polygon([(S(x1 + 12), S(y0 - 12)), (S(x1 - c), S(y0 - 12)), (S(x1 + 12), S(y0 + c))], fill=0)
         return m
 
-    def cartridge(self, w, h, box, focused, label_box, grip=None, stripe=None, pins=None, r=10, chamfer=11):
-        """A chunky plastic cartridge (SS-size RGBA) with a recessed label: ivory, or red when focused.
-        Returns it and the label's box."""
+    def cartridge(self, w, h, box, focused, label_box, grip=None, stripe=None, pins=None, r=10, chamfer=11,
+                  lift=(7, 5)):
+        """A chunky plastic cartridge (SS-size RGBA) with a recessed label: ivory, or red when focused
+        (its shadow [lift] = offset, blur). Returns it and the label's box."""
         outer = self.cart_mask(w, h, box, r, chamfer)
         inner = self.cart_mask(w, h, box, r, chamfer, 2)
         im = Image.new("RGBA", outer.size, (0, 0, 0, 0))
         if focused:
-            im = Image.alpha_composite(im, drop_shadow(outer, 0, 7, 5, 120))
+            im = Image.alpha_composite(im, drop_shadow(outer, 0, lift[0], lift[1], 120))
         else:
             im = Image.alpha_composite(im, drop_shadow(outer, 0, 3.5, 2.5, 90))
         im = layer(im, GOLD_D if not focused else RED_D, outer)
@@ -440,23 +446,14 @@ class Theme(Style):
             thin = ImageChops.multiply(rr_mask(w, h, (box[0], yb + 1.5, box[2], yb + 3), 0), inner)
             im = layer(im, CREAM if focused else GOLD, thin)
         if pins:
-            px0, py0, px1, py1 = pins
-            slot = rr_mask(w, h, pins, 3)
-            im = layer(im, (255, 255, 255, 160 if focused else 255), shift(slot, 0, 1))
-            im = layer(im, INK_D, slot)
-            n = int((px1 - px0 - 6) // 6)
-            x = (px0 + px1) / 2 - (n * 6 - 2) / 2
-            for _ in range(n):
-                im = layer(im, GOLD, rr_mask(w, h, (x, py0 + 3, x + 4, py1 - 1.5), 0.8))
-                im = layer(im, GOLD_HI, rr_mask(w, h, (x, py0 + 3, x + 1.6, py1 - 1.5), 0.6))
-                x += 6
+            im = self.pins(im, w, h, pins, focused)
         # recessed label well and the label in it
         well = rr_mask(w, h, label_box, 7)
         im = layer(im, (RED_D + (255,)) if focused else (IVORY_D + (255,)), well)
         im = layer(im, (0, 0, 0, 90) if focused else SHADOW + (80,), edge(well, 0, 2.5, 1))
         im = layer(im, (255, 255, 255, 60 if focused else 200), edge(well, 0, -1.5, 0.6))
         lx0, ly0, lx1, ly1 = label_box
-        lab_box = (lx0 + 3, ly0 + 3.5, lx1 - 3, ly1 - 2.5)
+        lab_box = (lx0 + 2, ly0 + 3.5, lx1 - 2, ly1 - 2.5)
         im = layer(im, GOLD if focused else GOLD_HI, rr_mask(w, h, lab_box, 5))
         lab = rr_mask(w, h, (lab_box[0] + 1, lab_box[1] + 1, lab_box[2] - 1, lab_box[3] - 1), 4)
         lab_fill = vgradient(w * SS, h * SS, rgba((152, 27, 31)), rgba((126, 20, 24))) if focused else \
@@ -464,12 +461,27 @@ class Theme(Style):
         lab_fill.putalpha(lab)
         return Image.alpha_composite(im, lab_fill), lab_box
 
+    @staticmethod
+    def pins(im, w, h, box, focused):
+        """A dark slot of gold connector pins."""
+        px0, py0, px1, py1 = box
+        slot = rr_mask(w, h, box, 3)
+        im = layer(im, (255, 255, 255, 160 if focused else 255), shift(slot, 0, 1))
+        im = layer(im, INK_D, slot)
+        n = int((px1 - px0 - 6) // 6)
+        x = (px0 + px1) / 2 - (n * 6 - 2) / 2
+        for _ in range(n):
+            im = layer(im, GOLD, rr_mask(w, h, (x, py0 + 3, x + 4, py1 - 1.5), 0.8))
+            im = layer(im, GOLD_HI, rr_mask(w, h, (x, py0 + 3, x + 1.6, py1 - 1.5), 0.6))
+            x += 6
+        return im
+
     TILE_BOX = (8, 8, 148, 268)
 
     def tile_geometry(self, focused):
         dy = -5 if focused else 0
         x0, y0, x1, y1 = self.TILE_BOX
-        return dict(box=(x0, y0 + dy, x1, y1 + dy), label_box=(x0 + 8, 55 + dy, x1 - 8, 240 + dy), chamfer=17,
+        return dict(box=(x0, y0 + dy, x1, y1 + dy), label_box=(x0 + 4, 55 + dy, x1 - 4, 240 + dy), chamfer=17,
                     grip=(x0 + 18, 16 + dy, x1 - 18, 32 + dy), stripe=(39 + dy, 45 + dy),
                     pins=(x0 + 26, 248 + dy, x1 - 26, 260 + dy))
 
@@ -484,6 +496,8 @@ class Theme(Style):
 
     def tile_glyph(self, key, focused):
         ink, fill, soft = self.glyph_colors(focused)
+        if key == "retroarch":  # the invader's offset print in gold, like the other glyphs' bodies
+            soft = fill
         cy = 114 - (5 if focused else 0)
         g = duo(156, 278, 78, cy, MENU[key], ink, fill, soft)
         if focused:
@@ -492,7 +506,8 @@ class Theme(Style):
 
     def card(self, w, h, focused):
         """Games grid cell: a short cartridge, the system on its label and the name below."""
-        im, _ = self.cartridge(w, h, (6, 6, w - 6, h - 4), focused, (13, 12, w - 13, 134), r=10, chamfer=12)
+        im, _ = self.cartridge(w, h, (6, 6, w - 6, h - 9), focused, (13, 12, w - 13, 134), r=10, chamfer=12,
+                               lift=(4, 2.5))
         return finish(im)
 
     # ---- buttons and small parts ----------------------------------------------------------
@@ -587,7 +602,7 @@ class Theme(Style):
         return finish(im)
 
     def panel_image(self, w, h):
-        dialog = h >= 200
+        dialog = (w, h) == (640, 300)  # pop-bg; bg-pop-menu-N fill their box edge to edge
         im = Image.new("RGBA", (w * SS, h * SS), (0, 0, 0, 0))
         x0, y0, x1, y1 = (22, 6, w - 22, h - 10) if dialog else (0, 0, w, h)
         r = 9 if dialog else 7
@@ -602,18 +617,33 @@ class Theme(Style):
         g.putalpha(inner)
         im = Image.alpha_composite(im, g)
         im = layer(im, SHADOW + (70,), edge(inner, 0, 2, 1))
-        if dialog:  # a red band over its title, a gold rule under it
-            band = ImageChops.multiply(rr_mask(w, h, (x0, y0, x1, y0 + 26), 0), inner)
-            g = Image.new("RGBA", im.size, (0, 0, 0, 0))
-            g.alpha_composite(vgradient(w * SS, int(S(26)), rgba(RED_HI), rgba(RED_D)), (0, int(S(y0))))
-            g.putalpha(band)
-            im = Image.alpha_composite(im, g)
-            d = ImageDraw.Draw(im)
-            d.rectangle([S(x0 + 5), S(y0 + 27.5), S(x1 - 5), S(y0 + 29)], fill=rgba(GOLD))
-            for y in (88, 91):
-                d.rectangle([S(w / 2 - 70), S(y), S(w / 2 + 70), S(y + 1.2)], fill=rgba(GOLD))
-            d.regular_polygon((S(w / 2), S(89.7), S(5)), 4, fill=rgba(RED))
+        if dialog:
+            im = self.dialog_head(im, w, h, x0, x1, inner)
         return finish(im)
+
+    def dialog_head(self, im, w, h, x0, x1, inner):
+        """pop-bg's top as a cartridge's: a grip, then a red band holding the title's label
+        (MainUI writes the title centred at y 60, the message from y 110)."""
+        lo, hi = ribs(w, h, (x0 + 34, 15, x1 - 34, 24), 4.5, inner, 85, 255, 1.3)
+        im = layer(layer(im, SHADOW, lo), (255, 255, 255), hi)
+        band = ImageChops.multiply(rr_mask(w, h, (x0, 30, x1, 90), 0), inner)
+        g = vgradient(w * SS, h * SS, rgba(RED_HI), rgba(RED_D))
+        g.putalpha(band)
+        im = Image.alpha_composite(im, g)
+        im = layer(im, (255, 255, 255, 70), ImageChops.multiply(rr_mask(w, h, (x0, 30, x1, 31), 0), inner))
+        im = layer(im, GOLD, ImageChops.multiply(rr_mask(w, h, (x0, 91.5, x1, 93), 0), inner))
+        well = rr_mask(w, h, (x0 + 14, 37.5, x1 - 14, 82.5), 7)
+        im = layer(im, RED_D, well)
+        im = layer(im, (0, 0, 0, 90), edge(well, 0, 2.5, 1))
+        im = layer(im, (255, 255, 255, 60), edge(well, 0, -1.5, 0.6))
+        im = layer(im, GOLD_HI, rr_mask(w, h, (x0 + 17, 41, x1 - 17, 79.5), 5))
+        lab = rr_mask(w, h, (x0 + 18, 42, x1 - 18, 78.5), 4)
+        g = vgradient(w * SS, h * SS, rgba((254, 251, 244)), rgba((245, 238, 222)))
+        g.putalpha(lab)
+        im = Image.alpha_composite(im, g)
+        im = layer(im, SHADOW + (60,), edge(lab, 0, 1.5, 0.8))
+        # connector pins along the bottom edge
+        return self.pins(im, w, h, (w / 2 - 64, 262, w / 2 + 64, 274), False)
 
     def folder_icon(self):
         return duo(60, 60, 30, 31, m_folder, rgba(INK), rgba(GOLD_HI), rgba(RED))
@@ -626,12 +656,13 @@ class Theme(Style):
         d = ImageDraw.Draw(im)
         d.rounded_rectangle([S(6), S(15), S(40), S(33)], radius=S(3.5), outline=rgba(INK), width=int(S(2.4)))
         d.rounded_rectangle([S(40), S(20), S(44.5), S(28)], radius=S(1.5), fill=rgba(INK))
-        if level > 0:
-            n = max(1, int(math.ceil(level * 4 - 0.01)))
-            col = rgba(RED) if level <= 0.2 else rgba(INK)
-            for i in range(n):
-                x = 9.6 + i * 7.1
-                d.rounded_rectangle([S(x), S(18.6), S(x + 5.6), S(29.4)], radius=S(1), fill=col)
+        n = int(round(level * 4))
+        col = rgba(RED) if level <= 0.2 else rgba(INK)
+        if n == 0:
+            d.rectangle([S(9.6), S(18.6), S(11.2), S(29.4)], fill=col)
+        for i in range(n):
+            x = 9.6 + i * 7.1
+            d.rounded_rectangle([S(x), S(18.6), S(x + 5.6), S(29.4)], radius=S(1), fill=col)
         if charging:
             bolt = [(26, 9), (16, 26), (23, 26), (20, 39), (32, 21), (25, 21)]
             d.polygon([(S(x), S(y)) for x, y in bolt], fill=rgba(CREAM))
@@ -646,7 +677,12 @@ class Theme(Style):
         im = layer(im, INK_D, rr_mask(w, h, (0, 0, w, h), 5))
         im = layer(im, GOLD, rr_mask(w, h, (1.5, 1.5, w - 1.5, h - 1.5), 4))
         im = layer(im, GOLD_HI, rr_mask(w, h, (2.5, 2.5, w - 3.5, h - 3.5), 3.5))
-        im = layer(im, INK_D, rr_mask(w, h, (4.5, 4.5, w - 4.5, h - 4.5), 2))
+        # light inside: MainUI writes "Empty" on it in the list colour
+        inner = rr_mask(w, h, (4.5, 4.5, w - 4.5, h - 4.5), 2)
+        g = vgradient(w * SS, h * SS, rgba((252, 249, 241)), rgba((244, 237, 221)))
+        g.putalpha(inner)
+        im = Image.alpha_composite(im, g)
+        im = layer(im, SHADOW + (70,), edge(inner, 0, 2, 1))
         return finish(im)
 
     def key(self, focused):
@@ -676,11 +712,20 @@ class Theme(Style):
     # ---- system and app icons -----------------------------------------------------------
     def icon_picture(self, sid, selected, cy):
         draw = GLYPHS.get(sid) or GLYPHS["fallback"]
+        if sid == "vmu":  # (the kit's side lines stop short of the bottom arc: close the gaps)
+            draw = lambda p: (GLYPHS["vmu"](p), p.ln((-26, 6), (-26, 14)), p.ln((26, 6), (26, 14)))
         if selected:
             ink, fill, soft = rgba(CREAM), rgba(GOLD), rgba(RED_D)
         else:
             ink, fill, soft = rgba(INK), rgba(GOLD_HI), rgba(RED, 200)
-        return duo(120, 130, 60, cy, draw, ink, fill, soft, sc=self.icon_scale(sid), holes=fill)
+        sc = self.icon_scale(sid)
+        wm, rim = self.RESTYLE.get(sid, (1.0, 0))
+        return duo(120, 130, 60, cy, draw, ink, fill, soft, sc=sc, holes=ink if sid == "android" else fill,
+                   rim=rim * sc, wm=wm)
+
+    # (line width factor, outline width) for drawings with nothing to fill: android is solid shapes
+    # (gold inside an outline), easyrpg a sword of lines (drawn wide, gold inside), ports thin lines
+    RESTYLE = {"android": (1.0, 3.4), "easyrpg": (2.8, 3.4), "ports": (1.4, 0)}
 
     _scales = {}
 
@@ -689,7 +734,8 @@ class Theme(Style):
         if sid not in self._scales:
             lines = Image.new("RGBA", (160 * SS, 160 * SS), (0, 0, 0, 0))
             m = blank(160, 160)
-            (GLYPHS.get(sid) or GLYPHS["fallback"])(DuoPen(ImageDraw.Draw(lines), ImageDraw.Draw(m), ImageDraw.Draw(m), 80, 80))
+            (GLYPHS.get(sid) or GLYPHS["fallback"])(DuoPen(ImageDraw.Draw(lines), ImageDraw.Draw(m), ImageDraw.Draw(m),
+                                                            80, 80, wm=self.RESTYLE.get(sid, (1.0, 0))[0]))
             x0, y0, x1, y1 = lines.split()[3].getbbox()
             hx, hy = max(80 - x0 / SS, x1 / SS - 80), max(80 - y0 / SS, y1 / SS - 80)
             self._scales[sid] = min(1.16, 57 / hx, 59 / hy)
@@ -726,7 +772,7 @@ class Theme(Style):
         cfg = super().config()
         cfg["title"]["color"] = hexc(INK)
         cfg["hint"]["color"] = hexc(CREAM)
-        cfg["list"].update(font=self.list_font, color=hexc(INK))
+        cfg["list"]["color"] = hexc(INK)
         cfg["batteryPercentage"]["color"] = hexc(INK)
         cfg["currentpage"]["color"] = hexc(GOLD_HI)
         cfg["total"]["color"] = hexc(CREAM)
@@ -734,7 +780,3 @@ class Theme(Style):
         cfg["grid"]["selectedcolor"] = hexc(CREAM)
         cfg["mainui"] = {"accent": hexc(RED), "panel": hexa(self.panel, self.panel_alpha), "background": hexc(IVORY)}
         return cfg
-
-    def fonts(self):
-        # (build() copies one licence file: the list font's goes along as a "font")
-        return super().fonts() + [self.list_license]

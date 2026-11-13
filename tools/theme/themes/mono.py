@@ -3,28 +3,33 @@ import math
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from theme_kit import (APPS, BADGES, GLYPHS, SS, TILES, Pen, S, Style, arc, canvas, circle, finish, g_folder,
-                       hexa, hexc, line, poly, rgba, rrect)
+from theme_kit import (APPS, GLYPHS, SS, TILES, Pen, S, Style, arc, canvas, circle, finish, g_folder, hexa, hexc,
+                       line, poly, rgba, rrect)
 
 WHITE = (255, 255, 255)
 DIM = (0x6A, 0x6A, 0x6A)      # unselected glyphs
-LABEL = (0x8C, 0x8C, 0x8C)    # unselected text (5.9:1 on black)
+LABEL = (0x8C, 0x8C, 0x8C)    # secondary text: page total, logo, toggle off (6.2:1 on black)
 HAIR = (0x2A, 0x2A, 0x2A)     # rules and frames
+EDGE = (0x33, 0x33, 0x33)     # dialog border
 FAINT = (0x1A, 0x1A, 0x1A)    # list dividers
-MENU_NO = {k: "%02d" % (i + 1) for i, k in enumerate(["recent", "favorite", "game", "emulators", "retroarch",
-                                                       "app", "setting"])}
+SOFT = (0x5E, 0x5E, 0x5E)     # inactive marks (3.2:1 on black)
+TEXT_N = (0xB0, 0xB0, 0xB0)   # unselected grid labels: the row-view counts, at 2/3 alpha, still reach 4.5:1
+BAYER = [[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26], [12, 44, 4, 36, 14, 46, 6, 38],
+         [60, 28, 52, 20, 62, 30, 54, 22], [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
+         [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]]
 
 
-def brackets(d, box, arm, color, w=2):
-    """Four corner marks (1x pixel rectangles, crisp) on a 1x ImageDraw."""
+def brackets(d, box, arm, color, w=2, down=None):
+    """Four corner marks (1x pixel rectangles, crisp) on a 1x ImageDraw; [down]: the bottom corners' rise."""
     x0, y0, x1, y1 = box
     for x, sx in ((x0, 1), (x1, -1)):
         for y, sy in ((y0, 1), (y1, -1)):
+            rise = arm if sy > 0 or down is None else down
             xa, xb = sorted((x, x + sx * arm))
             ya, yb = sorted((y, y + sy * w))
             d.rectangle((xa, ya, xb - 1, yb - 1), fill=color)
             xa, xb = sorted((x, x + sx * w))
-            ya, yb = sorted((y, y + sy * arm))
+            ya, yb = sorted((y, y + sy * rise))
             d.rectangle((xa, ya, xb - 1, yb - 1), fill=color)
 
 
@@ -41,16 +46,24 @@ class HairPen(Pen):
         return max(1, int(round(max(self.floor, w * self.k + 0.35) * self.ss)))
 
 
-def g_invader(d, cx, cy, s, c, w):
-    """Expert: the pixel invader as a dot matrix, light enough to sit with hairlines."""
-    rows = ["..X.....X..", "...X...X...", "..XXXXXXX..", ".XX.XXX.XX.", "XXXXXXXXXXX",
-            "X.XXXXXXX.X", "X.X.....X.X", "...XX.XX..."]
+INVADER = ["..X.....X..", "...X...X...", "..XXXXXXX..", ".XX.XXX.XX.", "XXXXXXXXXXX",
+           "X.XXXXXXX.X", "X.X.....X.X", "...XX.XX..."]
+
+
+def g_invader(d, cx, cy, s, c, w, solid=False):
+    """Expert: the pixel invader as a light dot matrix, or ([solid]) near-touching squares for small icons."""
     px = s * 2 / 11
     x0, y0 = cx - px * 5, cy - px * 3.5
-    for j, row in enumerate(rows):
+    for j, row in enumerate(INVADER):
         for i, ch in enumerate(row):
-            if ch == "X":
-                circle(d, x0 + i * px, y0 + j * px, px * 0.3, fill=c)
+            if ch != "X":
+                continue
+            x, y = x0 + i * px, y0 + j * px
+            if solid:
+                h = px * 0.45
+                d.rectangle((S(x - h), S(y - h), S(x + h), S(y + h)), fill=c)
+            else:
+                circle(d, x, y, px * 0.3, fill=c)
 
 
 def g_history(d, cx, cy, s, c, w):
@@ -65,7 +78,6 @@ def g_history(d, cx, cy, s, c, w):
 
 
 GLYPH = dict(TILES, retroarch=g_invader, recent=g_history)
-ICONS = dict(APPS, retroarch=g_invader)
 
 
 class Theme(Style):
@@ -78,10 +90,10 @@ class Theme(Style):
     accent2 = (0x4A, 0x4A, 0x4A)
     highlight = WHITE
     text = WHITE
-    muted = LABEL
+    muted = TEXT_N
     glyph_n = DIM
     glyph_f = WHITE
-    panel = (0x0C, 0x0C, 0x0C)
+    panel = (0x12, 0x12, 0x12)
     panel_alpha = 255
     bar = (0, 0, 0)
 
@@ -95,12 +107,13 @@ class Theme(Style):
 
     # ---- big pictures ---------------------------------------------------------------------
     def background(self, w=640, h=480):
+        # A faint centre lift, ordered-dithered so its few grey steps show no rings.
         im = Image.new("RGBA", (w, h))
         px = im.load()
         for y in range(h):
             for x in range(w):
                 t = min(1.0, math.hypot((x - w / 2) / (w * 0.62), (y - h * 0.46) / (h * 0.7)))
-                v = int(round(9 * (1 - t * t)))
+                v = min(9, int(9 * (1 - t * t) + (BAYER[y % 8][x % 8] + 0.5) / 64))
                 px[x, y] = (v, v, v, 255)
         return im
 
@@ -139,7 +152,7 @@ class Theme(Style):
 
     def divider(self):
         im = Image.new("RGBA", (640, 4), (0, 0, 0, 0))
-        ImageDraw.Draw(im).rectangle((20, 1, 619, 1), fill=rgba(FAINT))
+        ImageDraw.Draw(im).rectangle((20, 0, 619, 0), fill=rgba(FAINT))  # row 0: meets the header rule
         return im
 
     # ---- tiles --------------------------------------------------------------------------
@@ -148,21 +161,20 @@ class Theme(Style):
         if focused:
             d = ImageDraw.Draw(im)
             d.rectangle((7, 9, w - 8, h - 6), fill=(255, 255, 255, 10))
-            brackets(d, (7, 9, w - 7, h - 5), 14, rgba(WHITE), 2)
+            # Short bottom rises: MainUI's label (centred at y 148, scrolled when long) runs between them.
+            brackets(d, (7, 9, w - 7, h - 5), 14, rgba(WHITE), 2, down=4)
         return im
 
     def tile_base(self, focused):
         im = Image.new("RGBA", (156, 278), (0, 0, 0, 0))
         if focused:
-            brackets(ImageDraw.Draw(im), (12, 22, 144, 240), 16, rgba(WHITE), 2)
+            brackets(ImageDraw.Draw(im), (12, 28, 144, 246), 16, rgba(WHITE), 2)
         return im
 
     def tile_glyph(self, key, focused):
         im = canvas(156, 278)
         d = ImageDraw.Draw(im)
         GLYPH[key](d, 78, 114, 33, rgba(WHITE if focused else DIM), 2.4)
-        d.text((S(24), S(40)), MENU_NO[key], font=self.font(12), fill=rgba(WHITE if focused else (0x4A, 0x4A, 0x4A)),
-               anchor="lm")
         return finish(im)
 
     # ---- buttons and small parts ----------------------------------------------------------
@@ -200,7 +212,7 @@ class Theme(Style):
         if active:
             d.rectangle((3, 6, 20, 7), fill=rgba(WHITE))
         else:
-            d.rectangle((9, 6, 14, 7), fill=rgba((0x4A, 0x4A, 0x4A)))
+            d.rectangle((9, 6, 14, 7), fill=rgba(SOFT))
         return im
 
     def toggle(self, on):
@@ -228,7 +240,11 @@ class Theme(Style):
     def panel_image(self, w, h):
         im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(im)
-        d.rectangle((0, 0, w - 1, h - 1), fill=rgba(self.panel, self.panel_alpha), outline=rgba((0x33, 0x33, 0x33)))
+        if (w, h) == (640, 300):  # pop-bg is drawn at its own size: the box at MainUI's 560 x 280 dialog place
+            d.rectangle((40, 10, 599, 289), fill=rgba(self.panel), outline=rgba(EDGE))
+        else:  # pop menus: one slab with the title strip MainUI draws above, a hairline between them
+            d.rectangle((0, 0, w - 1, h - 1), fill=rgba(self.panel, self.panel_alpha))
+            d.rectangle((16, 0, w - 17, 0), fill=rgba(HAIR))
         return im
 
     def folder_icon(self):
@@ -237,12 +253,13 @@ class Theme(Style):
         return finish(im)
 
     def favorite_mark(self):
-        im = canvas(34, 39)
+        # The row's left icon, unscaled: 40 wide like the scaled folder icon, so both names start at x 77.
+        im = canvas(40, 40)
         pts = []
         for i in range(10):
             r = 9 if i % 2 == 0 else 3.9
             a = math.radians(-90 + i * 36)
-            pts.append((17 + r * math.cos(a), 20.5 + r * math.sin(a)))
+            pts.append((20 + r * math.cos(a), 20.5 + r * math.sin(a)))
         poly(ImageDraw.Draw(im), pts, fill=rgba(WHITE))
         return finish(im)
 
@@ -264,18 +281,17 @@ class Theme(Style):
         w, h = 250, 360
         im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(im)
-        d.rectangle((0, 0, w - 1, h - 1), outline=rgba(HAIR))
-        brackets(d, (0, 0, w, h), 12, rgba((0x8C, 0x8C, 0x8C)), 2)
+        d.rectangle((0, 0, w - 1, h - 1), fill=(255, 255, 255, 6), outline=rgba(HAIR))
         return im
 
     def key(self, focused):
         w, h = 64, 52
         im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(im)
+        # Stretched to every key: no outlines (they blur); focus is an underline, like bg-input's.
+        d.rectangle((2, 2, w - 3, h - 3), fill=(255, 255, 255, 40 if focused else 14))
         if focused:
-            d.rectangle((2, 2, w - 3, h - 3), fill=(255, 255, 255, 34), outline=rgba(WHITE))
-        else:
-            d.rectangle((2, 2, w - 3, h - 3), fill=(255, 255, 255, 14), outline=rgba(HAIR))
+            d.rectangle((2, 47, w - 3, 49), fill=rgba(WHITE))
         return im
 
     def input_box(self):
@@ -303,32 +319,19 @@ class Theme(Style):
             im.putalpha(edge)
         return finish(im)
 
-    def badge(self, label, selected):
-        im = canvas(120, 130)
-        d = ImageDraw.Draw(im)
-        f = self.font(10.5)
-        sp = 1.3
-        tw = sum(d.textlength(ch, font=f) / SS for ch in label) + sp * (len(label) - 1)
-        x = 60 - tw / 2
-        col = rgba(WHITE if selected else (0x7C, 0x7C, 0x7C))
-        for ch in label:
-            d.text((S(x), S(118)), ch, font=f, fill=col, anchor="lm")
-            x += d.textlength(ch, font=f) / SS + sp
-        return finish(im)
-
     def system_icon(self, sid, selected):
-        label = BADGES.get(sid, sid[:7].upper())
-        out = self.icon_picture(sid, selected, 54 if label else 62)
-        if label:
-            out = Image.alpha_composite(out, self.badge(label, selected))
-        return out
+        # No name badge: MainUI writes the full name under every icon.
+        return self.icon_picture(sid, selected, 62)
 
     def app_icon(self, key):
         n = 96
         im = canvas(n, n)
         d = ImageDraw.Draw(im)
         rrect(d, (6, 6, n - 6, n - 6), 20, rgba((0x3A, 0x3A, 0x3A)), 1.5)
-        ICONS[key](d, n / 2, n / 2, n * 0.24, rgba(WHITE), 2.6)
+        if key == "retroarch":
+            g_invader(d, n / 2, n / 2, n * 0.26, rgba(WHITE), 0, solid=True)
+        else:
+            APPS[key](d, n / 2, n / 2, n * 0.24, rgba(WHITE), 2.6)
         return finish(im)
 
     # ---- sound ----------------------------------------------------------------------------
