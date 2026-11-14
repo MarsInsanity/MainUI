@@ -82,4 +82,23 @@ class ThemePlumbingTest {
         assertEquals(listOf(true, true, false), e.map { it.featured })
         assertEquals(listOf(false, false, true), e.map { it.remixed })
     }
+
+    @Test fun mainuiCatalogEntriesPointAtTheRelease() {
+        val json = """{"version": 1, "themes": [
+            {"id": "frost", "name": "Frost", "author": "MainUI", "zip": "frost.zip", "preview": "frost.png", "stamp": "abc"},
+            {"id": "glass", "name": "Stained Glass", "author": "", "zip": "stainedglass.zip", "preview": "stainedglass.png"},
+            {"name": "../Escape", "zip": "x.zip", "preview": "x.png"},
+            {"name": "Path", "zip": "../x.zip", "preview": "x.png"},
+            {"name": "NoZip", "preview": "x.png"},
+            {"name": "frost", "zip": "frost2.zip", "preview": "frost2.png"}
+        ]}"""
+        val e = ThemeStore.parseMainUICatalog(json, "https://host/dl")
+        assertEquals(listOf("Frost", "Stained Glass"), e.map { it.name })
+        assertEquals("https://host/dl/frost.zip", ThemeStore.zipUrl(e[0]))
+        assertEquals("https://host/dl/stainedglass.png", ThemeStore.previewUrl(e[1]))
+        assertEquals(listOf("MainUI", "MainUI"), e.map { it.author })
+        assertEquals("Stained Glass", e[1].title)
+        assertEquals("abc", e[0].stamp)
+        assertTrue(e.all { it.mainui })
+    }
 }
