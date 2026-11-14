@@ -8,41 +8,94 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * Downloads themes from the OnionOS theme repository
- * (https://github.com/OnionUI/Themes):
- *  - the catalog: .github/data/custom.txt, remixed.txt and featured.txt (one theme per line)
- *  - previews: themes/<name>/preview.png
- *  - packages: release/<name>.zip (installed by ThemeManager like any .zip in Themes/)
+ * Downloads themes from two places, MainUI's own listed first:
+ *  - MainUI's themes (https://github.com/MainUI-Android/themes): catalog.json, <id>.zip and
+ *    <id>.png, the assets of that repository's latest release;
+ *  - the OnionOS theme repository (https://github.com/OnionUI/Themes): the catalog in
+ *    .github/data/custom.txt, remixed.txt and featured.txt (one theme per line), previews in
+ *    themes/<name>/preview.png, packages in release/<name>.zip.
+ * Packages are installed by ThemeManager like any .zip in Themes/.
  */
 object ThemeStore {
     private const val DEFAULT_RAW = "https://raw.githubusercontent.com/OnionUI/Themes/main"
+    private const val DEFAULT_MAINUI = "https://github.com/MainUI-Android/themes/releases/latest/download"
 
-    /** Debug builds can point at a local mirror with `setprop debug.mainui.themebase <url>`. */
-    private val RAW: String by lazy {
-        if (!io.github.marsinsanity.mainui.BuildConfig.DEBUG) DEFAULT_RAW
+    /** Debug builds: [prop]'s URL when set (`setprop debug.mainui.themebase <url>`...), else [default]. */
+    private fun debugBase(prop: String, default: String): String =
+        if (!io.github.marsinsanity.mainui.BuildConfig.DEBUG) default
         else runCatching {
-            Runtime.getRuntime().exec(arrayOf("getprop", "debug.mainui.themebase")).inputStream.bufferedReader().readText().trim()
-        }.getOrNull()?.takeIf { it.startsWith("http") } ?: DEFAULT_RAW
-    }
+            Runtime.getRuntime().exec(arrayOf("getprop", prop)).inputStream.bufferedReader().readText().trim()
+        }.getOrNull()?.takeIf { it.startsWith("http") } ?: default
 
-    data class Entry(val name: String, val remixed: Boolean, val featured: Boolean = false) {
-        /** "Blueprint by Aemiii91" -> author "Aemiii91" */
-        val title get() = name.substringBefore(" by ").trim()
-        val author get() = name.substringAfter(" by ", "").trim()
+    /** Debug builds can point at local mirrors (debug.mainui.themebase, debug.mainui.mainuithemes). */
+    private val RAW: String by lazy { debugBase("debug.mainui.themebase", DEFAULT_RAW) }
+    private val MAINUI_RELEASE: String by lazy { debugBase("debug.mainui.mainuithemes", DEFAULT_MAINUI) }
+
+    /**
+     * A theme. One of MainUI's has [zipAt] / [previewAt] (where its files are), its [by] and the
+     * [stamp] of its contents (a newer one than the installed copy's is an update).
+     */
+    data class Entry(val name: String, val remixed: Boolean, val featured: Boolean = false,
+                     val zipAt: String? = null, val previewAt: String? = null, val by: String? = null,
+                     val stamp: String = "", val description: String = "") {
+        val mainui get() = zipAt != null
+        /** "Blueprint by Aemiii91" -> title "Blueprint", author "Aemiii91" */
+        val title get() = if (mainui) name else name.substringBefore(" by ").trim()
+        val author get() = by ?: name.substringAfter(" by ", "").trim()
     }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
-    fun previewUrl(e: Entry) = "$RAW/themes/${enc(e.name)}/preview.png"
-    fun zipUrl(e: Entry) = "$RAW/release/${enc(e.name)}.zip"
+    fun previewUrl(e: Entry) = e.previewAt ?: "$RAW/themes/${enc(e.name)}/preview.png"
+    fun zipUrl(e: Entry) = e.zipAt ?: "$RAW/release/${enc(e.name)}.zip"
 
     private val cacheDir get() = File(MainUI.storage.dataDir("cache"), "themestore").apply { mkdirs() }
 
-    /** The catalog, cached for a day. */
+    private fun fresh(f: File) = f.isFile && System.currentTimeMillis() - f.lastModified() < 24 * 3600 * 1000L
+
+    /** Both catalogs, MainUI's themes first; cached for a day. Fails only when neither loads. */
     fun catalog(refresh: Boolean = false): List<Entry> {
+        val mainui = runCatching { mainuiCatalog(refresh) }
+        val onion = runCatching { onionCatalog(refresh) }
+        if (mainui.isFailure && onion.isFailure) throw onion.exceptionOrNull()!!
+        val own = mainui.getOrDefault(emptyList())
+        val names = own.map { it.name.lowercase() }.toSet()
+        return own + onion.getOrDefault(emptyList()).filter { it.name.lowercase() !in names }
+    }
+
+    private fun mainuiCatalog(refresh: Boolean): List<Entry> {
+        val cache = File(cacheDir, "mainui-catalog.json")
+        val text = if (!refresh && fresh(cache)) cache.readText() else Http.text("$MAINUI_RELEASE/catalog.json").also {
+            parseMainUICatalog(it, MAINUI_RELEASE) // (a broken one isn't cached)
+            cache.writeText(it)
+        }
+        return parseMainUICatalog(text, MAINUI_RELEASE)
+    }
+
+    /**
+     * MainUI's catalog.json: {"themes": [{"name", "author", "description", "zip", "preview",
+     * "stamp"}]}; zip and preview are file names next to it at [base]. Entries without a usable
+     * name or file are left out; the order is the catalog's.
+     */
+    internal fun parseMainUICatalog(json: String, base: String): List<Entry> {
+        val plain = Regex("[A-Za-z0-9._-]+")
+        val arr = org.json.JSONObject(json).getJSONArray("themes")
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val name = o.optString("name").trim()
+            val zip = o.optString("zip")
+            val preview = o.optString("preview")
+            if (name.isEmpty() || name.contains('/') || name.contains('\\') || name.contains("..") ||
+                !plain.matches(zip) || zip.startsWith(".") || !plain.matches(preview) || preview.startsWith(".")) return@mapNotNull null
+            Entry(name, false, zipAt = "$base/$zip", previewAt = "$base/$preview",
+                by = o.optString("author").ifBlank { "MainUI" }, stamp = o.optString("stamp"),
+                description = o.optString("description"))
+        }.distinctBy { it.name.lowercase() }
+    }
+
+    private fun onionCatalog(refresh: Boolean): List<Entry> {
         val cache = File(cacheDir, "catalog.txt")
-        val fresh = cache.isFile && System.currentTimeMillis() - cache.lastModified() < 24 * 3600 * 1000L
-        val text = if (!refresh && fresh) cache.readText() else {
+        val text = if (!refresh && fresh(cache)) cache.readText() else {
             val custom = Http.text("$RAW/.github/data/custom.txt")
             val remixed = runCatching { Http.text("$RAW/.github/data/remixed.txt") }.getOrDefault("")
             val featured = runCatching { Http.text("$RAW/.github/data/featured.txt") }.getOrDefault("")
@@ -68,7 +121,8 @@ object ThemeStore {
 
     /** Preview image, downloaded once into MainUI/cache/themestore. */
     fun preview(e: Entry): File? {
-        val f = File(cacheDir, "${e.name.replace(Regex("[^A-Za-z0-9 ._-]"), "_")}.png")
+        // (MainUI's themes change: a new look is a new file)
+        val f = File(cacheDir, "${e.name.replace(Regex("[^A-Za-z0-9 ._-]"), "_")}${if (e.stamp.isNotEmpty()) "-" + e.stamp.take(16).filter { it.isLetterOrDigit() } else ""}.png")
         if (f.isFile && f.length() > 0) return f
         return runCatching { Http.download(previewUrl(e), f); f }.getOrNull()
     }
@@ -91,14 +145,21 @@ object ThemeStore {
                     ?.map { it.name.removePrefix(".").removeSuffix(".pack") }?.filter { packInstalled(d, it) }?.map { it.lowercase() }.orEmpty()
         }.toSet()
 
+    /** Lower-case names of MainUI's themes whose installed copy is older than [list]'s. */
+    fun outdated(list: List<Entry>): Set<String> = list.filter { it.mainui && it.stamp.isNotEmpty() }.mapNotNull { e ->
+        val dir = MainUI.storage.themeDirs().map { File(it, e.name) }.firstOrNull { File(it, "config.json").isFile } ?: return@mapNotNull null
+        val stamp = runCatching { org.json.JSONObject(File(dir, "config.json").readText()).optJSONObject("mainui")?.optString("stamp") }.getOrNull()
+        e.name.lowercase().takeIf { stamp != e.stamp }
+    }.toSet()
+
     /**
      * Downloads and installs a theme into the Themes folder on [onSd] storage
-     * (created if needed). Returns the installed theme folder.
+     * (created if needed), over an older copy. Returns the installed theme folder.
      */
     fun install(e: Entry, onSd: Boolean, progress: (Long, Long) -> Unit = { _, _ -> }): File {
-        val vol = (if (onSd) MainUI.storage.sdCard else null) ?: MainUI.storage.internal
-        val themes = vol.dir.listFiles()?.firstOrNull { it.isDirectory && it.name.equals("Themes", true) }
-            ?: File(vol.dir, "Themes").apply { mkdirs() }
+        // (an update replaces the installed copy where it is)
+        val themes = MainUI.storage.themeDirs().firstOrNull { File(File(it, e.name), "config.json").isFile }
+            ?: MainUI.themes.userThemesDir(onSd)
         // The name comes from the catalog and becomes a file / folder name: no paths.
         if (e.name.isBlank() || e.name.contains('/') || e.name.contains('\\') || e.name.contains("..")) throw IOException("Invalid theme name")
         val zip = File(themes, "${e.name}.zip")

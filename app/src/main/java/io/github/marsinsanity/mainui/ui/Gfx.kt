@@ -1258,8 +1258,8 @@ class Gfx {
     }
 
     /**
-     * A top-level page tile, drawn the way MainUI's own theme draws them (tools/theme/
-     * make_mainui_theme.py, home_tile) in the theme's accent: a rounded card with a vertical
+     * A top-level page tile, drawn the way MainUI's own theme draws them (make_mainui_theme.py,
+     * home_tile, in the MainUI-Android/themes repository) in the theme's accent: a rounded card with a vertical
      * gradient; selected, the accent fading darker with a glowing light border and an underline
      * below the label; otherwise faint, with a thin border. For themes without tile artwork.
      */

@@ -22,8 +22,8 @@ import java.text.DateFormat
 import java.util.Date
 
 /**
- * Theme downloader for the OnionOS theme repository: preview on the right,
- * A downloads + installs, Y downloads and applies right away.
+ * Theme downloader for MainUI's own themes and the OnionOS theme repository: preview on the
+ * right, A downloads + installs (or updates), Y downloads and applies right away.
  */
 class ThemeStoreScene(host: SceneHost) : ListScene(host, "Get themes") {
     override var aLabel: String? = "GET"
@@ -36,21 +36,23 @@ class ThemeStoreScene(host: SceneHost) : ListScene(host, "Get themes") {
         busy = "Loading theme list..."
         // Which themes are installed is worked out here too: one listing of each Themes folder,
         // not a storage lookup per catalog entry on the UI thread.
-        host.io({ runCatching { ThemeStore.catalog(refresh) to ThemeStore.installedNames() } }) { r ->
+        host.io({ runCatching { ThemeStore.catalog(refresh).let { Triple(it, ThemeStore.installedNames(), ThemeStore.outdated(it)) } } }) { r ->
             busy = null
             r.onFailure { host.push(DialogScene(host, "Theme repository", "Could not load the theme list:\n${it.message}", "OK", null)) }
-            r.onSuccess { (list, installed) -> show(list, installed) }
+            r.onSuccess { (list, installed, outdated) -> show(list, installed, outdated) }
         }
     }
 
-    private fun show(list: List<ThemeStore.Entry>, installed: Set<String>) {
+    private fun show(list: List<ThemeStore.Entry>, installed: Set<String>, outdated: Set<String>) {
         this.list.set(list.map { e ->
             UiItem(e.title, sub = buildString {
-                if (e.name.lowercase() in installed) append("installed  ")
+                val n = e.name.lowercase()
+                if (n in outdated) append("update  ")
+                else if (n in installed) append("installed  ")
                 else if (e.featured) append("featured  ")
-                append(e.author.ifEmpty { if (e.remixed) "remix" else "" })
+                append(if (e.mainui) "MainUI theme" else e.author.ifEmpty { if (e.remixed) "remix" else "" })
             }.trim(), data = e,
-                preview = { Images.get("themestore:${e.name}", host, 640, network = true) { ThemeStore.preview(e) } })
+                preview = { Images.get("themestore:${e.name}:${e.stamp}", host, 640, network = true) { ThemeStore.preview(e) } })
         })
         title = "Get themes (${list.size})"
     }
@@ -86,7 +88,7 @@ class ThemeStoreScene(host: SceneHost) : ListScene(host, "Get themes") {
                         offerThemeMusic(host, e.title)
                     }
                 } else host.toast("${e.title} installed. Apps > Theme Switcher to use it", 3000)
-                list.items.firstOrNull { it.data === e }?.sub = "installed  ${e.author}"
+                list.items.firstOrNull { it.data === e }?.sub = "installed  ${if (e.mainui) "MainUI theme" else e.author}"
             }
         }
     }

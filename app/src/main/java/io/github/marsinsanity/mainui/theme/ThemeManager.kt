@@ -37,13 +37,51 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     init {
         // Unpacked (or brought up to date after an update) in the background; one that is needed
         // before that is unpacked there and then (see [ensureBundled]).
-        if (bundled.isNotEmpty()) Thread {
+        Thread {
             for (n in bundled) {
                 val dir = bundledDir(n)
                 if (runCatching { ensureBundled(dir) }.getOrDefault(false))
                     android.os.Handler(android.os.Looper.getMainLooper()).post { if (settings.themePath == dir.absolutePath) reload() }
             }
+            moveLeftovers()
         }.start()
+    }
+
+    /**
+     * Themes an earlier MainUI bundled and this one doesn't (they are in the Theme Store now):
+     * their unpacked copies in app storage.
+     */
+    private fun leftovers(): List<File> = builtinDir.parentFile?.listFiles()?.filter {
+        it.isDirectory && it != builtinDir && it.name !in bundled && !it.name.endsWith(".new") && !it.name.endsWith(".old") &&
+            File(it, "config.json").isFile
+    }.orEmpty()
+
+    /**
+     * Moves [leftovers] into the Themes folder, where the Theme Switcher lists them and the Theme
+     * Store sees them installed. The one in use switches to its new place; its old copy goes at
+     * the next start, once nothing reads from it. Tried again at every start until it works
+     * (storage access may not be granted yet).
+     */
+    private fun moveLeftovers() {
+        for (d in leftovers()) runCatching {
+            val target = File(userThemesDir(false), d.name)
+            if (!File(target, "config.json").isFile) {
+                val tmp = File(target.parentFile, ".${d.name}.moving")
+                tmp.deleteRecursively()
+                if (!d.copyRecursively(tmp, overwrite = true) || !tmp.renameTo(target)) { tmp.deleteRecursively(); return@runCatching }
+            }
+            if (settings.themePath == d.absolutePath) {
+                settings.themePath = target.absolutePath
+                android.os.Handler(android.os.Looper.getMainLooper()).post { reload() }
+            } else d.deleteRecursively()
+        }
+    }
+
+    /** The Themes folder at the top of internal storage or the SD card ([onSd]), created if needed. */
+    fun userThemesDir(onSd: Boolean): File {
+        val vol = (if (onSd) storage.sdCard else null) ?: storage.internal
+        return vol.dir.listFiles()?.firstOrNull { it.isDirectory && it.name.equals("Themes", true) }
+            ?: File(vol.dir, "Themes").apply { mkdirs() }
     }
 
     /** Unpacks bundled theme [dir] if it isn't, or is older than the APK's; true when it did. */
@@ -174,6 +212,13 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
                     if (seen.add(n.lowercase())) out += ThemeEntry(null, f, n, "", "Not installed yet (.zip)")
                 }
             }
+        }
+        // (not moved to the Themes folder yet, see [moveLeftovers])
+        for (d in leftovers()) {
+            if (!seen.add(d.name.lowercase())) continue
+            val o = runCatching { JSONObject(File(d, "config.json").readText()) }.getOrNull()
+            out += ThemeEntry(d, null, o?.optString("name")?.ifEmpty { null } ?: d.name, o?.optString("author") ?: "MainUI",
+                o?.optString("description") ?: "")
         }
         return out
     }
