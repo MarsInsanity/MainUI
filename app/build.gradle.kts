@@ -38,7 +38,7 @@ android {
 
     defaultConfig {
         applicationId = "io.github.marsinsanity.mainui"
-        minSdk = 29
+        minSdk = 28
         targetSdk = 34
         versionCode = commitCount
         versionName = "0.1.$commitCount"

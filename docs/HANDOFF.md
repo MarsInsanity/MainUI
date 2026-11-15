@@ -5,7 +5,15 @@ and test, and how to connect an Android device over ADB so Claude Code can test 
 covers how the CI, releases and emulator forks work, and the rules this project follows. Give it to
 the Claude Code session on your PC as its first read.
 
-Last updated 2026-11-15, from branch `claude/tender-tesla-u8ze4z` (MainUI 0.1.119).
+Last updated 2026-11-15 (MainUI 0.1.122).
+
+**Two devices, two keys:**
+- **Retroid Pocket 2+**: the test device on the PC's USB. It runs builds from the PC, signed with
+  the PC's debug key. Claude installs and tests on it.
+- **Retroid Pocket Mini V2**: your own device. It keeps running the GitHub Actions releases, signed
+  with the release key, and updates through Settings > Updates.
+
+**All development happens on `main`.** No other branches.
 
 ---
 
@@ -42,16 +50,8 @@ A shallow clone gets a low version number, and Android refuses a lower version a
 git clone https://github.com/MarsInsanity/MainUI.git
 ```
 
-```bash
-cd MainUI && git checkout claude/tender-tesla-u8ze4z
-```
-
-All the work so far is on **`claude/tender-tesla-u8ze4z`**. It is 118 commits ahead of `main`,
-and `main` has nothing it lacks. Pick one of these two:
-- keep developing on that branch, or
-- fast-forward `main` to it once (`git checkout main && git merge --ff-only claude/tender-tesla-u8ze4z && git push`) and work on `main` from then on.
-
-Either way works: CI builds and releases every branch you push.
+Work on `main` only: commit there and push there. All earlier work was merged into it. The old
+`claude/tender-tesla-u8ze4z` branch is finished and isn't used any more.
 
 ### Themes
 
@@ -127,37 +127,47 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 - `assembleRelease` builds `app/build/outputs/apk/release/app-release.apk`, the same thing CI builds.
 - Toolchain: AGP 8.9.1, Kotlin 2.1.20, Gradle 8.14.3 (the wrapper downloads it), compileSdk 35,
-  minSdk 29 (Android 10), targetSdk 34.
+  minSdk 28 (Android 9, for the Retroid Pocket 2+), targetSdk 34.
 - Application id: `io.github.marsinsanity.mainui`, for debug and release alike. Debug has no
   suffix, so only one of the two can be installed at a time.
 
-### Signing: read this before installing on a device that already has MainUI
+### Signing: two devices, two keys
 
-Android only updates an installed app with an APK signed by the **same key**.
-- The MainUI on your own device came from the GitHub releases, which are signed with the release
-  key (the org/repo secrets `MAINUI_KEYSTORE` (base64), `MAINUI_KEYSTORE_PASSWORD`,
-  `MAINUI_KEY_ALIAS`, `MAINUI_KEY_PASSWORD`).
-- A local build without that key is signed with your PC's debug key (`~/.android/debug.keystore`).
-  It can't update a release-signed MainUI. You would have to uninstall first, which deletes MainUI's
-  settings, recents and so on.
+Android only updates an installed app with an APK signed by the **same key**, so each device
+stays with one kind of build:
 
-What to do:
-- **On the test device**, use debug builds signed with your PC's debug key. Don't install release
-  APKs there, or you'll have to keep uninstalling. Debug builds are also the only ones `run-as` and
-  the `debug.mainui.*` properties work with (section 6).
-- **On your own device**, keep updating through the in-app updater (Settings > Updates), which
-  installs CI releases. If you want to build release-signed APKs locally, point the build at your
-  own copy of the keystore:
-  `MAINUI_KEYSTORE=/path/to/mainui.keystore MAINUI_KEYSTORE_PASSWORD=... MAINUI_KEY_ALIAS=... MAINUI_KEY_PASSWORD=... ./gradlew assembleRelease`.
-  Keep the keystore outside the repo. `*.keystore` is git-ignored, but never commit, paste or print
-  it or its passwords, Claude included.
+| Device | Builds | Signed with | Updated by |
+|---|---|---|---|
+| Retroid Pocket 2+ (test device) | `assembleDebug` on the PC | the PC's debug key (`~/.android/debug.keystore`, made by the SDK) | `adb install -r` from the PC |
+| Retroid Pocket Mini V2 (yours) | GitHub Actions releases | the release key (repo secrets `MAINUI_KEYSTORE` (base64), `MAINUI_KEYSTORE_PASSWORD`, `MAINUI_KEY_ALIAS`, `MAINUI_KEY_PASSWORD`) | Settings > Updates |
+
+- Never install a GitHub release on the Pocket 2+, and don't use its Settings > Updates: a
+  release-signed APK can't replace the PC-signed one. You'd have to uninstall first, which deletes
+  MainUI's settings, recents and so on. The same goes the other way for the Pocket Mini.
+- Keep the PC's `~/.android/debug.keystore` (back it up). If it's lost or the PC changes, the next
+  build has a new key, and the Pocket 2+ needs one uninstall and a fresh setup.
+- Debug builds are also the only ones `run-as` and the `debug.mainui.*` properties work with
+  (section 6).
+- The release key lives only in GitHub secrets. Building release-signed APKs on the PC isn't
+  needed. Never commit, paste or print a keystore or its passwords, Claude included.
 
 ---
 
-## 5. Setting up the test device for Claude
+## 5. Setting up the test device (Retroid Pocket 2+) for Claude
 
-Any Android 10+ device works. Ideally use a second **Retroid Pocket Mini V2 rooted with Magisk**,
-the device MainUI targets: same screen (it's not 16:9), same buttons, root.
+The test device is a **Retroid Pocket 2+**: Android 9, Unisoc T310, 2 GB RAM, 3.5" 640x480
+touchscreen. MainUI supports Android 9 for it (minSdk 28). What that means for testing:
+- **Its screen is 640x480, the Miyoo Mini's own size**, so OnionOS themes show 1:1 there. That
+  makes it the right device for the theme fidelity work (`docs/onion-fidelity/`). The Pocket Mini
+  has a different screen shape, so check a layout change on both: on the Pocket 2+ over adb, and
+  on the Pocket Mini after the release lands.
+- **It's a slow chip**: RetroArch with 8/16/32-bit cores, PPSSPP's lighter games and other light
+  emulators run. GameCube/Wii, PS2, 3DS, PS3 and Switch emulators don't. Test those on the Pocket
+  Mini with release builds. Some forks may not even install on Android 9 (their own minimum).
+- **Android 9 differences** MainUI already handles: storage is the old read/write permission (no
+  "All files access" screen); there is no Android 10+ Wi-Fi panel or newer haptics.
+- **Root**: everything below works without root except the root-only features. If you root it
+  with Magisk, do step 3.
 
 1. **Developer options**: Settings > About > tap Build number 7 times. Then in Developer options
    turn on **USB debugging** (and "Stay awake" helps while testing).
@@ -170,8 +180,10 @@ the device MainUI targets: same screen (it's not 16:9), same buttons, root.
 4. Install a debug MainUI (section 4). Then do the setup screen's steps, or set them over adb:
 
    ```bash
-   adb shell appops set --uid io.github.marsinsanity.mainui MANAGE_EXTERNAL_STORAGE allow
+   adb shell pm grant io.github.marsinsanity.mainui android.permission.WRITE_EXTERNAL_STORAGE
    ```
+
+   (On Android 11+ devices it's `adb shell appops set --uid io.github.marsinsanity.mainui MANAGE_EXTERNAL_STORAGE allow` instead.)
 
    ```bash
    adb shell cmd package set-home-activity io.github.marsinsanity.mainui/.MainActivity
@@ -186,7 +198,7 @@ the device MainUI targets: same screen (it's not 16:9), same buttons, root.
    ```
 
    The accessibility service is the in-game menu overlay (Home opens it during a game).
-5. **Emulators**: install them from MainUI itself (Apps > Emulators: the "MainUI build" entries
+5. **Emulators** (the light ones, see above): install them from MainUI itself (Apps > Emulators: the "MainUI build" entries
    download the fork's latest stable release). Or download the APK from a fork's GitHub
    releases: `<upstream tag>-mainui` is stable, `nightly` is a test build.
    **RetroArch**: get the website or F-Droid build (https://www.retroarch.com), not the Play Store
@@ -244,11 +256,11 @@ adb logcat -s MainUI.Session MainUI.StateApi MainUIStateApi MainUI.Overlay MainU
 
 ### MainUI: `.github/workflows/build.yml`
 
-- **Every push to any branch** runs the unit tests, builds a release-signed APK and publishes it
+- **Every push to `main`** (pushes that change only docs or `*.md` are skipped) runs the unit tests, builds a release-signed APK and publishes it
   as the GitHub release **"MainUI 0.1.N"** (tag `v0.1.N`, N = commit count). It keeps the newest 20
   releases.
-- The in-app updater (Settings > Updates) installs the latest release. So pushing is how a change
-  reaches your own device.
+- The in-app updater on the Pocket Mini (Settings > Updates) installs the latest release. So
+  pushing to `main` is how a change reaches your own device, a few minutes after CI finishes.
 - `cores.yml` builds the extra RetroArch cores weekly (Monday 05:23 UTC) into the `cores` release.
   MainUI's core installer downloads them from there.
 
@@ -296,8 +308,9 @@ claude.ai under scheduled tasks.
 
 ## 8. Rules this project follows (for Claude on the PC)
 
-- **Never create, commit, paste or print signing keys** or their passwords. Use the env-var
-  mechanism only. Never commit `local.properties`.
+- **Work on `main` only.** Commit there and push there.
+- **Never create, commit, paste or print signing keys** or their passwords. Never commit
+  `local.properties`.
 - **Forks change nothing but the save/load State API** (plus packaging/CI: `.mainui` package
   suffix, release signing; and Dolphin has savestates on by default). No other behaviour changes,
   so they stay mergeable with upstream.
@@ -313,7 +326,7 @@ claude.ai under scheduled tasks.
 
 ## 9. Where things stand
 
-Recently finished and verified (all on `claude/tender-tesla-u8ze4z`, CI green):
+Recently finished and verified (CI green):
 - PPSSPP save/load made reliable (fork patch + `v1.20.4.patch`).
 - Touch support in the in-game menu and process popup.
 - MainUI-style icons for Hidden apps and the App Store.
@@ -323,14 +336,18 @@ Recently finished and verified (all on `claude/tender-tesla-u8ze4z`, CI green):
   disappearing). MainUI also continues from the resume state only when the game was left with it.
 
 Open, not started or paused:
-- **OnionOS fidelity**: theme rendering differences from a real Miyoo Mini (tile scaling, draw order,
-  bar stretching, fallbacks, list/popup art). A list of ~40 findings was made in the cloud session.
-  It wasn't saved to the repo and needs redoing from the OnionOS source if wanted.
+- **OnionOS fidelity**: where MainUI draws OnionOS themes differently from a Miyoo Mini. See
+  [`docs/onion-fidelity/README.md`](onion-fidelity/README.md) for the status, every open finding
+  with its proposed fix, and the device reference. Lanes A and B (theme loading, main menu, bars,
+  battery) are done. Lane B still needs a review. Lanes C (lists, pop-ups, dialogs) and D (Game
+  Switcher, in-game menu) are open. Test them on the Pocket 2+, whose screen is the Miyoo's size.
 - **RetroArch auto state**: RetroArch's own auto-save state could in principle be older than the
   game's in-game save (the hazard fixed for Dolphin). Not looked at yet.
 - Relaunching the game that is already running logs "the game wasn't ready" for auto load. Harmless.
 - Standalone emulators other than RetroArch, PPSSPP and Dolphin are only partly tested on a real
-  device. A real test device makes this possible now: README "Known limitations" has the list.
+  device. README "Known limitations" has the list. The light ones can be tested on the Pocket 2+.
+- **Android 9 (Pocket 2+)**: MainUI was made to install on Android 9 for the test device. It
+  builds and passes its tests, but hasn't been tried on Android 9 yet.
 
 ---
 
@@ -341,11 +358,7 @@ git clone https://github.com/MarsInsanity/MainUI.git
 ```
 
 ```bash
-cd MainUI && git checkout claude/tender-tesla-u8ze4z
-```
-
-```bash
-./gradlew testDebugUnitTest assembleDebug
+cd MainUI && ./gradlew testDebugUnitTest assembleDebug
 ```
 
 ```bash
