@@ -1256,7 +1256,7 @@ class RomFilesTest {
     @org.junit.Before fun setUp() { dir = java.nio.file.Files.createTempDirectory("roms").toFile() }
     @org.junit.After fun tearDown() { dir.deleteRecursively() }
     private fun f(name: String, text: String = "x") = File(dir, name).apply { parentFile?.mkdirs(); writeText(text) }
-    private fun names(files: List<File>) = files.map { it.relativeTo(dir).path }.toSet()
+    private fun names(files: List<File>) = files.map { it.relativeTo(dir).invariantSeparatorsPath }.toSet()
     private val rf = io.github.marsinsanity.mainui.data.RomFiles
 
     @Test fun cueTakesItsTracks() {
