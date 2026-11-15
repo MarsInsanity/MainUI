@@ -5,7 +5,7 @@ and test, and how to connect an Android device over ADB so Claude Code can test 
 covers how the CI, releases and emulator forks work, and the rules this project follows. Give it to
 the Claude Code session on your PC as its first read.
 
-Last updated 2026-11-15 (MainUI 0.1.122).
+Last updated 2026-11-15 (MainUI 0.1.123).
 
 **Two devices, two keys:**
 - **Retroid Pocket 2+**: the test device on the PC's USB. It runs builds from the PC, signed with
@@ -127,7 +127,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 - `assembleRelease` builds `app/build/outputs/apk/release/app-release.apk`, the same thing CI builds.
 - Toolchain: AGP 8.9.1, Kotlin 2.1.20, Gradle 8.14.3 (the wrapper downloads it), compileSdk 35,
-  minSdk 28 (Android 9, for the Retroid Pocket 2+), targetSdk 34.
+  minSdk 29 (Android 10), targetSdk 34.
 - Application id: `io.github.marsinsanity.mainui`, for debug and release alike. Debug has no
   suffix, so only one of the two can be installed at a time.
 
@@ -155,19 +155,21 @@ stays with one kind of build:
 
 ## 5. Setting up the test device (Retroid Pocket 2+) for Claude
 
-The test device is a **Retroid Pocket 2+**: Android 9, Unisoc T310, 2 GB RAM, 3.5" 640x480
-touchscreen. MainUI supports Android 9 for it (minSdk 28). What that means for testing:
+The test device is a **Retroid Pocket 2+** running **LineageOS 19 (Android 12L)**: Unisoc T310,
+2 GB RAM, 3.5" 640x480 touchscreen. What that means for testing:
 - **Its screen is 640x480, the Miyoo Mini's own size**, so OnionOS themes show 1:1 there. That
   makes it the right device for the theme fidelity work (`docs/onion-fidelity/`). The Pocket Mini
   has a different screen shape, so check a layout change on both: on the Pocket 2+ over adb, and
   on the Pocket Mini after the release lands.
 - **It's a slow chip**: RetroArch with 8/16/32-bit cores, PPSSPP's lighter games and other light
   emulators run. GameCube/Wii, PS2, 3DS, PS3 and Switch emulators don't. Test those on the Pocket
-  Mini with release builds. Some forks may not even install on Android 9 (their own minimum).
-- **Android 9 differences** MainUI already handles: storage is the old read/write permission (no
-  "All files access" screen); there is no Android 10+ Wi-Fi panel or newer haptics.
-- **Root**: everything below works without root except the root-only features. If you root it
-  with Magisk, do step 3.
+  Mini with release builds.
+- **Android 12L, not the Pocket Mini's Android 13**: a few things MainUI does differ by version
+  (the in-game menu's handling of a paused emulator on Android 14+, notification and receiver
+  rules on 13+), so a change in those areas still needs a check on the Pocket Mini.
+- **Root**: everything below works without root except the root-only features. MainUI's own root
+  needs Magisk (step 3). If your LineageOS build has Developer options > **Rooted debugging**,
+  turning it on lets `adb root` give Claude a root shell even without Magisk.
 
 1. **Developer options**: Settings > About > tap Build number 7 times. Then in Developer options
    turn on **USB debugging** (and "Stay awake" helps while testing).
@@ -180,10 +182,8 @@ touchscreen. MainUI supports Android 9 for it (minSdk 28). What that means for t
 4. Install a debug MainUI (section 4). Then do the setup screen's steps, or set them over adb:
 
    ```bash
-   adb shell pm grant io.github.marsinsanity.mainui android.permission.WRITE_EXTERNAL_STORAGE
+   adb shell appops set --uid io.github.marsinsanity.mainui MANAGE_EXTERNAL_STORAGE allow
    ```
-
-   (On Android 11+ devices it's `adb shell appops set --uid io.github.marsinsanity.mainui MANAGE_EXTERNAL_STORAGE allow` instead.)
 
    ```bash
    adb shell cmd package set-home-activity io.github.marsinsanity.mainui/.MainActivity
@@ -346,8 +346,6 @@ Open, not started or paused:
 - Relaunching the game that is already running logs "the game wasn't ready" for auto load. Harmless.
 - Standalone emulators other than RetroArch, PPSSPP and Dolphin are only partly tested on a real
   device. README "Known limitations" has the list. The light ones can be tested on the Pocket 2+.
-- **Android 9 (Pocket 2+)**: MainUI was made to install on Android 9 for the test device. It
-  builds and passes its tests, but hasn't been tried on Android 9 yet.
 
 ---
 
