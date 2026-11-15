@@ -22,15 +22,34 @@ Last updated 2026-11-15 (MainUI 0.1.123).
 | Tool | Why | Where to get it |
 |---|---|---|
 | **Git** | cloning and committing | https://git-scm.com/downloads (on Windows this includes Git Bash) |
-| **JDK 17** (or newer) | Gradle / Android build | https://adoptium.net (Temurin 17), or the JDK bundled with Android Studio |
-| **Android SDK**: platform 35, build-tools 35, platform-tools (adb) | build and install the app | Easiest: **Android Studio** (https://developer.android.com/studio), then SDK Manager. Without Studio: "Command line tools only" from the same page, then `sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"` |
+| **JDK 17** (up to 24, not 25 or newer) | Gradle / Android build | https://adoptium.net (Temurin 17, what CI uses), or the JDK bundled with Android Studio. See the JDK note below the table |
+| **Android SDK**: platform 35, build-tools 35, NDK 27.2.12479018, platform-tools (adb) | build and install the app | Easiest: **Android Studio** (https://developer.android.com/studio), then SDK Manager. Without Studio: "Command line tools only" from the same page. See the SDK note below the table |
 | **Claude Code** | your agent on the PC | https://code.claude.com/docs (macOS / Linux / WSL: `curl -fsSL https://claude.ai/install.sh \| bash`; Windows PowerShell: `irm https://claude.ai/install.ps1 \| iex`) |
 | **GitHub CLI `gh`** (recommended) | watch CI runs, read releases, start workflows | https://cli.github.com, then `gh auth login` |
 | **Python 3.13** + Pillow 12.3.0, numpy 2.5.3 | only for the themes repo (its kit draws every theme) | https://www.python.org/downloads, then `pip install -r kit/requirements.txt` in the themes repo |
 | **scrcpy** (optional) | see and control the test device's screen live | https://github.com/Genymobile/scrcpy |
 
-You don't need the Android NDK. MainUI is Kotlin only. The emulator forks need the NDK, but they
-are built by GitHub Actions, not on your machine (see section 7).
+**JDK:** Gradle 8.14.3 runs on Java 17 to 24. On Java 25 or newer every build fails at once, with
+only the Java version (for example `25.0.5`) under "What went wrong". If your default `java` is
+25+, keep it and point Gradle at a JDK 17 just for MainUI. The Temurin 17 `.zip`
+(not the `.msi`) unpacks anywhere without changing PATH or JAVA_HOME. Then run Gradle with
+`JAVA_HOME` set to that folder, for example in Git Bash
+`JAVA_HOME=~/.jdks/jdk-17.0.21+9 ./gradlew assembleDebug`.
+
+**SDK:** MainUI needs the **NDK 27.2.12479018**: the app builds one small C library with
+ndk-build, `libmainuiinput.so` (`app/src/main/jni`), the virtual keyboard MainUI presses RetroArch's
+hotkeys with. The emulator forks need the NDK too, but GitHub Actions builds them (see section 7).
+Install the packages with the command line tools:
+- In command line tools 23 or newer, `sdkmanager` is only a deprecated wrapper that can't parse
+  names with `;`. Use the new `android` CLI next to it, which separates package names with `/`:
+  `android sdk install platform-tools platforms/android-35 build-tools/35.0.0 ndk/27.2.12479018`
+- Older command line tools (with a working `sdkmanager`) use `;`:
+  `sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"`
+- If the downloads keep failing ("closed"), download the archives from
+  `https://dl.google.com/android/repository/` with `curl -L -C - --retry 5 -O <url>` (it resumes)
+  and unpack them by hand: `android-ndk-r27c-<os>.zip` into `<sdk>/ndk/27.2.12479018`, and
+  `build-tools_r35_<os>.zip` into `<sdk>/build-tools/35.0.0` (each archive has one top folder;
+  its contents go there).
 
 **Windows:** run adb natively on Windows, not inside WSL, where USB devices aren't visible without
 extra setup. If `adb devices` lists nothing, install the Google USB Driver (Android Studio > SDK

@@ -698,7 +698,8 @@ The key is never committed. The newest 20 releases are kept.
 
 ## Building
 
-Requirements: JDK 17+, Android SDK with platform 35.
+Requirements: JDK 17 to 24 (Gradle 8.14.3 doesn't run on 25 or newer), Android SDK with platform
+35, build-tools 35 and NDK 27.2.12479018 (for the small native library in `app/src/main/jni`).
 
 ```bash
 ./gradlew assembleRelease
