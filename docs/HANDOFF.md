@@ -15,6 +15,8 @@ Last updated 2026-11-15 (MainUI 0.1.123).
 
 **All development happens on `main`.** No other branches.
 
+**What to test on the Pocket 2+:** [TEST_PLAN.md](TEST_PLAN.md), bug areas in order of importance.
+
 ---
 
 ## 1. What to install on the PC
