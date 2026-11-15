@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import io.github.marsinsanity.mainui.R
 import io.github.marsinsanity.mainui.scraper.ScrapeState
@@ -28,7 +29,11 @@ class ScraperService : Service() {
         }
         if (worker?.isAlive == true) return START_NOT_STICKY
         val systems = intent?.getStringArrayExtra(EXTRA_SYSTEMS)?.toList()
-        startForeground(NOTIF_ID, notification("Starting..."), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(NOTIF_ID, notification("Starting..."), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIF_ID, notification("Starting..."))
+        }
         worker = Thread {
             val updater = Thread {
                 try {
