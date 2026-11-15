@@ -166,10 +166,12 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         resumed = false
-        // Whatever comes next (the game, another app, the screen going off): never a frozen game.
+        // Whatever comes next (the game, another app): never a frozen game. The screen going off
+        // keeps it paused while the device sleeps (Sessions.screenOff), unless that is turned off.
         // Once the lifecycle step is done: HOME inside MainUI pauses it only around onNewIntent.
         window.decorView.post {
-            if (!resumed) Thread({ MainUI.sessions.unpark() }, "unpark").apply { isDaemon = true }.start()
+            val awake = runCatching { getSystemService(android.os.PowerManager::class.java).isInteractive }.getOrDefault(true)
+            if (!resumed && (awake || !MainUI.settings.pauseWhenAsleep)) Thread({ MainUI.sessions.unpark() }, "unpark").apply { isDaemon = true }.start()
         }
         // Left for the game only when MainUI started or brought back the game during this visit;
         // the screen turning off or another app opened from MainUI must not end the session.

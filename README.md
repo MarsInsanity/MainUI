@@ -403,9 +403,14 @@ opened its own menu instead of the game.)
    paused 0.8 s after MainUI's screen appears (once the emulator has taken in that it's in the
    background, and after the Game Switcher's save) and resumed before it is brought back, before
    any other game or app is started, when the session ends, and whenever MainUI's screen goes
-   (another app, the screen turning off). RetroArch pauses itself; Android games are left alone.
+   (another app). RetroArch pauses itself; Android games are left alone.
    Freezing follows the *Freeze standalone emulators (root)* setting like the menu does. The paused package is also remembered on disk and resumed when
    MainUI or the service starts, so a crash can't leave a game paused.
+   **While the device sleeps** the game is paused the same way, whatever was in front: an emulator
+   that plays on in the background would play on with the screen off, and its sound keeps the device
+   from sleeping (it gets hot and drains the battery). It runs again once the device is woken and
+   unlocked, unless MainUI's screen or in-game menu is what comes back (they hold it paused). Settings
+   > Controls > *Pause game while asleep* turns this off.
 4. *Native Menu* opens the emulator's own menu (Back, or `MENU_TOGGLE` where RetroArch has commands).
    *Exit Game* force stops the emulator with root (without root, Android 14 and later don't let
    MainUI stop it: it says so, and the emulator is closed from Recents) (RetroArch flushes SRAM saves every 10 s once

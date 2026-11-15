@@ -256,6 +256,9 @@ class OverlayService : AccessibilityService() {
         getSystemService(android.view.inputmethod.InputMethodManager::class.java).enabledInputMethodList.any { it.packageName == pkg }
     }.getOrDefault(false)
 
+    /** MainUI's in-game menu is showing or opening over the game and holds it paused ("Pause game while menu is open"). */
+    val menuHoldsGame: Boolean get() = MainUI.settings.pauseOnMenu && (opening || overlay?.scenes()?.any { it is InGameMenuScene } == true)
+
     /** MainUI's in-game menu (or popup) is showing or opening over the app in front. */
     val overlayShowing: Boolean get() = overlay != null || opening
 
