@@ -123,6 +123,7 @@ class ControlSettingsScene(host: SceneHost) : ListScene(host, "Controls") {
             multi("Hold Home in MainUI", listOf("gs" to "Game Switcher", "none" to "Nothing"),
                 { s.homeHoldInMainUI }) { s.homeHoldInMainUI = it },
             toggle("Pause game while menu is open", { s.pauseOnMenu }) { s.pauseOnMenu = it },
+            toggle("Pause game while asleep", { s.pauseWhenAsleep }) { s.pauseWhenAsleep = it },
             toggle("Freeze standalone emulators (root)", { s.freezeStandalone }) { s.freezeStandalone = it },
             toggle("Auto save & load (exit, Game Switcher)", { s.autoSaveOnExit }) { s.autoSaveOnExit = it },
             action("Overlay service", if (overlayOn) "enabled" else "disabled") { openAccessibility(host) },

@@ -111,6 +111,32 @@ class App : Application() {
             }
         }, filter)
 
+        // The game paused while the device sleeps, and running again once it is woken and
+        // unlocked (a moment later: MainUI's screen, if it is what comes back, takes over).
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val woken = Runnable {
+            MainUI.sessions.woken(MainActivity.instance?.isShowing == true ||
+                io.github.marsinsanity.mainui.service.OverlayService.instance?.menuHoldsGame == true)
+        }
+        registerReceiver(object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                main.removeCallbacks(woken)
+                when (i.action) {
+                    Intent.ACTION_SCREEN_OFF -> MainUI.sessions.screenOff(
+                        io.github.marsinsanity.mainui.service.OverlayService.instance?.menuHoldsGame == true)
+                    Intent.ACTION_SCREEN_ON -> {
+                        val locked = runCatching { getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked }.getOrDefault(false)
+                        if (!locked) main.postDelayed(woken, 600)
+                    }
+                    Intent.ACTION_USER_PRESENT -> main.postDelayed(woken, 600)
+                }
+            }
+        }, IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        })
+
         // An SD card mounted after MainUI started (late at boot) or swapped: MainUI's data folder
         // can move with it, so everything read from storage is read again.
         registerReceiver(object : BroadcastReceiver() {

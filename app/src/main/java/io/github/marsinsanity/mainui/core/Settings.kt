@@ -122,6 +122,8 @@ class Settings(ctx: Context) {
     var pauseOnMenu by bool("pause_on_menu", true)
     /** Pause standalone emulators by freezing their process (SIGSTOP, needs root). */
     var freezeStandalone by bool("freeze_standalone", true)
+    /** The game paused while the device sleeps (Sessions.screenOff). */
+    var pauseWhenAsleep by bool("pause_when_asleep", true)
 
     // ---- scraper -------------------------------------------------------------------
     var ssUser by str("ss_user", "")

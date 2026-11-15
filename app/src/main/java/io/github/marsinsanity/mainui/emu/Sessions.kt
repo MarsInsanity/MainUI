@@ -220,9 +220,9 @@ class SessionManager(
      * MainUI's screen came to the front: pause the active standalone emulator's game after
      * [delayMs] (time for the emulator to take in that it's in the background), unless
      * [unpark] comes first. A MainUI build pauses itself (frozen apps can come back without
-     * sound); others are frozen (root).
+     * sound); others are frozen (root). [why]: for the session log.
      */
-    fun park(delayMs: Long = 800) {
+    fun park(delayMs: Long = 800, why: String = "while MainUI is in front") {
         val s = active ?: return
         if (s.emuRef?.startsWith("sa:") != true) return
         parkWanted = true
@@ -244,11 +244,11 @@ class SessionManager(
                         else if (r.extras != null && settings.freezeStandalone && Root.knownAvailable()) synchronized(parkLock) {
                             if (parked === mark && Freezer.freeze(s.pkg, def?.freezeOnly)) parked = s.pkg to Freezer.generation
                         }
-                        io.github.marsinsanity.mainui.core.SessionLog.log("paused ${s.name} (${s.pkg}) while MainUI is in front: ${r.error ?: "ok"}")
+                        io.github.marsinsanity.mainui.core.SessionLog.log("paused ${s.name} (${s.pkg}) $why: ${r.error ?: "ok"}")
                     }
                 } else if (Freezer.freeze(s.pkg, def?.freezeOnly)) {
                     parked = s.pkg to Freezer.generation
-                    io.github.marsinsanity.mainui.core.SessionLog.log("paused ${s.name} (${s.pkg}) while MainUI is in front")
+                    io.github.marsinsanity.mainui.core.SessionLog.log("paused ${s.name} (${s.pkg}) $why")
                 }
             }
         }, "park").apply { isDaemon = true }.start()
@@ -276,6 +276,31 @@ class SessionManager(
         }
         if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
             runCatching { resumed.get(5, java.util.concurrent.TimeUnit.SECONDS) }
+    }
+
+    // ---- the game paused while the device sleeps ------------------------------------------
+    // Android only tells an emulator it's in the background when the screen goes off: one that
+    // plays on behind MainUI plays on in the dark too, and its sound keeps the device from
+    // sleeping (hot, battery drained). So it is parked the same way until the device is woken.
+
+    /** [screenOff] parked (or kept parked) the game. */
+    @Volatile private var asleepParked = false
+
+    /** The screen went off. [menuHolds]: MainUI's in-game menu over the game holds it paused already. */
+    fun screenOff(menuHolds: Boolean) {
+        if (!settings.pauseWhenAsleep || menuHolds || active == null) return
+        asleepParked = true
+        park(delayMs = 500, why = "while the screen is off")
+    }
+
+    /**
+     * Woken and unlocked: the game [screenOff] parked runs again, unless MainUI holds it
+     * ([mainUiHolds]: its screen or in-game menu is in front, which keep it paused themselves).
+     */
+    fun woken(mainUiHolds: Boolean) {
+        if (!asleepParked) return
+        asleepParked = false
+        if (!mainUiHolds) Thread({ unpark() }, "unpark").apply { isDaemon = true }.start()
     }
 
     /** Ends the running session (play time accounting). Does not kill anything. */
