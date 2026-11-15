@@ -356,6 +356,7 @@ class SessionManager(
 
     private fun resumeSession(s: Session): Boolean {
         io.github.marsinsanity.mainui.core.SessionLog.log("resume ${s.name} (${s.pkg})")
+        resumeUsed(s.gameKey) // (it plays on past its resume state)
         unpark() // running again before it is in front
         if (Root.knownAvailable()) {
             val id = runCatching { Tasks.idOf(Root.Shell.run("dumpsys activity recents", 4000).out, s.pkg) }.getOrNull()
@@ -425,7 +426,8 @@ class SessionManager(
 
     fun controllerFor(s: Session): GameController =
         if (s.isRetroArch) RetroArchController(emulators.raCommandPort, s.pkg, s.path)
-        else StandaloneController(s.pkg, s.emuRef?.let { emulators.defFor(it) }) { markSaved(s.gameKey) }
+        else StandaloneController(s.pkg, s.emuRef?.let { emulators.defFor(it) },
+            onSaved = { markSaved(s.gameKey) }, onResumeSaved = { markResumeSaved(s.gameKey) })
 
     /**
      * RetroArch only takes keys from the first three keyboards it hears from after its input
@@ -482,6 +484,19 @@ class SessionManager(
 
     fun hasSavedState(gameKey: String) = settings.prefs.contains(savedKey(gameKey))
 
+    // The resume state is continued from only when it is the last thing the game did: one left by
+    // a session that ended another way (MainUI or the emulator closed, the emulator killed in the
+    // background) is older than the game's own saves, and loading it brings back the save data it
+    // holds (Dolphin writes the memory card in it over the newer saves). So it is marked fresh when
+    // MainUI saves it as the game is left, and used up once the game runs on from it.
+    private fun freshKey(gameKey: String) = "resume_fresh:" + sha1(gameKey)
+
+    fun markResumeSaved(gameKey: String) { settings.prefs.edit().putLong(freshKey(gameKey), System.currentTimeMillis()).apply() }
+
+    private fun resumeFresh(gameKey: String) = settings.prefs.contains(freshKey(gameKey))
+
+    private fun resumeUsed(gameKey: String) { settings.prefs.edit().remove(freshKey(gameKey)).apply() }
+
     /**
      * Presses the emulator's load key once [s]'s game is up: when the emulator's window is in
      * front (seen by the accessibility service; without it, after a fixed wait), plus time for
@@ -517,6 +532,8 @@ class SessionManager(
         if (!settings.autoSaveOnExit) return
         val c = controllerFor(s) as? StandaloneController ?: return
         if (c.states == StateSupport.NONE) return // no save states at all (PICO-8, Switch)
+        if (!resumeFresh(s.gameKey)) { log("auto load ${s.name}: skipped, its last session didn't end with MainUI's save"); return }
+        resumeUsed(s.gameKey)
         if (c.states == StateSupport.DIRECT) { autoLoadDirect(s, c, hasSavedState(s.gameKey)); return }
         if (!hasSavedState(s.gameKey)) { log("auto load ${s.name}: skipped, MainUI never saved it"); return }
         if (c.states != StateSupport.HOTKEY || c.loadSpec == null) {

@@ -580,6 +580,8 @@ class StandaloneController(
     private val def: EmuDef?,
     /** The save key reached the emulator (MainUI then loads that state when the game starts again). */
     private val onSaved: () -> Unit = {},
+    /** MainUI's resume state was saved as the game was left (the next start continues from it). */
+    private val onResumeSaved: () -> Unit = {},
 ) : GameController {
     /** The emulator's id in emulators.json (null for Android games). */
     val emuId: String? get() = def?.id
@@ -688,7 +690,7 @@ class StandaloneController(
     /** State API: MainUI's own resume state, apart from the user's slots. */
     override fun saveToResume(): Boolean {
         if (direct && noGame()) { saveProblem = null; return true }
-        return save(if (direct) StateApi.RESUME_SLOT else 0)
+        return save(if (direct) StateApi.RESUME_SLOT else 0).also { if (it) onResumeSaved() }
     }
 
     override fun openNativeMenu(): Boolean {
@@ -710,23 +712,27 @@ class StandaloneController(
         if (autoSave && direct) {
             unpause()
             // Not stopped without its save: false with saveProblem set, the game keeps running.
-            // (The answer comes once the state is written: nothing to wait for after.)
-            if (!noGame() && !save(StateApi.RESUME_SLOT)) return false
-            return Root.forceStop(pkg)
-        }
-        if (autoSave && states == StateSupport.HOTKEY && saveSpec != null) {
+            if (!noGame()) {
+                if (!save(StateApi.RESUME_SLOT)) return false
+                onResumeSaved()
+            }
+        } else if (autoSave && states == StateSupport.HOTKEY && saveSpec != null) {
             unpause()
             // Not stopped without its save: false with saveProblem set, the game keeps running.
             if (!keys(saveSpec)) { saveProblem = "MainUI couldn't press the save key"; return false }
             onSaved()
-            waitForWrites()
+            onResumeSaved()
         }
+        // (A save the game itself just made, or a memory card the emulator writes a moment later,
+        // is written out before the emulator is stopped: Dolphin flushes its cards a second after.)
+        waitForWrites()
         return Root.forceStop(pkg)
     }
 
     /**
-     * After a save key: waits (at most 15 s) until the emulator stops writing (its processes'
-     * write_bytes stay the same twice), so stopping it can't cut a big state (PS2, Wii, 3DS) short.
+     * Before stopping the emulator: waits (at most 15 s) until it stops writing (its processes'
+     * write_bytes stay the same twice), so stopping it can't cut a big state (PS2, Wii, 3DS) or the
+     * game's own save short.
      */
     private fun waitForWrites() {
         val cmd = "for p in \$(pidof ${Root.q(pkg)}); do grep write_bytes /proc/\$p/io; done | awk '{s+=\$2} END {print s+0}'"

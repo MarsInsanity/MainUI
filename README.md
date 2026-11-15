@@ -301,7 +301,12 @@ commands directly (the **MainUI State API**, `tools/stateapi`), so for them:
   slots, the same ones its menu shows), with MainUI's screenshot of each slot. **No root and no hotkeys**
   needed (and no *Save / load keys...*).
 - MainUI's **resume state** (Exit Game / the Game Switcher with auto save, loaded when the game starts
-  again) is a separate slot of its own, so it never overwrites yours.
+  again) is a separate slot of its own, so it never overwrites yours. It is loaded only when it is
+  the last thing the game did: after a session that ended another way (MainUI or the emulator closed,
+  the emulator stopped in the background) it is older than the game's own saves, and loading it would
+  bring back the save data it holds (Dolphin writes the memory card in a state over newer saves), so
+  the game starts from its own saves instead. Exiting waits until the emulator has written everything
+  (a save the game just made included) before stopping it.
 - Commands wait for **the best moment**: the emulator itself waits until the game has booted and runs,
   not paused, not loading, not in its own menu, steadily for a moment, then saves or loads and answers
   once the state is written. Auto load on start therefore needs no *Auto load wait*: the emulator
@@ -449,7 +454,8 @@ cores > Auto load waits** or the in-game menu (*Save / load keys... > Auto load 
 to never load by itself; the default comes from `"loadDelay"` in the emulator's `ingame` entry of
 `emulators.json`. Skipped if you open the menu or leave first; picking the
 game in the Game Switcher continues it too. A game the emulator still has running is just brought back.
-The session log says why an auto load didn't happen (never saved by MainUI, no load key, the
+The session log says why an auto load didn't happen (never saved by MainUI, the last session ended
+without MainUI's save, no load key, the
 emulator never came to the front, the game was left first) and, for RetroArch, whether it has an auto
 slot to load when the game starts.
 
