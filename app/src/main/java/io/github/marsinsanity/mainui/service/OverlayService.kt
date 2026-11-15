@@ -603,8 +603,10 @@ class OverlayService : AccessibilityService() {
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_FULLSCREEN or
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+            // (No FLAG_KEEP_SCREEN_ON: a game paused in the menu follows the screen timeout, and
+            // "Pause game while asleep" can take over. A long job in it keeps the screen on through
+            // its MainUIView, see Scene.keepsScreenOn.)
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_FULLSCREEN,
             if (translucent) PixelFormat.TRANSLUCENT else PixelFormat.OPAQUE,
         ).apply {
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES

@@ -29,6 +29,7 @@ class ThemeStoreScene(host: SceneHost) : ListScene(host, "Get themes") {
     override var aLabel: String? = "GET"
     override val extraHints get() = listOf("Y" to "GET + APPLY")
     private var busy: String? = "Loading theme list..."
+    override val keepsScreenOn get() = busy != null
 
     override fun onEnter() = load(false)
 
@@ -109,6 +110,7 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
     override val showPreview = false
     override val extraHints get() = listOf("Y" to "SEARCH")
     private var busy: String? = null
+    override val keepsScreenOn get() = busy != null
     private var query = ""
     private var category: String? = null
     private var updatesOnly = false
@@ -180,6 +182,10 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
                 items += UiItem(a.name, icon = { Images.get("appicon:${a.pkg}", host, 96, network = true) { AppStore.icon(a) } },
                     sub = status, data = a, onSelect = { host.push(AppDetailScene(host, a)) })
             }
+            // The list stops at 1500 (a few thousand rows are slow to scroll here): said, with the way
+            // to the rest, instead of ending at "D" as if that were everything.
+            if (apps.size > 1500) items += UiItem("${apps.size - 1500} more apps", sub = "use Search or Category to find them",
+                onSelect = { search() })
             list.set(items)
             title = if (total == 0) "App Store" else "App Store (${apps.size})"
         }
@@ -216,6 +222,7 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
 /** One app: description, version, install / update / open / uninstall. */
 class AppDetailScene(host: SceneHost, private val app: AppStore.App) : ListScene(host, app.name) {
     private var busy: String? = null
+    override val keepsScreenOn get() = busy != null
     override val showPreview = true
 
     override fun onEnter() = build()
@@ -282,6 +289,7 @@ class RepoScene(host: SceneHost) : ListScene(host, "Repositories") {
     override val showPreview = false
     override val extraHints get() = listOf("Y" to "REMOVE")
     private var busy: String? = null
+    override val keepsScreenOn get() = busy != null
 
     override fun onEnter() = build()
 
@@ -353,6 +361,7 @@ class EmulatorStoreScene(host: SceneHost) : ListScene(host, "Emulators", large =
     override var aLabel: String? = "OPEN"
     override val showPreview = false
     private var busy: String? = "Loading emulators..."
+    override val keepsScreenOn get() = busy != null
 
     override fun onEnter() = load()
     override fun onResume() = load()
@@ -364,7 +373,7 @@ class EmulatorStoreScene(host: SceneHost) : ListScene(host, "Emulators", large =
                 UiItem(e.def.name, icon = { emuIcon(host, e) },
                     sub = listOf(e.systems, e.source).filter { it.isNotBlank() }.joinToString("  ·  "),
                     data = e, mark = e.installed != null, onSelect = { host.push(EmulatorDetailScene(host, e.def.id)) })
-            }, false)
+            }, true) // (back from an emulator's page: on that emulator, not the top)
             title = "Emulators (${entries.count { it.installed != null }}/${entries.size} installed)"
         }
     }
@@ -385,6 +394,7 @@ class EmulatorStoreScene(host: SceneHost) : ListScene(host, "Emulators", large =
 /** One emulator: install it from the best source, or open its store page / website. */
 class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(host, "Emulator", large = true) {
     private var busy: String? = null
+    override val keepsScreenOn get() = busy != null
     override val showPreview = false
 
     override fun onEnter() = build()
@@ -423,12 +433,12 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
                 val mySigner = if (have != null) AppStore.installedSigner(app.pkg) else null
                 when {
                     have == null -> items += UiItem("Install from $repo", sub = apk.versionName, preview = preview,
-                        onSelect = { run("Downloading...") { AppStore.install(app) { busy = it; host.invalidate() } } })
+                        onSelect = { run("Downloading...") { AppStore.install(app, grantStorage = true) { busy = it; host.invalidate() } } })
                     // Installed from somewhere else (retroarch.com, Play...): Android refuses to mix signatures.
                     apk.signer != null && mySigner != null && !apk.signer.equals(mySigner, true) ->
                         items += UiItem("$repo has ${apk.versionName}", sub = "other signature: uninstall first", preview = preview, disabled = true)
                     apk.versionCode > have -> items += UiItem("Update from $repo", sub = apk.versionName, preview = preview,
-                        onSelect = { run("Downloading...") { AppStore.install(app) { busy = it; host.invalidate() } } })
+                        onSelect = { run("Downloading...") { AppStore.install(app, grantStorage = true) { busy = it; host.invalidate() } } })
                     else -> {}
                 }
             }
@@ -450,6 +460,25 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
                         val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestGithub(repo)
                         io.github.marsinsanity.mainui.store.EmulatorStore.install("${e.def.name} ${r.version}", r, if (updates) official else null) { busy = it; host.invalidate() }
                     }
+                })
+            }
+            e.apkPage?.let { page ->
+                // The project's own download page (DuckStation's): its newest APK, straight from its site.
+                val official = e.officialPackage
+                val updates = official != null && AppStore.installedVersion(official) != null
+                val site = e.apkPageSite ?: "its website"
+                fun get() = run("Checking $site...") {
+                    val r = io.github.marsinsanity.mainui.store.EmulatorStore.latestFromPage(page)
+                    io.github.marsinsanity.mainui.store.EmulatorStore.install("${e.def.name} ${r.version}", r, if (updates) official else null) { busy = it; host.invalidate() }
+                }
+                items += UiItem((if (updates) "Install from " else "Download from ") + site,
+                    sub = page.removePrefix("https://").removeSuffix("/"), preview = preview, onSelect = {
+                    // Over an installed copy (maybe the stable one from elsewhere: DuckStation's page has
+                    // the beta of its rewrite, which resets settings), only once the user has read why.
+                    if (updates) host.push(DialogScene(host, "${e.def.name} from $site",
+                        "This installs $site's newest build over the installed ${e.def.name}." + (e.note?.let { "\n\n$it" } ?: ""),
+                        "INSTALL", "CANCEL") { get() })
+                    else get()
                 })
             }
             e.url?.let { url ->
@@ -511,6 +540,9 @@ class EmulatorUpdatesScene(host: SceneHost) : ListScene(host, "Emulator updates"
     override val showPreview = false
     override val extraHints get() = listOf("Y" to "CHECK")
     private var status: String? = null
+    /** A check is running (it downloads the repositories' indexes): the screen stays on meanwhile. */
+    @Volatile private var checking = false
+    override val keepsScreenOn get() = checking
 
     override fun onEnter() {
         build()
@@ -522,8 +554,10 @@ class EmulatorUpdatesScene(host: SceneHost) : ListScene(host, "Emulator updates"
     private fun check() {
         if (status != null) return
         status = "Checking..."
+        checking = true
         build()
         host.io({ runCatching { io.github.marsinsanity.mainui.store.EmulatorUpdates.check { status = it; host.invalidate() } } }) { r ->
+            checking = false
             status = r.exceptionOrNull()?.let { "Could not check: ${it.message}" }
             build()
         }
@@ -550,6 +584,8 @@ class EmulatorUpdatesScene(host: SceneHost) : ListScene(host, "Emulator updates"
             io.github.marsinsanity.mainui.store.EmulatorUpdates.Source.FDROID -> "F-Droid repo"
             io.github.marsinsanity.mainui.store.EmulatorUpdates.Source.GITHUB -> "GitHub"
             io.github.marsinsanity.mainui.store.EmulatorUpdates.Source.RETROARCH -> "retroarch.com"
+            io.github.marsinsanity.mainui.store.EmulatorUpdates.Source.PAGE ->
+                runCatching { java.net.URI(u.from).host }.getOrNull()?.removePrefix("www.")?.removePrefix("downloads.") ?: "website"
         }, onSelect = { confirm(u) })
         items += UiItem("Check automatically", ItemType.TOGGLE, value = if (eu.autoCheck) 1 else 0, sub = "daily",
             onChange = { eu.autoCheck = it.value == 1 })

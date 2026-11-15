@@ -151,6 +151,10 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
             gfx.end()
         }
         val now = System.currentTimeMillis()
+        // The screen stays on only while a scene runs a long job (see Scene.keepsScreenOn), or a
+        // scrape runs (its service holds no wake lock: with the screen off it would stall).
+        val keepOn = stack.any { it.keepsScreenOn } || io.github.marsinsanity.mainui.scraper.ScrapeState.running
+        if (keepScreenOn != keepOn) keepScreenOn = keepOn
         if (gfx.wantsFrame || stack.any { it.animating(now) }) postInvalidateOnAnimation()
         else if (gfx.redrawIn > 0) postInvalidateDelayed(gfx.redrawIn)
     }
@@ -305,6 +309,17 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     private val downBtn = HashMap<Int, Btn>()
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Back held opens the process popup (OverlayService.watchBack): here Back is B on release,
+        // and only when it was a short press; acting on the press would also leave the screen
+        // (or cancel the dialog) behind the popup.
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && io.github.marsinsanity.mainui.MainUI.settings.backHold == "processes" &&
+            io.github.marsinsanity.mainui.service.OverlayService.instance != null) {
+            if (event.action == KeyEvent.ACTION_UP && !event.isCanceled &&
+                event.eventTime - event.downTime < io.github.marsinsanity.mainui.MainUI.settings.homeHoldMs) {
+                press(Btn.B, timerRepeat = false); release(Btn.B)
+            }
+            return true
+        }
         val b = (if (event.action == KeyEvent.ACTION_UP) downBtn.remove(event.keyCode) else null)
             ?: mapKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) downBtn[event.keyCode] = b

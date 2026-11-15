@@ -213,6 +213,36 @@ class EmulatorManager(
         )
     }
 
+    /**
+     * With root, gives [pkg] the storage permission it declares but was never granted: an emulator
+     * installed some other way and never opened by hand (its first start asks for it) can't read
+     * the rom MainUI starts it with (RetroArch then hangs on a black screen). Only the storage
+     * permission, only where it applies (not for apps targeting Android 13+ on 13+). Call off the
+     * main thread.
+     */
+    fun grantStorageIfMissing(pkg: String) {
+        val read = android.Manifest.permission.READ_EXTERNAL_STORAGE
+        val pm = ctx.packageManager
+        val info = runCatching { pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_PERMISSIONS) }.getOrNull() ?: return
+        if (info.requestedPermissions?.contains(read) != true) return
+        if (android.os.Build.VERSION.SDK_INT >= 33 && (info.applicationInfo?.targetSdkVersion ?: 0) >= 33) return
+        if (pm.checkPermission(read, pkg) == android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        if (!Root.knownAvailable()) return
+        val r = Root.exec("pm grant ${Root.q(pkg)} $read; pm grant ${Root.q(pkg)} android.permission.WRITE_EXTERNAL_STORAGE", timeoutSec = 15)
+        io.github.marsinsanity.mainui.core.SessionLog.log("$pkg had no storage access: granted (${if (r.ok) "ok" else r.err.trim().take(80)})")
+    }
+
+    /** The first detection (started with the app, slow on a small chip) has finished. */
+    @Volatile var detected = false
+        private set
+
+    /**
+     * Waits for the first detection, or runs it. Before it, nothing counts as installed: a game
+     * started in MainUI's first seconds would be told its installed emulator is missing.
+     * Call off the main thread.
+     */
+    fun awaitDetection() { if (!detected) synchronized(defsLock) { if (!detected) refresh() } }
+
     /** Re-detect installed packages and RetroArch cores. Call off the main thread. */
     fun refresh() = synchronized(defsLock) {
         val pm = ctx.packageManager
@@ -259,6 +289,7 @@ class EmulatorManager(
             ?: retroarch.packages.firstOrNull { installed(it) }
         raPackage = ra
         refreshCores()
+        detected = true
     }
 
     /**
@@ -643,7 +674,9 @@ class EmulatorManager(
             wanted["state_slot"] = "\"0\""
         }
         val merged = RetroArchCores.mergeConfig(cfg, wanted)
-            ?: return false to "retroarch.cfg looks incomplete, so nothing was changed.\n\n$path"
+            ?: return false to ("retroarch.cfg looks incomplete, so nothing was changed. RetroArch writes it in full the " +
+                "first time it is quit from its own menu: open RetroArch once from its icon, allow storage access, " +
+                "quit it (Main Menu > Quit RetroArch), then try again.\n\n$path")
         val w = Root.writeFile(path, merged, backup = true)
         if (w.ok) settings.prefs.edit().putString("$RA_CONFIG_STAMP:$pkg", raConfigStamp()).apply()
         return if (w.ok) true to "RetroArch configured for MainUI"

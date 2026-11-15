@@ -2,8 +2,9 @@
   "version": 2,
   "_doc": [
     "get: where Apps > App Store > Emulators finds it. github: 'owner/repo' (APK of the latest release), url: direct APK,",
-    "buildbot: RetroArch from retroarch.com, play: Google Play package, page: website, note: text shown. F-Droid repos are",
-    "searched by package name automatically.",
+    "buildbot: RetroArch from retroarch.com, apkpage: the project's own download page; its newest .apk link is installed",
+    "(the highest number in the file name, which must be the app's version code: duckstation-12126.apk), play: Google Play",
+    "package, page: website, note: text shown. F-Droid repos are searched by package name automatically.",
     "Launch recipes for Android emulators. Copy this file to <storage>/MainUI/emulators.json to override or extend it;",
     "entries in the override file replace built-in entries with the same id.",
     "Recipes follow ES-DE's maintained Android rules (resources/systems/android/es_find_rules.xml and es_systems.xml).",
@@ -101,7 +102,9 @@
     },
     {
       "id": "duckstation", "name": "DuckStation",
-      "get": { "play": "com.github.stenzek.duckstation", "page": "https://www.duckstation.org/" },
+      "get": { "apkpage": "https://downloads.duckstation.org/android-testing/", "play": "com.github.stenzek.duckstation",
+               "page": "https://www.duckstation.org/",
+               "note": "duckstation.org's APK is the official beta, signed like Google Play's: installed over the Play version it keeps saves, memory cards and BIOS, not settings" },
       "components": ["com.github.stenzek.duckstation/.EmulationActivity"],
       "extras": { "resumeState": "bool:false", "bootPath": "%ROMSAF%" },
       "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
@@ -109,7 +112,7 @@
     },
     {
       "id": "drastic", "name": "DraStic",
-      "get": { "play": "com.dsemu.drastic", "note": "Paid app on Google Play" },
+      "get": { "note": "No longer on Google Play, and no official download elsewhere. SeedlessDS (DraStic's core, from GitHub) runs the same games" },
       "components": ["com.dsemu.drastic/.DraSticActivity"],
       "data": "%ROMSAF%", "flags": ["NEW_TASK", "CLEAR_TASK", "CLEAR_TOP"],
       "ingame": { "menu": "back", "states": "hotkey", "save": "keys:KEYCODE_F1", "load": "keys:KEYCODE_F2" }
@@ -192,7 +195,8 @@
     },
     {
       "id": "redream", "name": "Redream",
-      "get": { "page": "https://redream.io/download", "play": "io.recompiled.redream" },
+      "get": { "page": "https://redream.io/download", "play": "io.recompiled.redream",
+               "note": "Its Android version is only on Google Play. Flycast (GitHub, or RetroArch's Flycast core) runs Dreamcast games too" },
       "components": ["io.recompiled.redream/.MainActivity"],
       "action": "android.intent.action.VIEW", "data": "%ROMSAF%", "flags": ["NEW_TASK"],
       "ingame": { "menu": "back", "states": "menu" }
@@ -206,7 +210,8 @@
     },
     {
       "id": "yabasanshiro2", "name": "Yaba Sanshiro 2",
-      "get": { "play": "org.devmiyax.yabasanshioro2" },
+      "get": { "play": "org.devmiyax.yabasanshioro2",
+               "note": "Only on Google Play: its GitHub and website are gone. RetroArch's Yabasanshiro, Yabause and Beetle Saturn cores run Saturn games too" },
       "components": [
         "org.devmiyax.yabasanshioro2.pro/org.uoyabause.android.Yabause",
         "org.devmiyax.yabasanshioro2/org.uoyabause.android.Yabause"

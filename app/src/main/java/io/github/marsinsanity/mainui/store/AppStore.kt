@@ -448,21 +448,26 @@ object AppStore {
      * root, otherwise through Android's package installer (asks the user).
      * Returns a message for the UI.
      */
-    fun install(app: App, progress: (String) -> Unit): String {
+    fun install(app: App, grantStorage: Boolean = false, progress: (String) -> Unit): String {
         val apk = app.apk ?: return "No compatible version for this device"
         if (!PACKAGE_NAME.matches(app.pkg)) return "Invalid package name"
         val file = File(cacheDir, "${app.pkg}-${apk.versionCode}.apk")
         Http.download("${app.repo}/${apk.apkName}", file) { done, total ->
             progress("Downloading ${app.name}: ${formatBytes(done)}" + if (total > 0) " / ${formatBytes(total)}" else "")
         }
-        return installFile(file, app.name, apk.sha256, progress)
+        return installFile(file, app.name, apk.sha256, progress, grantStorage)
     }
 
     /**
      * Checks [file] against [sha256] (when known) and installs it: silently with
      * root, otherwise through Android's package installer (asks the user).
      */
-    fun installFile(file: File, name: String, sha256: String?, progress: (String) -> Unit = {}): String {
+    /**
+     * [grantStorage]: an emulator. With root it also gets storage access, as tapping through its
+     * first start would: RetroArch started straight into a game by MainUI never asks for it itself,
+     * and can't read the rom then. (Only that permission, never all of an app's: no `pm install -g`.)
+     */
+    fun installFile(file: File, name: String, sha256: String?, progress: (String) -> Unit = {}, grantStorage: Boolean = false): String {
         sha256?.let { expected ->
             progress("Verifying...")
             val actual = file.inputStream().use { input ->
@@ -475,9 +480,15 @@ object AppStore {
         progress("Installing $name...")
         if (Root.knownAvailable() || Root.available()) {
             file.setReadable(true, false)
+            val pkg = if (grantStorage) runCatching { MainUI.app.packageManager.getPackageArchiveInfo(file.path, 0)?.packageName }.getOrNull() else null
             val r = Root.exec("pm install -r ${Root.q(file.absolutePath)}", timeoutSec = 300)
             file.delete()
-            if (r.ok && r.out.contains("Success")) return "$name installed"
+            if (r.ok && r.out.contains("Success")) {
+                // (Errors ignored: an app that doesn't declare them, or targets an Android without them.)
+                if (pkg != null) Root.exec("pm grant ${Root.q(pkg)} android.permission.READ_EXTERNAL_STORAGE; " +
+                    "pm grant ${Root.q(pkg)} android.permission.WRITE_EXTERNAL_STORAGE", timeoutSec = 30)
+                return "$name installed"
+            }
             val why = (r.out + r.err).let { o ->
                 when {
                     o.contains("UPDATE_INCOMPATIBLE") -> "a version from another source (different signature) is installed; uninstall it first"

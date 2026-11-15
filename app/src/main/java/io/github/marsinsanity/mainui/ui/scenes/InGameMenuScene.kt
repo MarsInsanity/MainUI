@@ -72,6 +72,8 @@ class InGameMenuScene(
     companion object {
         const val ROW_H = 56f
         private const val PANEL_W = 300f
+        /** The session whose last Exit couldn't save it: the next Exit leaves without saving. */
+        @Volatile private var saveFailedFor: String? = null
     }
 
     private enum class Action { CONTINUE, SAVE, LOAD, STATES_MENU, NATIVE, SWITCHER, EXIT, BIND, BIND_SAVE, BIND_LOAD, BIND_BACK,
@@ -172,7 +174,10 @@ class InGameMenuScene(
             val frame = g.skin("preview-bg")
             if (frame != null) g.bmp(frame, bx - 6, by - 6, bw + 12, bh + 12) else g.fillRect(bx - 4, by - 4, bw + 8, bh + 8, g.theme.panel, 6f)
             if (thumb != null) g.bmpFit(thumb, bx, by, bw, bh)
-            else g.text("Empty", g.theme.list, bx + bw / 2, by + bh / 2, Align.CENTER, alpha = 170)
+            // MainUI only knows the pictures of saves made from this menu: a slot saved in the
+            // emulator's own menu (or before MainUI's data was cleared) holds a state with no picture.
+            // "Empty" would invite saving over it.
+            else g.text("No preview", g.theme.list, bx + bw / 2, by + bh / 2, Align.CENTER, alpha = 170)
             g.fillRect(bx, by + bh - 40f, bw, 40f, Color.argb(160, 0, 0, 0))
             g.arrow(true, bx + 8f, by + bh - 20f)
             g.arrow(false, bx + bw - 8f, by + bh - 20f)
@@ -454,9 +459,16 @@ class InGameMenuScene(
             MainUI.sessions.toast("${session.name} wasn't saved: its last save wasn't loaded yet (Load it from this menu first)")
     }
 
+    /** This session, as [saveFailedFor] names it. */
+    private val sessionId get() = "${session.pkg}|${session.gameKey}|${session.startedUptime}"
+
     private fun exitGame() {
         val ctx = host.hostContext
-        if (saveByKey) {
+        // The last Exit couldn't save this game (the emulator hung, can't write its states...): this
+        // one exits without saving, or a game that can't save could never be left.
+        val forced = saveFailedFor == sessionId
+        if (forced) io.github.marsinsanity.mainui.core.SessionLog.log("exit ${session.name}: without saving (the last save failed)")
+        if (saveByKey && !forced) {
             // Close the menu and let the game run, save with its key, then stop it.
             Toast.makeText(ctx, "Saving and exiting...", Toast.LENGTH_SHORT).show()
             // HOME meanwhile must not open the menu again (it would freeze the game mid-save).
@@ -468,7 +480,9 @@ class InGameMenuScene(
                 if (!ok && problem != null) {
                     io.github.marsinsanity.mainui.service.OverlayService.instance?.clearLeaving()
                     io.github.marsinsanity.mainui.core.SessionLog.log("exit ${session.name}: not saved, left running: $problem")
-                    MainUI.sessions.toast("${session.name} wasn't saved, so it is still running: $problem")
+                    saveFailedFor = sessionId
+                    MainUI.sessions.toast("${session.name} wasn't saved, so it is still running: $problem. " +
+                        "Exit Game again exits without saving")
                     return@leaveThen
                 }
                 MainUI.sessions.endActive()
@@ -484,12 +498,13 @@ class InGameMenuScene(
             }
             return
         }
-        sayNotSaved()
+        if (!forced) sayNotSaved()
         busy = "Exiting..."
         invalidate()
         resumed = true // quitting: force stop also kills a frozen process
         host.io({
-            val ok = controller.quit(autoSave)
+            val ok = controller.quit(autoSave && !forced)
+            if (forced) saveFailedFor = null
             MainUI.sessions.endActive()
             ok
         }) { ok ->

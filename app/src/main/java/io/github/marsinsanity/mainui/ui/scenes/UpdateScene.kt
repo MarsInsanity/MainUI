@@ -39,6 +39,9 @@ class UpdateScene(host: SceneHost) : ListScene(host, "Updates") {
     private fun build() {
         val items = mutableListOf<UiItem>()
         items += UiItem("Installed", sub = BuildConfig.VERSION_NAME + if (BuildConfig.DEBUG) " (debug build)" else "")
+        // A debug build is signed with the PC's key: releases (the release key) can't replace it
+        // without uninstalling MainUI, which deletes its settings. It is updated from the PC.
+        if (BuildConfig.DEBUG) items += UiItem("Debug build: update it from the PC", sub = "releases can't install over it", disabled = true)
         val n = newest
         when {
             status != null -> items += UiItem(status!!.take(80), sub = null)

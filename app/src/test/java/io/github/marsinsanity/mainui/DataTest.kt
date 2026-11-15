@@ -128,6 +128,20 @@ class EmulatorStoreTest {
         // RPCSX's single APK is still picked.
         assertTrue(es.scoreApk("rpcsx-release.apk", "arm64-v8a", 33, true) > -50)
     }
+
+    @Test
+    fun takesTheNewestApkFromADownloadPage() {
+        // downloads.duckstation.org/android-testing/: relative links, older builds listed below.
+        val page = "https://downloads.duckstation.org/android-testing/"
+        val html = """<a class="button button-primary" href="downloads/duckstation-12010.apk">Download</a>
+            <a href="downloads/duckstation-12126.apk">12126</a> <a href='downloads/duckstation-11915.apk'>old</a>
+            <a href="http://elsewhere.example/duckstation-99999.apk">plain http</a> <a href="styles.css">css</a>"""
+        val r = es.newestApkLink(page, html)!!
+        assertEquals("12126", r.version)
+        assertEquals("duckstation-12126.apk", r.apkName)
+        assertEquals("https://downloads.duckstation.org/android-testing/downloads/duckstation-12126.apk", r.url)
+        assertNull(es.newestApkLink(page, "<a href=\"index.html\">no apk</a>"))
+    }
 }
 
 class Ps3GamesTest {

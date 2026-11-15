@@ -91,20 +91,30 @@ open class ListScene(
         }
     }
 
-    override fun onTap(x: Float, y: Float): Boolean {
-        // Map the tap to a row using the same geometry as Gfx.list
+    /** The list index of the row at logical [y], or null (same geometry as Gfx.list). */
+    private fun rowAt(y: Float): Int? {
         val itemH = if (list.large) 90f else 60f
         val bottom = host.logicalHeight - Gfx.FOOTER
         val rows = maxOf(1, ((bottom - Gfx.HEADER) / itemH).toInt())
         val startY = Gfx.HEADER + ((bottom - Gfx.HEADER) - rows * itemH) / 2f
         // (The footer's hints are taps of their own; the band below the last row is no row.)
-        if (y < startY || y > bottom) return false
+        if (y < startY || y > bottom) return null
         val k = ((y - startY) / itemH).toInt()
-        if (k >= rows) return false
-        val idx = list.scroll + k
-        if (idx !in 0 until list.size) return false
+        if (k >= rows) return null
+        return (list.scroll + k).takeIf { it in 0 until list.size }
+    }
+
+    override fun onTap(x: Float, y: Float): Boolean {
+        val idx = rowAt(y) ?: return false
         if (idx == list.active) activate() else list.active = idx
         return true
+    }
+
+    /** A held row is selected first, so the options (SELECT) that follow are its own. */
+    override fun onLongPress(x: Float, y: Float): Boolean {
+        // (Redrawn here: in a list without options, the SELECT that follows draws nothing.)
+        rowAt(y)?.let { list.active = it; invalidate() }
+        return false
     }
 }
 
@@ -152,6 +162,7 @@ class DialogScene(
 /** "Working..." panel over the current screen; swallows input until the caller pops it. */
 class BusyScene(host: SceneHost, @Volatile var text: String, private val onCancel: (() -> Unit)? = null) : Scene(host) {
     override val isOverlay = true
+    override val keepsScreenOn get() = true
     @Volatile private var cancelled = false
     override fun draw(g: Gfx) {
         g.dim(90)

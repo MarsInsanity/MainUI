@@ -21,7 +21,8 @@ import io.github.marsinsanity.mainui.ui.UiItem
 class ProcessManagerScene(host: SceneHost, private val overlayMode: Boolean = false) : ListScene(host, "Processes", large = true) {
     override var aLabel: String? = "SWITCH"
     override val showPreview = false
-    override val extraHints get() = listOf("X" to "KILL", "Y" to "REFRESH")
+    override val extraHints get() = if (overlayMode) listOf("X" to "KILL", "Y" to "REFRESH")
+        else listOf("X" to "KILL", "Y" to "REFRESH", "START" to "KILL ALL")
 
     override fun onEnter() = reload()
     override fun onResume() = reload()
@@ -66,17 +67,25 @@ class ProcessManagerScene(host: SceneHost, private val overlayMode: Boolean = fa
                     host.io({
                         // Only what the list would offer (never Play Store, the keyboard, an
                         // accessibility service...), plus the running game; nothing without root.
-                        if (Root.available()) {
-                            val launched = MainUI.sessions.launchedPackages.toSet()
-                            val keep = io.github.marsinsanity.mainui.data.RunningApps.killable(host.hostContext, launched)
-                            val game = MainUI.sessions.active?.pkg
-                            // Running ones only: stopping one that isn't drops its alarms and jobs.
-                            val running = Root.exec("ps -A -o NAME").out.lines().map { it.trim().substringBefore(':') }.toSet()
-                            // (The game too when MainUI restarted since it launched it: it isn't in the list then.)
-                            (launched + listOfNotNull(game)).filter { it in running && (keep(it) || it == game) }.forEach { Root.forceStop(it) }
-                            MainUI.sessions.endActive()
-                        }
-                    }) { reload() }
+                        if (!Root.available()) return@io -1
+                        val launched = MainUI.sessions.launchedPackages.toSet()
+                        val keep = io.github.marsinsanity.mainui.data.RunningApps.killable(host.hostContext, launched)
+                        val game = MainUI.sessions.active?.pkg
+                        // Running ones only: stopping one that isn't drops its alarms and jobs.
+                        val running = Root.exec("ps -A -o NAME").out.lines().map { it.trim().substringBefore(':') }.toSet()
+                        // (The game too when MainUI restarted since it launched it: it isn't in the list then.)
+                        val stop = (launched + listOfNotNull(game)).filter { it in running && (keep(it) || it == game) }
+                        stop.forEach { Root.forceStop(it) }
+                        MainUI.sessions.endActive()
+                        stop.size
+                    }) { n ->
+                        host.toast(when {
+                            n < 0 -> "Needs root: grant it to MainUI in Magisk"
+                            n == 0 -> "Nothing MainUI launched is running"
+                            else -> "Stopped $n app${if (n > 1) "s" else ""}"
+                        })
+                        reload()
+                    }
                 })
                 return true
             }

@@ -122,6 +122,7 @@ class SessionManager(
         val rootLaunch = emulators.defFor(option.ref)?.rootLaunch == true
         if (rootLaunch && !Root.available()) return "${option.name} can only be started by MainUI with root"
         val pkg = intent.component?.packageName ?: intent.`package` ?: option.pkg ?: ""
+        if (pkg.isNotEmpty()) runCatching { emulators.grantStorageIfMissing(pkg) }
         val s = Session(game.key, game.systemId, game.file?.absolutePath, game.name, option.ref, pkg,
             intent.component?.className, System.currentTimeMillis(), intent.toUri(Intent.URI_INTENT_SCHEME))
         // The new session is in place before the game appears (MainActivity.onPause reads it while
@@ -135,10 +136,37 @@ class SessionManager(
         }
         if (err != null) { swapBack(s, sw); return err }
         sw.prev?.let { account(it) }
+        // The game left for this one keeps running in its emulator (another app): remembered, so
+        // picking it again brings it back where it was (resumeLeft). This emulator now runs [s].
+        sw.prev?.let { p -> if (p.pkg != s.pkg) leftRunning[p.pkg] = p }
+        leftRunning.remove(s.pkg)
         io.github.marsinsanity.mainui.core.SessionLog.log("launch ${game.name} with ${option.ref} ($pkg)")
         library.addRecent(game, option.ref)
         if (option.isRetroArch) introduceKeyboard(s) else autoLoad(s)
         return null
+    }
+
+    /** Games left for another one (Game Switcher, Recents) whose emulator kept running them, by package. */
+    private val leftRunning = java.util.concurrent.ConcurrentHashMap<String, Session>()
+
+    /**
+     * [gameKey] is a game left for another one and still running in its emulator: it becomes the
+     * session again and is brought back where it was, instead of started again. (Started again,
+     * an emulator that keeps the game just comes to the front, and MainUI's auto load would wait
+     * for a fresh start that never comes, keeping automatic saves off.) Needs root to know the
+     * emulator still runs. Off the UI thread. False: start it as usual.
+     */
+    fun resumeLeft(gameKey: String): Boolean {
+        val left = leftRunning.values.firstOrNull { it.gameKey == gameKey } ?: return false
+        leftRunning.remove(left.pkg)
+        if (!Root.knownAvailable() || !isRunning(left) || gameEnded(left)) return false
+        // (Its earlier play was counted when it was left: counted from now on.)
+        val s = left.copy(startedUptime = android.os.SystemClock.uptimeMillis())
+        val sw = swapIn(s)
+        if (!resume()) { swapBack(s, sw); return false }
+        sw.prev?.let { p -> account(p); if (p.pkg != s.pkg) leftRunning[p.pkg] = p }
+        io.github.marsinsanity.mainui.core.SessionLog.log("${s.name}: still running in ${s.pkg}, continued where it was")
+        return true
     }
 
     /**

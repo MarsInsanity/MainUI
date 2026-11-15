@@ -61,6 +61,11 @@ abstract class Scene(val host: SceneHost) {
     open fun onSwipe(direction: Btn): Boolean = onKey(direction, false)
     /** Return true while an animation is running so the host keeps redrawing. */
     open fun animating(now: Long): Boolean = false
+    /**
+     * True while this scene runs a long job (download, install, unzip) that the screen turning off
+     * would stall: the screen stays on until it ends. Otherwise MainUI follows the screen timeout.
+     */
+    open val keepsScreenOn: Boolean get() = false
 
     protected val ctx: Context get() = host.hostContext
     fun invalidate() = host.invalidate()

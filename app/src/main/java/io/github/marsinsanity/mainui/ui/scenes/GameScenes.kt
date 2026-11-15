@@ -337,7 +337,12 @@ abstract class EntryListScene(host: SceneHost, title: String) : ListScene(host, 
 
     protected fun reload() {
         host.io({ entries().also { es -> es.forEach { e -> warmPort(e.toGame()) } } }) { es ->
+            // The selection stays on the same game, not the same row: playing one moves it to the
+            // top of Recents, and the row it was on now holds another game.
+            val selected = (list.current?.data as? Library.Entry)?.key
             list.set(es.map { e -> GameItems.item(host, null, e.toGame(), sub(e)).also { it.data = e } })
+            val at = if (selected == null) -1 else es.indexOfFirst { it.key == selected }
+            if (at >= 0) { list.active = at; list.ensureVisible() }
         }
     }
 

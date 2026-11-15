@@ -267,12 +267,16 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             .mapTo(HashSet()) { it.name.lowercase() }
     }
 
-    /** Hide .bin/.img tracks referenced by .cue and discs referenced by .m3u. */
+    /**
+     * Hide .bin/.img tracks referenced by .cue and discs referenced by .m3u. Only for a descriptor
+     * the system lists as a game: one it can't open (a .cue in PS2's folder, an .m3u of Amiga disks)
+     * would hide the playable files and list nothing in their place.
+     */
     private fun discFilesToHide(system: GameSystem, files: Array<File>): Set<String> {
         val hide = HashSet<String>()
         for (f in files) {
             val ext = f.extension.lowercase()
-            if (ext == "cue" || ext == "gdi") {
+            if ((ext == "cue" || ext == "gdi") && system.def.accepts(f)) {
                 runCatching {
                     f.useLines { lines ->
                         lines.take(200).forEach { raw ->
@@ -289,7 +293,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
                 // CloneCD (.ccd + .img + .sub) and Alcohol (.mds + .mdf): the descriptor is the game.
                 val base = f.nameWithoutExtension.lowercase()
                 if (ext == "ccd") { hide += "$base.img"; hide += "$base.sub" } else hide += "$base.mdf"
-            } else if (ext == "m3u") {
+            } else if (ext == "m3u" && system.def.accepts(f)) {
                 runCatching {
                     // (A Windows editor's byte order mark must not hide disc 1 from the match.)
                     f.useLines { lines -> lines.take(50).map { it.removePrefix("\uFEFF").trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }

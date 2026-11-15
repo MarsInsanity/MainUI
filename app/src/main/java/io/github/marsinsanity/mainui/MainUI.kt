@@ -48,6 +48,20 @@ object MainUI {
 }
 
 class App : Application() {
+    /**
+     * MainUI stays in memory behind a game (it is the launcher and hosts the overlay service), so
+     * its decoded pictures (box art, screenshots, icons: tens of MB) are given back once its screens
+     * are hidden; a 2 GB device's emulator needs them more. They load again when shown.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) runCatching {
+            io.github.marsinsanity.mainui.ui.Images.clear()
+            io.github.marsinsanity.mainui.ui.Glyphs.clear()
+            MainUI.apps.trimIcons()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         MainUI.app = this
@@ -83,6 +97,14 @@ class App : Application() {
             MainUI.emulators.refresh()
             // Only with the real library (before access is granted it's a stand-in that goes).
             if (MainUI.storage.hasAllFilesAccess()) MainUI.apps.reconcileNewInstalls(MainUI.emulators)
+            // APKs handed to Android's installer (no root) stay behind, one per version: gone once
+            // they are an hour old (an installation still being confirmed keeps its file).
+            runCatching {
+                val old = System.currentTimeMillis() - 3_600_000L
+                for (d in listOf("appstore", "update")) java.io.File(cacheDir, d).listFiles()
+                    ?.filter { it.isFile && (it.name.endsWith(".apk") || it.name.endsWith(".apk.part")) && it.lastModified() < old }
+                    ?.forEach { it.delete() }
+            }
         }
 
         // PACKAGE_ADDED cannot be received by manifest receivers since Android 8,

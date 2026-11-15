@@ -14,7 +14,9 @@ import org.json.JSONObject
  *  - retroarch.com: the newest stable version against the installed one;
  *  - the project's GitHub releases: the release's version against the installed one; a tag
  *    that is a build number ("v12") against the installed build ("0.2.0-12" / version code 12);
- *    otherwise a release published after the app was installed.
+ *    otherwise a release published after the app was installed;
+ *  - the project's own download page ("apkpage", DuckStation's): the number in the newest APK's
+ *    file name, which is its version code there, against the installed version code.
  * Apps installed by Google Play are left to it.
  */
 object EmulatorUpdates {
@@ -24,7 +26,7 @@ object EmulatorUpdates {
     private const val RETRY_MS = 60L * 60 * 1000
     private const val MAX_RETRIES = 3
 
-    enum class Source { FDROID, GITHUB, RETROARCH }
+    enum class Source { FDROID, GITHUB, RETROARCH, PAGE }
 
     data class Update(
         val id: String, val name: String, val pkg: String,
@@ -159,19 +161,49 @@ object EmulatorUpdates {
         // 2. RetroArch's own builds.
         if (e.buildbot && (pkg == "com.retroarch.aarch64" || pkg == "com.retroarch" || pkg == "com.retroarch.ra32")) {
             val r = EmulatorStore.latestRetroArch(pkg)
+            if (refused(pkg, r.version)) return null
             return if (isNewer(r.version, installedName) == true) Update(e.def.id, name, pkg, installedName, r.version, Source.RETROARCH, "retroarch.com", installedAt) else null
         }
-        // 3. GitHub releases: the MainUI build from MainUI-Android's fork, the official app from its
+        // 3. The project's own download page (official package only): its APKs are named after their
+        // version code, so the newest file's number against the installed version code. Only for a
+        // build that came from that page (its number is listed there): DuckStation's page has the
+        // beta of a rewritten app, and moving a stable install to it resets its settings, which the
+        // user chooses on the emulator's page, never as a routine update.
+        e.apkPage?.takeIf { pkg == e.officialPackage && e.github == null }?.let { page ->
+            val builds = EmulatorStore.pageBuilds(page)
+            val r = builds.firstOrNull() ?: throw java.io.IOException("No APK on $page")
+            if (builds.none { it.version.toLongOrNull() == code }) return null
+            val build = r.version.toLongOrNull() ?: return null
+            if (refused(pkg, r.version)) return null
+            return if (build > code) Update(e.def.id, name, pkg, installedName, r.version, Source.PAGE, page, installedAt) else null
+        }
+        // 4. GitHub releases: the MainUI build from MainUI-Android's fork, the official app from its
         // project. (Only for the package it publishes: another build listed beside it isn't updated by it.)
         val repo = (if (pkg.endsWith(EmulatorStore.MAINUI_SUFFIX)) e.mainui
             else e.github?.takeIf { pkg == e.officialPackage }) ?: return null
         val r = EmulatorStore.latestGithub(repo)
+        if (refused(pkg, r.version)) return null
         // A MainUI build's stable is built again, same name, when its patch changes: by date then.
         val rebuilt = pkg.endsWith(EmulatorStore.MAINUI_SUFFIX) && r.version == installedName
         val newer = (if (rebuilt) null else isNewer(r.version, installedName) ?: buildNumberNewer(r.version, installedName, code))
             ?: (r.published > installedAt + 3_600_000L)
         return if (newer) Update(e.def.id, name, pkg, installedName, r.version, Source.GITHUB, repo, installedAt) else null
     }
+
+    /**
+     * [pkg]'s download of [version] was signed unlike the installed app (another source), so it
+     * can't update it: that version isn't offered again (a newer one is, and is checked again).
+     */
+    fun refuse(pkg: String, version: String, installedSigner: String) = synchronized(this) {
+        val o = runCatching { JSONObject(MainUI.settings.prefs.getString("emu_updates_refused", "{}")) }.getOrDefault(JSONObject())
+        MainUI.settings.prefs.edit().putString("emu_updates_refused", o.put(pkg, "$version|$installedSigner").toString()).apply()
+    }
+
+    /** Refused for the app as it is installed now: one reinstalled from that source is offered again. */
+    private fun refused(pkg: String, version: String): Boolean = runCatching {
+        val v = JSONObject(MainUI.settings.prefs.getString("emu_updates_refused", "{}")).optString(pkg)
+        v.substringBeforeLast('|') == version && v.substringAfterLast('|').equals(AppStore.installedSigner(pkg) ?: "", true)
+    }.getOrDefault(false)
 
     private fun installer(pkg: String): String? = runCatching {
         val pm = MainUI.app.packageManager
@@ -184,15 +216,17 @@ object EmulatorUpdates {
         val e = EmulatorStore.entries().firstOrNull { it.def.id == u.id } ?: return "${u.name} is no longer known"
         val before = runCatching { MainUI.app.packageManager.getPackageInfo(u.pkg, 0).lastUpdateTime }.getOrNull()
         val msg = when (u.source) {
-            Source.FDROID -> e.fdroid?.let { AppStore.install(it, progress) } ?: "${u.name} is no longer in the repository"
+            Source.FDROID -> e.fdroid?.let { AppStore.install(it, grantStorage = true, progress = progress) } ?: "${u.name} is no longer in the repository"
             Source.RETROARCH -> EmulatorStore.latestRetroArch(u.pkg).let { EmulatorStore.install("${u.name} ${it.version}", it, u.pkg, progress) }
             Source.GITHUB -> EmulatorStore.latestGithub(u.from).let { EmulatorStore.install("${u.name} ${it.version}", it, u.pkg, progress) }
+            Source.PAGE -> EmulatorStore.latestFromPage(u.from).let { EmulatorStore.install("${u.name} ${it.version}", it, u.pkg, progress) }
         }
         // Done (or asked Android to install it): drop it from the list unless it's still old
         // (a nightly keeping its version name counts as done once it was installed again).
         runCatching {
             val info = MainUI.app.packageManager.getPackageInfo(u.pkg, 0)
-            if ((info.versionName ?: "") != u.installed || (before != null && info.lastUpdateTime != before)) synchronized(this) {
+            if ((info.versionName ?: "") != u.installed || (before != null && info.lastUpdateTime != before) ||
+                refused(u.pkg, u.latest)) synchronized(this) {
                 // Only the list: when the last check ran (and whether it failed) stays as it was.
                 MainUI.settings.prefs.edit().putString("emu_updates",
                     JSONArray().apply { known().filter { !(it.id == u.id && it.pkg == u.pkg) }.forEach { put(it.json()) } }.toString()).apply()

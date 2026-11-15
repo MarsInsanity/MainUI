@@ -208,9 +208,11 @@ object Scraper {
                             else if (e.fatal) { fatal.set(true); st.message = "Stopped: ${describe(e)}" }
                             else if (e.tooManyThreads) { queue.put(sys to game); Thread.sleep(2000); continue }
                             else { st.errors.incrementAndGet(); st.addLog("ScreenScraper ${e.code}: ${game.name}: ${e.message?.take(60)}") }
-                        } catch (e: Exception) {
+                        } catch (e: Throwable) {
+                            // (Throwable: an OutOfMemoryError in a pool thread would otherwise be
+                            // uncaught and take the whole launcher down; it costs this game only.)
                             fileLog("${sys.id}: ${game.file?.name}: error $e")
-                            st.errors.incrementAndGet(); st.addLog("Error: ${game.name}: ${e.message}")
+                            st.errors.incrementAndGet(); st.addLog("Error: ${game.name}: ${e.message ?: e.javaClass.simpleName}")
                             Log.w(TAG, "scrape failed ${game.file}", e)
                         }
                         st.done.incrementAndGet()
@@ -407,9 +409,23 @@ object Scraper {
             return if (!ScreenScraper.hasDevCredentials()) "Set a ScreenScraper developer ID first, or turn on the free box art sources"
             else "No box art source covers ${sys.name}"
         }
+        // With ScreenScraper refusing the account (login, quota, closed, busy), the free sources
+        // still get their turn, as in a full run.
+        return try {
+            scrapeOneWith(api, free, sys, game)
+        } catch (e: ScreenScraper.ApiException) {
+            if ((e.fatal || e.tooManyThreads) && api != null && FreeArt.supports(free, sys.id))
+                runCatching { scrapeOneWith(null, free, sys, game) + " (ScreenScraper: ${describe(e)})" }.getOrElse { "Error: ${it.message}" }
+            else "ScreenScraper: ${describe(e)}"
+        } catch (e: Exception) {
+            "Error: ${e.message}"
+        }
+    }
+
+    private fun scrapeOneWith(api: ScreenScraper?, free: List<String>, sys: GameSystem, game: Game): String {
         val gamelists = ConcurrentHashMap<String, GameListXml>()
         val dats = ConcurrentHashMap<String, LogiqxDat>()
-        return try {
+        run {
             val r = scrapeGame(api, FreeArt.Session(free, BoxArtMatch.regionPrefs(MainUI.settings.ssRegions)), sys, game, gamelists, dats,
                 RateLimiter(0), SsBreaker())
             // Each file on its own: one that can't be written (a gamelist.xml MainUI couldn't read)
@@ -425,15 +441,11 @@ object Scraper {
             )
             val note = (if (r != Result.FOUND && notYet.isNotEmpty()) " (${notYet.joinToString(" / ")} not downloaded yet: scrape the system once)" else "") +
                 if (unsaved.isEmpty()) "" else " (${unsaved.size} metadata file${if (unsaved.size > 1) "s" else ""} left unchanged: couldn't be read)"
-            when (r) {
+            return when (r) {
                 Result.FOUND -> "Artwork updated$note"
                 Result.INFO_ONLY -> "Game info updated, no box art found$note"
                 else -> "No box art found for this game$note"
             }
-        } catch (e: ScreenScraper.ApiException) {
-            "ScreenScraper: ${describe(e)}"
-        } catch (e: Exception) {
-            "Error: ${e.message}"
         }
     }
 

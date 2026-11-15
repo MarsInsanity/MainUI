@@ -23,6 +23,9 @@ class Apps(private val ctx: Context, private val library: Library, private val s
 
     fun invalidate() { cache = null; iconCache.clear() } // (an updated app may have a new icon)
 
+    /** Drops the decoded icons (memory for a game); they load again when shown. */
+    fun trimIcons() = iconCache.clear()
+
     fun all(): List<AppInfo> {
         cache?.let { return it }
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
@@ -66,12 +69,16 @@ class Apps(private val ctx: Context, private val library: Library, private val s
     /** Apps in the Ports system (files in the ports folders, see AndroidPorts). */
     private fun portPackages(): Set<String> = runCatching { io.github.marsinsanity.mainui.MainUI.games.portPackages() }.getOrDefault(emptySet())
 
-    /** Apps for the Apps menu: not hidden, not sorted into the Android or Ports system or the Emulators menu. */
+    /**
+     * Apps for the Apps menu: not hidden, not sorted into the Android or Ports system or the Emulators
+     * menu. While the Emulators menu or the Android system is turned off (Settings > User interface),
+     * their apps are listed here, or nothing would open them.
+     */
     fun visibleApps(): List<AppInfo> {
         val hidden = library.hiddenApps()
-        val games = library.androidGames()
+        val games = if (settings.showAndroidSystem) library.androidGames() else emptySet()
         val ports = portPackages()
-        val emus = emulatorApps().mapTo(HashSet()) { it.pkg }
+        val emus = if (settings.showEmulators) emulatorApps().mapTo(HashSet()) { it.pkg } else emptySet()
         return all().filter { it.pkg !in hidden && it.pkg !in games && it.pkg !in ports && it.pkg !in emus }
     }
 
