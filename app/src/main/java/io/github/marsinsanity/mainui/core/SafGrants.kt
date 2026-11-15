@@ -24,8 +24,8 @@ object SafGrants {
         val now = System.currentTimeMillis()
         cache[pkg]?.let { (at, v) -> if (now - at < 60_000) return v }
         if (!Root.knownAvailable() && !Root.available()) return emptyList()
-        val dump = Root.exec("dumpsys activity permissions", 15).out
-        val xml = Root.exec("f=/data/system/urigrants.xml; head -c 5 \$f | grep -q '<' && cat \$f", 15).out
+        val dump = Root.quick("dumpsys activity permissions 2>/dev/null", 15_000).out
+        val xml = Root.quick("f=/data/system/urigrants.xml; head -c 5 \$f 2>/dev/null | grep -q '<' && cat \$f 2>/dev/null", 15_000).out
         val found = (fromDumpsys(dump, uid) + fromXml(xml, pkg)).distinct()
         Log.d(TAG, "$pkg folders: $found")
         cache[pkg] = now to found

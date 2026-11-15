@@ -172,7 +172,11 @@ object EmulatorUpdates {
         e.apkPage?.takeIf { pkg == e.officialPackage && e.github == null }?.let { page ->
             val builds = EmulatorStore.pageBuilds(page)
             val r = builds.firstOrNull() ?: throw java.io.IOException("No APK on $page")
-            if (builds.none { it.version.toLongOrNull() == code }) return null
+            // From the page: its build is listed there now, or was when it was installed (the page
+            // keeps only its last few builds, so an install left alone a few weeks drops off it).
+            val fromPage = builds.any { it.version.toLongOrNull() == code } || pageInstalled(pkg) == code
+            if (!fromPage) return null
+            rememberPageBuild(pkg, code)
             val build = r.version.toLongOrNull() ?: return null
             if (refused(pkg, r.version)) return null
             return if (build > code) Update(e.def.id, name, pkg, installedName, r.version, Source.PAGE, page, installedAt) else null
@@ -188,6 +192,17 @@ object EmulatorUpdates {
         val newer = (if (rebuilt) null else isNewer(r.version, installedName) ?: buildNumberNewer(r.version, installedName, code))
             ?: (r.published > installedAt + 3_600_000L)
         return if (newer) Update(e.def.id, name, pkg, installedName, r.version, Source.GITHUB, repo, installedAt) else null
+    }
+
+    /** The version code of [pkg] last seen installed from its download page ("apkpage"), or -1. */
+    private fun pageInstalled(pkg: String): Long = runCatching {
+        JSONObject(MainUI.settings.prefs.getString("emu_page_builds", "{}")).optLong(pkg, -1L)
+    }.getOrDefault(-1L)
+
+    private fun rememberPageBuild(pkg: String, code: Long) = synchronized(this) {
+        if (pageInstalled(pkg) == code) return@synchronized
+        val o = runCatching { JSONObject(MainUI.settings.prefs.getString("emu_page_builds", "{}")) }.getOrDefault(JSONObject())
+        MainUI.settings.prefs.edit().putString("emu_page_builds", o.put(pkg, code).toString()).apply()
     }
 
     /**

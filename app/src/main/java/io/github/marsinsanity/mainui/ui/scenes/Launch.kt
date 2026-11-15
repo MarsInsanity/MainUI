@@ -47,7 +47,7 @@ object Launch {
         if (stillExiting(host)) return
         val now = android.os.SystemClock.uptimeMillis()
         // (0 = no start pending: uptime itself is under the guard's length right after boot.)
-        if (launchingSince != 0L && now - launchingSince < LAUNCH_GUARD_MS) return
+        if (launchingSince != 0L && now - launchingSince < LAUNCH_GUARD_MS) { host.toast("Starting..."); return }
         launchingSince = now
         val active = MainUI.sessions.active
         if (active != null && active.gameKey == game.key) {

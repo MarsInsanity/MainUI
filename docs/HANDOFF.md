@@ -364,7 +364,7 @@ Open, not started or paused:
   Switcher, in-game menu) are open. Test them on the Pocket 2+, whose screen is the Miyoo's size.
 - **RetroArch auto state**: RetroArch's own auto-save state could in principle be older than the
   game's in-game save (the hazard fixed for Dolphin). Confirmed by code review in the bug hunt
-  (section 10, open item "RetroArch auto state over a newer in-game save"); not fixed yet.
+  (section 10); now fixed there: an auto state older than the game's `.srm` is set aside.
 - Relaunching the game that is already running logs "the game wasn't ready" for auto load. Harmless.
 - Standalone emulators other than RetroArch, PPSSPP and Dolphin are only partly tested on a real
   device. README "Known limitations" has the list. The light ones can be tested on the Pocket 2+.
@@ -398,8 +398,30 @@ Crashes:
 
 Lost progress or data:
 - **A game whose save failed could never be left** (found on the device: a RetroArch that hung, a
-  PPSSPP that couldn't write its states): Exit Game and the Game Switcher refused, with no way out
-  but a force stop. Now the message says so, and choosing Exit Game again exits without saving.
+  PPSSPP that couldn't write its states): Exit Game refused, with no way out but a force stop. Now
+  the message says so, the item then reads "Exit without saving" (until a save works again), and
+  choosing it exits without saving.
+- **RetroArch's auto save wrote into the user's own slot**: the Game Switcher / Exit auto save pressed
+  the save key on the slot RetroArch was on (slot 0 at the start, or the user's last slot), replacing
+  their save (seen in the device log). It now steps to RetroArch's auto slot (-1), saves, and steps
+  back. Verified on the Pocket 2+ (RetroArch 1.22): "slot 0 -> -1", saved `.state.auto`, "slot
+  -1 -> 0", and slot 0's file untouched. (A RetroArch whose slot key stops at 0 saves into slot 0 as
+  before.)
+- **An older RetroArch auto state overwrote a newer in-game save**: after RetroArch died mid-game, it
+  auto-loaded `.state.auto` and its older SRAM over the newer `.srm`. Before a RetroArch start (root,
+  auto save on), an auto state more than a minute older than the game's `.srm` is renamed aside
+  (`.older`), so the game starts from its save. Only when exactly one of each is found (two games
+  with the same name in other folders are left alone).
+- **A second game in the same emulator stacked on the first**: emulators whose recipe has only
+  `NEW_TASK` (Flycast, PPSSPP, melonDS, Mupen64Plus, MAME4droid, Redream) could stack a second, empty
+  game screen on the running one, with the old game still running behind. With root the emulator is
+  now stopped before another game starts in it (the Game Switcher saved the old one on leaving);
+  never an emulator the user opened by itself (its game is unknown to MainUI and unsaved by it).
+- **The in-game menu showed over the lock screen** after waking (B there resumed the game behind the
+  lock screen; with the screen timeout now applying, this happened whenever the menu was left open).
+  It is now transparent and ignores keys, touches and HOME until the device is unlocked; it keeps
+  the focus, so a game frozen behind it is never reported as not responding. Verified on the
+  Pocket 2+: the lock screen shows after waking, the menu is back after unlocking.
 - **Going back to a game still running in its emulator turned auto save off** (found on the
   device): MainUI started it again, the emulator only came to the front, and the auto load waited
   3 minutes for a fresh start that never came, keeping automatic saves off (progress lost on Exit).
@@ -437,12 +459,27 @@ Things that didn't work:
 - **A core download the user left with Home still started its game later** over the running one.
 - **Scraping one game gave up when ScreenScraper refused the account** (login, quota, closed); the
   free sources are now tried, as in a full run.
+- **libretro's game lists (DATs) never downloaded** (found on the device): Android asks for gzip by
+  itself, raw.githubusercontent.com then gzips the byte ranges MainUI downloads in, and every length
+  check failed ("Download incomplete"). CRC identification was lost for every source, and a game
+  nobody found counted as an error ("libretro's lists couldn't be downloaded"). Downloads now ask for
+  the bytes as they are (`Accept-Encoding: identity`). Verified on the device: "No box art found"
+  instead of the error.
+- **Dialogs cut their text at five lines** (an app's About in the App Store, long warnings): a longer
+  message now scrolls with UP / DOWN, with ▲ / ▼ marks.
+- **App Store search buried what was searched for** ("nes" listed 208 apps from "2fa" on, summary hits
+  first by name): apps whose name starts with or contains the search come first.
 - **Long press opened the options of the selected item**, not the one under the finger (lists, grid,
   row).
 - **Recents put the cursor on another game** after playing one.
 - **Holding Back for the process popup also left the screen** behind it; with hold-Back on, Back now
   acts on release when it was a short press.
 - **App Store > Emulators jumped back to the top** after every emulator page.
+- **Magisk's "granted Superuser" toast covered the footer hints on most screens** (49 toasts in 38
+  minutes of device testing): every root command started its own `su`. The frequent, short ones
+  (process list, `pidof`, the core scan and `retroarch.cfg` read on each return to MainUI, the SAF
+  grant check at each start, brightness) now run through the persistent root shell
+  (`Root.quick` / `Root.readText`), and a denied root request isn't asked again for a minute.
 
 Store and updates:
 - **An emulator update that can never install (other signature) was offered and downloaded every
@@ -473,25 +510,12 @@ Checked each emulator whose only source in `emulators.json` was Google Play or a
 ### Open (real, not fixed yet)
 
 Most severe first, each with the fix the review suggested:
-- **RetroArch auto save writes into the user's slot**: the Game Switcher / Exit auto save presses
-  RetroArch's save key on the slot it is on (slot 0, or the slot the user last used), replacing that
-  save; its preview isn't updated. Fix: step to RetroArch's auto slot (-1) for the auto save and back
-  (needs a device check that the slot keys reach -1). `emu/Controllers.kt` `saveToResume`.
-- **RetroArch auto state over a newer in-game save**: after RetroArch dies mid-game (crash, killed
-  for memory), it auto-loads `.state.auto`, older than the newest `.srm`; with SRAM in the state the
-  in-game save is overwritten. Fix: before a RetroArch launch, skip the auto state when the save
-  file is newer (as for Dolphin), or `block_sram_overwrite`.
-- **A second game in the same emulator from the Game Switcher**: emulators whose recipe has only
-  `NEW_TASK` (Flycast, PPSSPP, melonDS, Mupen64Plus, MAME4droid, Redream) may stack a second game
-  screen on the running one, and the previous game keeps running behind (both use CPU and RAM).
-  Fix: force-stop the running emulator (root) before starting another game in it.
 - **A session restored after MainUI's process restarts is never ended** when the game ended
   meanwhile (Android kills MainUI under memory pressure during big games). Fix: on start, end a
   restored session whose emulator isn't in front.
-- **Magisk's "granted Superuser" toast on every root command**: `Root.exec` starts a new `su` per
-  command (the process manager uses 2 per open / refresh, each return to MainUI 1+), and the toast
-  covers the footer hints. Fix: run them through the persistent `Root.Shell`; meanwhile set Magisk >
-  Settings > Superuser notification to None.
+- **Magisk's "granted Superuser" toast for the remaining root commands**: the frequent ones now go
+  through the persistent `Root.Shell` (see Fixed); writes, installs and long jobs still start their
+  own `su`. Set Magisk > Settings > Superuser notification to None to hide the rest.
 - **Store screens swallow B while busy** (refresh, download): only Home leaves. Fix: B cancels
   (`Http.Cancelled`) or leaves while it finishes. Similarly a background job that throws leaves a
   scene's busy text set (`host.io` doesn't call `done`).
@@ -519,10 +543,15 @@ Most severe first, each with the fix the review suggested:
   emulator and MainUI comes back cleanly; "Still closing the last game..." right after Exit; auto
   load after Exit and relaunch; resume from Recents; the Game Switcher; sleep / wake pauses and
   resumes. Found the save-failed, auto-save-off, RetroArch-storage and overlay screen-on bugs above.
-  Open from it: the in-game menu shows over the lock screen after waking (B there resumes the game
-  behind the lock screen; fix: hide the overlay while the keyguard is up); PPSSPP's MainUI build
-  started straight into a game before its first-run setup has no memory stick (every save fails;
-  open it once by hand first, as section 5 says).
+  Open from it: PPSSPP's MainUI build started straight into a game before its first-run setup has
+  no memory stick (every save fails; open it once by hand first, as section 5 says).
+- Store, themes, scraper: DuckStation installed through the new duckstation.org source (versionCode
+  12126, storage granted), its page asks before installing over it, Open works, and the in-game
+  menu works over it; no false DuckStation update. An OnionOS theme (Analogue Blanche) downloaded,
+  applied and used on every main screen and the in-game menu, then MainUI's theme back. The scraper
+  (free sources) finished without hanging and wrote valid gamelist.xml files (LaunchBox's 110 MB
+  index takes ~3 minutes to read on this chip). App Store search, categories, app pages and the
+  "N more apps" end work. Found the DAT download, dialog and search bugs above.
 
 ---
 

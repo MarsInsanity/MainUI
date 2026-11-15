@@ -258,7 +258,7 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     }
 
     private fun readStates(p: String, r: String): StateFiles {
-        val cfg = Root.readFile(MainUI.emulators.raConfigPath(p))
+        val cfg = Root.readText(MainUI.emulators.raConfigPath(p))
         val base = java.io.File(r).nameWithoutExtension
         val dirs = RetroArchCores.stateDirs(cfg, p, java.io.File(r).parent)
         val find = "find ${dirs.joinToString(" ") { Root.q(it) }} -maxdepth 3 -type f " +
@@ -400,6 +400,29 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
     private fun saveByKey(): Boolean = saveChecked("F2", "Couldn't press RetroArch's save key (needs root)") { hotkey("F2") }
 
     /**
+     * The automatic save (Game Switcher, Exit): into RetroArch's auto slot (-1), never into the slot
+     * the user is on, which holds their own save: stepped down to it with the slot key, saved,
+     * stepped back. (A RetroArch whose slot key stops at 0 saves into slot 0 as before: saveChecked
+     * sees which file it wrote, copies it into the auto slot and corrects the slot MainUI counts.)
+     */
+    private fun saveToAutoSlotByKey(): Boolean {
+        val back = slotKey()?.let { keySlots[it] } ?: 0
+        // (A failed key press says why: without a saveProblem the exit would treat it as "can't
+        // be stopped" and kill RetroArch unsaved.)
+        if (!selectSlotByKey(-1)) { saveProblem = "Couldn't press RetroArch's slot key (needs root)"; return false }
+        // A few presses more: RetroArch's slot stops at -1, so this lands there even when MainUI's
+        // count was off (the slot changed in RetroArch's own menu, MainUI restarted), never on one
+        // of the user's slots.
+        repeat(3) {
+            if (!io.github.marsinsanity.mainui.core.VirtualKeys.press("F6", 70)) return@repeat
+            Thread.sleep(90)
+        }
+        val ok = saveByKey()
+        runCatching { selectSlotByKey(back) }
+        return ok
+    }
+
+    /**
      * With network commands RetroArch saves into slot 0, which its auto load never reads either:
      * checked and copied into the auto slot like [saveByKey] (root, for its files).
      */
@@ -410,7 +433,7 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
                 val reply = ask("SAVE_STATE_SLOT 0", 1500)
                 if (reply != null && !reply.contains("-1")) true else { selectSlot(0); send("SAVE_STATE") }
             }
-        } else if (!api) keys && saveByKey() // the slot it is on (the user's pick), copied into the auto slot
+        } else if (!api) keys && saveToAutoSlotByKey() // the auto slot, not the user's
         else save(0)
 
     /** Saves with [press] ([what]: for the log), checked and copied into the auto slot (see [saveByKey]). */
@@ -551,7 +574,7 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
         // Checked: the force stop below must not cut the save short. When the save didn't happen
         // (or didn't reach the auto slot RetroArch loads next time) RetroArch is left running:
         // false with saveProblem set, so the caller says so and the user can save another way.
-        if (!api && autoSave && keys && (!saveByKey() || saveProblem != null)) return false
+        if (!api && autoSave && keys && (!saveToAutoSlotByKey() || saveProblem != null)) return false
         if (api) {
             // savestate_auto_save (set by "Configure RetroArch") writes the auto slot on QUIT.
             send("QUIT")
@@ -560,11 +583,11 @@ class RetroArchController(private val port: Int, private val pkg: String? = null
             // Until it has written that and gone (a big state takes a while), at most 15 s.
             val t0 = android.os.SystemClock.uptimeMillis()
             do { Thread.sleep(250) } while (pkg != null && Root.knownAvailable() &&
-                android.os.SystemClock.uptimeMillis() - t0 < 15_000 && Root.exec("pidof $pkg").out.isNotBlank())
+                android.os.SystemClock.uptimeMillis() - t0 < 15_000 && Root.quick("pidof $pkg").out.isNotBlank())
         }
         // Make sure it is really gone (also the only way without the command interface).
         return if (pkg != null && Root.knownAvailable()) {
-            if (Root.exec("pidof $pkg").out.isNotBlank()) Root.forceStop(pkg) else true
+            if (Root.quick("pidof $pkg").out.isNotBlank()) Root.forceStop(pkg) else true
         } else api
     }
 }
@@ -722,6 +745,9 @@ class StandaloneController(
             if (!keys(saveSpec)) { saveProblem = "MainUI couldn't press the save key"; return false }
             onSaved()
             onResumeSaved()
+            // Time to start writing before MainUI comes in front (its onPause may pause emulation),
+            // as the Game Switcher gives it; waitForWrites then waits for the writing to end.
+            Thread.sleep(800)
         }
         if (Root.knownAvailable() || Root.available()) {
             // Never stopped frozen or paused: thawed, with MainUI brought in front of it, the app

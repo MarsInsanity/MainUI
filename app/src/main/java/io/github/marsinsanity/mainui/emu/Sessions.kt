@@ -118,6 +118,7 @@ class SessionManager(
         val option = opt ?: emulators.choose(sys, game) ?: return "No emulator available for ${sys.name}"
         if (option.installed == false) return "${option.name} is not installed"
         if (option.isRetroArch) runCatching { emulators.ensureRetroArchConfigured() }
+        if (option.isRetroArch) game.file?.absolutePath?.let { rom -> (option.pkg ?: emulators.raPackage)?.let { keepNewerSave(rom, it) } }
         val intent = try { emulators.buildIntent(game, option) } catch (e: IllegalStateException) { return e.message }
         val rootLaunch = emulators.defFor(option.ref)?.rootLaunch == true
         if (rootLaunch && !Root.available()) return "${option.name} can only be started by MainUI with root"
@@ -128,6 +129,21 @@ class SessionManager(
         // The new session is in place before the game appears (MainActivity.onPause reads it while
         // the start is still under way); the previous one comes back if the start fails.
         val sw = swapIn(s)
+        // Another game still running in this same emulator (left for this one): stopped first (root)
+        // when the recipe doesn't clear its task. Sent a second game, such an emulator can stack a
+        // second, empty game screen on the running one (Flycast does), with the old game still
+        // running behind. (The Game Switcher saved it on leaving; a CLEAR_TASK emulator such as
+        // RetroArch replaces it the same way.)
+        // (Not an emulator opened by itself: a game started in its own menu, unknown to MainUI and
+        // never saved by it, would be lost.)
+        val other = (sw.prev?.takeIf { it.pkg == pkg } ?: leftRunning[pkg])?.takeIf { it.gameKey != s.gameKey && !isAdopted(it) }
+        if (other != null && pkg.isNotEmpty() && (intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TASK) == 0 && Root.knownAvailable() &&
+            Root.quick("pidof ${Root.q(pkg)}").out.isNotBlank()) {
+            io.github.marsinsanity.mainui.core.SessionLog.log("${other.name} still runs in $pkg: stopped before starting ${s.name}")
+            Root.forceStop(pkg)
+            leftRunning.remove(pkg)
+            Thread.sleep(300)
+        }
         val err = try {
             if (rootLaunch) Root.startActivity(intent)?.let { "Could not start ${option.name}: $it" }
             else { ctx.startActivity(intent); null }
@@ -218,6 +234,9 @@ class SessionManager(
             launchedPackages += pkg
             if (s != null) {
                 sw?.prev?.let { account(it) }
+                // (As in launch: the game left for this one, still running, is brought back by resumeLeft.)
+                sw?.prev?.let { p -> if (p.pkg != pkg) leftRunning[p.pkg] = p }
+                leftRunning.remove(pkg)
                 library.addRecent(g, null)
             }
             null
@@ -297,7 +316,7 @@ class SessionManager(
             // (Always sent: a pause that answered late still took effect.)
             apiParker.submit {
                 // Not to an emulator just force-stopped: the broadcast would start it again.
-                if (!Root.knownAvailable() || Root.exec("pidof ${Root.q(p.first)}").out.isNotBlank())
+                if (!Root.knownAvailable() || Root.quick("pidof ${Root.q(p.first)}").out.isNotBlank())
                     StateApi.call(p.first, "resume", timeoutMs = 2000)
                 ApiPauses.resumed(p.first)
             }
@@ -440,7 +459,7 @@ class SessionManager(
 
     fun isRunning(s: Session): Boolean {
         if (!Root.knownAvailable()) return true // can't tell, assume so
-        return Root.exec("pidof ${s.pkg}").out.isNotBlank()
+        return Root.quick("pidof ${s.pkg}").out.isNotBlank()
     }
 
     /**
@@ -486,10 +505,42 @@ class SessionManager(
         }, "ra-keyboard").apply { isDaemon = true }.start()
     }
 
+    /**
+     * Before RetroArch starts [rom]: when its in-game save (.srm) is more than a minute newer than
+     * the auto state RetroArch would load by itself, the auto state is renamed aside (".older"),
+     * so the game starts from the save. Otherwise loading the older state brings back older SRAM,
+     * which RetroArch then writes over the newer save: after RetroArch died mid-game (a crash,
+     * killed for memory) the in-game progress since the last auto save was lost. (The minute
+     * leaves out RetroArch's own SRAM writes around an exit or a switch.) Root, off the UI thread.
+     */
+    private fun keepNewerSave(rom: String, pkg: String) = runCatching {
+        // (Without auto save MainUI doesn't turn RetroArch's auto load on: nothing to protect.)
+        if (!Root.knownAvailable() || !settings.autoSaveOnExit) return@runCatching
+        val cfg = Root.readText(emulators.raConfigPath(pkg))
+        val romDir = File(rom).parent
+        fun found(dirs: List<String>, name: String): List<Pair<Long, String>> =
+            Root.Shell.run("find ${dirs.joinToString(" ") { Root.q(it) }} -maxdepth 3 -type f " +
+                "-name ${Root.q(RetroArchCores.globEscape(name))} -exec stat -c '%Y %n' {} + 2>/dev/null", 5000).out
+                .lines().mapNotNull { l -> l.trim().substringBefore(' ').toLongOrNull()?.let { it to l.trim().substringAfter(' ') } }
+                .distinctBy { it.second }
+        // One of each, or nothing is done: two games with the same name in other systems' (or
+        // cores') folders could otherwise compare one's save with the other's state.
+        val autos = found(RetroArchCores.stateDirs(cfg, pkg, romDir), RetroArchCores.stateFileName(rom, -1))
+        val srms = found(RetroArchCores.saveDirs(cfg, pkg, romDir), File(rom).nameWithoutExtension + ".srm")
+        if (autos.size != 1 || srms.size != 1) return@runCatching
+        val auto = autos[0]
+        val srm = srms[0]
+        if (srm.first > auto.first + 60) {
+            val moved = Root.Shell.run("mv -f ${Root.q(auto.second)} ${Root.q(auto.second + ".older")} && echo moved", 5000).out.contains("moved")
+            io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch: ${File(rom).name}'s in-game save is newer than its auto state: " +
+                if (moved) "auto state set aside (${auto.second}.older), the game starts from the save" else "couldn't set the auto state aside")
+        }
+    }
+
     /** Logs whether RetroArch has an auto slot to load for [s]'s game (savestate_auto_load). */
     private fun logAutoState(s: Session) = runCatching {
         val rom = s.path ?: return@runCatching
-        val cfg = Root.readFile(emulators.raConfigPath(s.pkg))
+        val cfg = Root.readText(emulators.raConfigPath(s.pkg))
         val name = RetroArchCores.stateFileName(rom, -1)
         val dirs = RetroArchCores.stateDirs(cfg, s.pkg, File(rom).parent)
         val found = Root.Shell.run("find ${dirs.joinToString(" ") { Root.q(it) }} -maxdepth 3 -type f " +

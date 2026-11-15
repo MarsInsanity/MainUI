@@ -42,7 +42,7 @@ object Brightness {
      * held key (brightness 3 -> 10) never ends on an older value that finished last.
      */
     fun rootPut(key: String, cmd: String) {
-        if (pending.put(key, cmd) == null) rootExec.execute { pending.remove(key)?.let { Root.exec(it) } }
+        if (pending.put(key, cmd) == null) rootExec.execute { pending.remove(key)?.let { Root.quick(it) } }
     }
 }
 

@@ -305,20 +305,37 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         }
     }
 
+    /** The Back press now down waits for its release (see dispatchKeyEvent). */
+    private var backDeferred = false
+
     /** The button each key's DOWN was, so its UP releases the same one (Swap A/B toggled meanwhile). */
     private val downBtn = HashMap<Int, Btn>()
 
+    /** Keys and stick moves are ignored (an overlay hidden for the lock screen keeps the focus). */
+    @Volatile var inputBlocked = false
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (inputBlocked) return true
         // Back held opens the process popup (OverlayService.watchBack): here Back is B on release,
         // and only when it was a short press; acting on the press would also leave the screen
         // (or cancel the dialog) behind the popup.
-        if (event.keyCode == KeyEvent.KEYCODE_BACK && io.github.marsinsanity.mainui.MainUI.settings.backHold == "processes" &&
-            io.github.marsinsanity.mainui.service.OverlayService.instance != null) {
-            if (event.action == KeyEvent.ACTION_UP && !event.isCanceled &&
-                event.eventTime - event.downTime < io.github.marsinsanity.mainui.MainUI.settings.homeHoldMs) {
-                press(Btn.B, timerRepeat = false); release(Btn.B)
+        // (Only where holding Back does open the popup: no overlay showing, so not in the in-game
+        // menu, the overlay's Game Switcher or the popup itself, where Back stays B on press.
+        // Decided on the press, kept for its release.)
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                val svc = io.github.marsinsanity.mainui.service.OverlayService.instance
+                backDeferred = io.github.marsinsanity.mainui.MainUI.settings.backHold == "processes" && svc != null && !svc.overlayShowing
             }
-            return true
+            if (backDeferred) {
+                if (event.action == KeyEvent.ACTION_UP) {
+                    backDeferred = false
+                    if (!event.isCanceled && event.eventTime - event.downTime < io.github.marsinsanity.mainui.MainUI.settings.homeHoldMs) {
+                        press(Btn.B, timerRepeat = false); release(Btn.B)
+                    }
+                }
+                return true
+            }
         }
         val b = (if (event.action == KeyEvent.ACTION_UP) downBtn.remove(event.keyCode) else null)
             ?: mapKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
@@ -348,6 +365,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
     fun takeMovedControllers(): Set<Int> = HashSet(movedControllers).also { movedControllers.clear() }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if (inputBlocked) return true
         if (event.isFromSource(InputDevice.SOURCE_JOYSTICK) || event.isFromSource(InputDevice.SOURCE_GAMEPAD)) {
             if (event.actionMasked == MotionEvent.ACTION_MOVE && event.deviceId >= 0) movedControllers += event.deviceId
             // The stick / hat stream was cut off (focus moved to a game): nothing stays held.

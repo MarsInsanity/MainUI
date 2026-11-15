@@ -182,6 +182,11 @@ object Http {
             connectTimeout = 15000; readTimeout = 30000
             instanceFollowRedirects = false
             setRequestProperty("User-Agent", UA)
+            // The bytes as they are: Android otherwise asks for gzip by itself, and a server that
+            // gzips a byte range (raw.githubusercontent.com does) sends compressed ranges and a
+            // compressed length, so pieces don't fit and every length check fails ("Download
+            // incomplete": libretro's DATs never downloaded).
+            setRequestProperty("Accept-Encoding", "identity")
             for ((k, v) in headers) setRequestProperty(k, v)
         }
 
