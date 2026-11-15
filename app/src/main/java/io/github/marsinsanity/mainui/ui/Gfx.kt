@@ -400,9 +400,16 @@ class Gfx {
     private val marqueeStart = HashMap<String, Long>()
     private val marqueeSeen = HashSet<String>()
 
-    /** Multi-line wrapped text, top aligned at [top]. Returns the bottom y. */
+    /** How many lines the last [paragraph] wrapped its text to (all of them, shown or not). */
+    var lastParagraphLines = 0
+        private set
+
+    /**
+     * Multi-line wrapped text, top aligned at [top], from wrapped line [skip] on (a scrolled
+     * dialog). Returns the bottom y.
+     */
     fun paragraph(s: String, style: FontStyle, x: Float, top: Float, maxW: Float, size: Float = style.size,
-                  color: Int = style.color, align: Align = Align.LEFT, maxLines: Int = 20): Float {
+                  color: Int = style.color, align: Align = Align.LEFT, maxLines: Int = 20, skip: Int = 0): Float {
         setText(style, size, color)
         val lineH = size * 1.25f
         var y = top + lineH / 2
@@ -415,8 +422,10 @@ class Gfx {
             }
             wrapped += line
         }
+        lastParagraphLines = wrapped.size
+        val from = if (skip > 0) wrapped.drop(skip.coerceAtMost(wrapped.size)) else wrapped
         // More than fits: the last line holds the rest, cut with "...", so it's clear text is missing.
-        val shown = if (wrapped.size > maxLines) wrapped.take(maxLines - 1) + wrapped.drop(maxLines - 1).joinToString(" ") else wrapped
+        val shown = if (from.size > maxLines) from.take(maxLines - 1) + from.drop(maxLines - 1).joinToString(" ") else from
         for (line in shown) { text(line, style, x, y, align, maxW, color, size); y += lineH }
         return y - lineH / 2
     }
@@ -1173,7 +1182,11 @@ class Gfx {
 
     /** Onion's theme_renderDialog: pop-bg with title + message. */
     /** Draws a dialog box; returns the box's area (taps outside it dismiss a dialog). */
-    fun dialog(title: String, message: String): RectF {
+    /** Lines a [dialog] shows at once; longer messages scroll (DialogScene: UP / DOWN). */
+    val dialogLines = 5
+
+    /** [scroll]: wrapped lines of [message] scrolled past. [lastParagraphLines] then has its length. */
+    fun dialog(title: String, message: String, scroll: Int = 0): RectF {
         dim(120)
         val b = skin("pop-bg")
         val pw = 560f; val ph = 280f
@@ -1187,7 +1200,11 @@ class Gfx {
             RectF(x, y, x + pw, y + ph)
         }
         text(title, theme.title, W / 2, y + 50, Align.CENTER, maxW = pw - 40)
-        paragraph(message, theme.list, W / 2, y + 100, pw - 60, align = Align.CENTER, maxLines = 5)
+        paragraph(message, theme.list, W / 2, y + 100, pw - 60, align = Align.CENTER, maxLines = dialogLines, skip = scroll)
+        val total = lastParagraphLines
+        // More above / below: marks at the box's edges (UP / DOWN scroll; text used to just be cut).
+        if (scroll > 0) text("▲", theme.list, W / 2, box.top + 76, Align.CENTER, size = 18f)
+        if (total > scroll + dialogLines) text("▼", theme.list, W / 2, box.bottom - 14, Align.CENTER, size = 18f)
         return box
     }
 

@@ -117,21 +117,32 @@ object Root {
             if (!knownAvailable() && !available()) return Result(-1, "", "no root")
             val alive = proc?.isAlive == true
             if (!alive && start() == null) return exec(cmd, timeoutMs / 1000 + 1)
-            val marker = "__mainui_end_${++seq}__"
+            val n = ++seq
+            val start = "__mainui_start_${n}__"
+            val marker = "__mainui_end_${n}__"
             try {
-                stdin!!.write("$cmd\necho \"$marker \$?\"\n")
+                // (A start marker too: lines a timed-out command printed late are skipped, never
+                // read as this command's output, e.g. a stray pid as "running".)
+                stdin!!.write("echo $start\n$cmd\necho \"$marker \$?\"\n")
                 stdin!!.flush()
             } catch (e: java.io.IOException) {
                 close()
                 return exec(cmd, timeoutMs / 1000 + 1)
             }
             val out = StringBuilder()
+            var started = false
             val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
             while (true) {
                 val left = deadline - android.os.SystemClock.uptimeMillis()
                 val l = if (left > 0) lines.poll(left, TimeUnit.MILLISECONDS) else null
                 if (l == null) { close(); return Result(-2, out.toString(), "timeout") }
-                if (l.startsWith(marker)) return Result(l.substringAfter(' ').trim().toIntOrNull() ?: 0, out.toString(), "")
+                if (!started) { if (l.endsWith(start)) started = true; continue }
+                // (Found anywhere in the line: output without a final newline has it glued on.)
+                val i = l.indexOf(marker)
+                if (i >= 0) {
+                    if (i > 0) out.appendLine(l.substring(0, i))
+                    return Result(l.substring(i).substringAfter(' ').trim().toIntOrNull() ?: 0, out.toString(), "")
+                }
                 out.appendLine(l)
             }
         }
@@ -178,6 +189,11 @@ object Root {
         if (ok) {
             detectNamespace()
             cached = true
+        } else {
+            // Denied (or the prompt not answered in time): not asked again for a minute, or every
+            // root check would start `su` again, each with Magisk's "denied" toast. Setup's
+            // "tap to request" (recheck) still asks at once.
+            noSuUntil = android.os.SystemClock.uptimeMillis() + 60_000
         }
         remember(ok)
         return ok
@@ -370,6 +386,22 @@ object Root {
 
     /** [readBytes] as UTF-8 text. */
     fun readFile(path: String): String? = readBytes(path)?.toString(Charsets.UTF_8)
+
+    /**
+     * A text file read only to be parsed (never written back: line ends come back as "\n"),
+     * through the open [Shell]: no new `su` per read. [readBytes] starts one per 32 KB, and Magisk
+     * shows its "granted Superuser" toast over the screen for each. Null when it can't be read.
+     */
+    fun readText(path: String): String? =
+        // (The /data/media and /mnt/media_rw paths too: root can't always reach another app's
+        // Android/data through /storage, see lowerPaths.)
+        Shell.run(lowerPaths(path).joinToString(" || ") { "cat ${q(it)} 2>/dev/null" }, 8000).takeIf { it.ok }?.out
+
+    /**
+     * [exec] for a short command whose output is parsed, through the open [Shell] (stderr comes
+     * mixed into the output: callers must not mind, or send it to /dev/null).
+     */
+    fun quick(cmd: String, timeoutMs: Long = 5000): Result = Shell.run(cmd, timeoutMs)
 
     data class WriteResult(val ok: Boolean, val error: String = "", val writtenTo: String? = null)
 

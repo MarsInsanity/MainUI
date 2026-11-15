@@ -131,13 +131,26 @@ class DialogScene(
 ) : Scene(host) {
     override val isOverlay = true
     private var box: android.graphics.RectF? = null
+    /** Wrapped lines scrolled past (a message longer than the box), and how many there are. */
+    private var scroll = 0
+    private var lines = 0
+    private var shownLines = 5
 
     override fun draw(g: Gfx) {
-        box = g.dialog(title, message)
+        box = g.dialog(title, message, scroll)
+        lines = g.lastParagraphLines
+        shownLines = g.dialogLines
         g.footer(confirmLabel, cancelLabel, covering = true)
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
+        // UP / DOWN scroll a message longer than the box (a warning at its end must be readable).
+        if (b == Btn.UP || b == Btn.DOWN) {
+            val max = (lines - shownLines).coerceAtLeast(0)
+            val next = (scroll + if (b == Btn.DOWN) 1 else -1).coerceIn(0, max)
+            if (next != scroll) { scroll = next; invalidate() }
+            return true
+        }
         if (repeat) return false
         when (b) {
             Btn.A -> { close(); onConfirm() }

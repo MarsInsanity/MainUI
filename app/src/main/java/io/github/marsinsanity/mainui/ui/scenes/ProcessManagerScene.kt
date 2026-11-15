@@ -72,7 +72,7 @@ class ProcessManagerScene(host: SceneHost, private val overlayMode: Boolean = fa
                         val keep = io.github.marsinsanity.mainui.data.RunningApps.killable(host.hostContext, launched)
                         val game = MainUI.sessions.active?.pkg
                         // Running ones only: stopping one that isn't drops its alarms and jobs.
-                        val running = Root.exec("ps -A -o NAME").out.lines().map { it.trim().substringBefore(':') }.toSet()
+                        val running = Root.quick("ps -A -o NAME 2>/dev/null").out.lines().map { it.trim().substringBefore(':') }.toSet()
                         // (The game too when MainUI restarted since it launched it: it isn't in the list then.)
                         val stop = (launched + listOfNotNull(game)).filter { it in running && (keep(it) || it == game) }
                         stop.forEach { Root.forceStop(it) }
@@ -99,10 +99,10 @@ object Processes {
     /** Running apps you opened, or null without root (Android hides other apps' processes). */
     fun scan(ctx: android.content.Context): List<RunningApps.App>? {
         if (!Root.available()) return null
-        val r = Root.exec("ps -A -o PID,USER,RSS,%CPU,NAME")
+        val r = Root.quick("ps -A -o PID,USER,RSS,%CPU,NAME 2>/dev/null")
         if (!r.ok) return null
         val launched = MainUI.sessions.launchedPackages.toSet()
-        val recents = RunningApps.recentPackages(Root.exec("dumpsys activity recents").out)
+        val recents = RunningApps.recentPackages(Root.quick("dumpsys activity recents 2>/dev/null", 6000).out)
         return RunningApps.parse(r.lines, RunningApps.killable(ctx, recents + launched), launched, MainUI.sessions.active?.pkg)
     }
 

@@ -121,7 +121,8 @@ class InGameMenuScene(
             }
             items += UiItem("Native Menu", data = Action.NATIVE)
             items += UiItem("Game Switcher", data = Action.SWITCHER)
-            items += UiItem("Exit Game", data = Action.EXIT)
+            // (After a failed save the next Exit doesn't save: said where it is chosen.)
+            items += UiItem(if (saveFailedFor == sessionId) "Exit without saving" else "Exit Game", data = Action.EXIT)
             // RetroArch's hotkeys are its own defaults; standalone emulators get theirs set here (root presses
             // them). MainUI builds (the State API) need no keys.
             if (sa != null && Root.knownAvailable() && controller.states != StateSupport.DIRECT) items += UiItem("Save / load keys...", data = Action.BIND)
@@ -253,6 +254,7 @@ class InGameMenuScene(
             Action.SAVE -> if (controller.states == StateSupport.API) apiAction("Saving...") {
                 val ok = controller.save(slot)
                 if (ok) screenshot?.let { saveThumb(it) }
+                if (ok && saveFailedFor == sessionId) saveFailedFor = null // saving works again: Exit saves again
                 if (ok) "State saved to slot $slot" else "Save failed (run Configure RetroArch)"
             } else hotkeyAction("Save") { controller.save(if (controller.hasSlots) slot else 0).also { ok -> if (ok) { screenshot?.let { saveThumb(it) }; MainUI.sessions.loadDone(session) } } }
             // Loaded by hand: what runs is what the user wants, so it is saved again on leaving.
@@ -368,6 +370,8 @@ class InGameMenuScene(
             val direct = controller.states == StateSupport.DIRECT
             val problem = if (what == "Save") controller.saveProblem else (controller as? StandaloneController)?.takeIf { direct }?.loadProblem
             io.github.marsinsanity.mainui.core.SessionLog.log("menu $what for ${session.name}: ${if (ok) "ok" else "FAILED ${problem ?: ""}"}")
+            // Saving works again: the next Exit saves again.
+            if (what == "Save" && ok && problem == null && saveFailedFor == sessionId) saveFailedFor = null
             main.post {
                 // RetroArch saves are checked (its state file changed); other presses can't be.
                 // A save that worked only partly (not into RetroArch's auto slot) says so.
@@ -467,7 +471,10 @@ class InGameMenuScene(
         // The last Exit couldn't save this game (the emulator hung, can't write its states...): this
         // one exits without saving, or a game that can't save could never be left.
         val forced = saveFailedFor == sessionId
-        if (forced) io.github.marsinsanity.mainui.core.SessionLog.log("exit ${session.name}: without saving (the last save failed)")
+        if (forced) {
+            io.github.marsinsanity.mainui.core.SessionLog.log("exit ${session.name}: without saving (the last save failed)")
+            Toast.makeText(ctx, "Exiting without saving", Toast.LENGTH_SHORT).show()
+        }
         if (saveByKey && !forced) {
             // Close the menu and let the game run, save with its key, then stop it.
             Toast.makeText(ctx, "Saving and exiting...", Toast.LENGTH_SHORT).show()

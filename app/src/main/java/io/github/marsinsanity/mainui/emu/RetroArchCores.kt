@@ -102,6 +102,15 @@ object RetroArchCores {
         romDir,
     ).distinct()
 
+    /** Folders RetroArch may keep in-game saves (.srm) in, like [stateDirs] for savefile_directory. */
+    fun saveDirs(cfg: String?, pkg: String, romDir: String?): List<String> = listOfNotNull(
+        cfgValue(cfg, "savefile_directory")?.takeIf { it.startsWith("/") }?.trimEnd('/'),
+        "/storage/emulated/0/RetroArch/saves",
+        "/storage/emulated/0/Android/data/$pkg/files/saves",
+        "/data/user/0/$pkg/saves",
+        romDir,
+    ).distinct()
+
     /** [name] as a `find -name` pattern matching only itself ("Game [USA]" has glob brackets). */
     fun globEscape(name: String): String = name.replace(Regex("""([\\*?\[\]])"""), """\\$1""")
 
@@ -141,11 +150,13 @@ object RetroArchCores {
         //    one, then anything under the app's files (Play Feature Delivery split-compat).
         if (Root.knownAvailable() || Root.available()) {
             val q = Root::q
-            val r = Root.exec(
+            // (Through the open root shell: this runs on every return to MainUI, and a new `su` each
+            // time shows Magisk's toast.)
+            val r = Root.quick(
                 "for d in ${q(coreDir)} ${q("$dataDir/cores")}; do ls -1d \"\$d\"/*$SUFFIX 2>/dev/null; done; " +
                     "find ${q("$dataDir/files")} -maxdepth 7 -name '*$SUFFIX' 2>/dev/null; " +
                     // Only a complete scan if RetroArch's data folder is actually visible to root.
-                    "[ -d ${q(dataDir)} ] && echo __scan_ok__")
+                    "[ -d ${q(dataDir)} ] && echo __scan_ok__", 20_000)
             if (r.out.contains("__scan_ok__")) complete = true
             for (l in r.lines) {
                 val p = l.trim()

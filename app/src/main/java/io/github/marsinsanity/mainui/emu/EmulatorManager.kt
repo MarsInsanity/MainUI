@@ -303,7 +303,7 @@ class EmulatorManager(
             raCores = null; corePaths = emptyMap(); coresComplete = false; raCoreDir = null; raInfoDir = null
             return
         }
-        val cfg = if (Root.knownAvailable() || Root.available()) Root.readFile(raConfigPath(ra))
+        val cfg = if (Root.knownAvailable() || Root.available()) Root.readText(raConfigPath(ra))
         else runCatching { File(raConfigPath(ra)).readText() }.getOrNull()
         val scan = RetroArchCores.scan(ctx, ra, cfg)
         corePaths = scan.cores
@@ -314,7 +314,7 @@ class EmulatorManager(
         // .info files give us names + extensions so cores we don't know still show up.
         val info = HashMap<String, Pair<String, Set<String>>>()
         if (Root.knownAvailable()) {
-            val lines = Root.exec("cd ${Root.q(scan.infoDir)} 2>/dev/null && grep -H -E '^(display_name|supported_extensions) *=' *.info").lines
+            val lines = Root.quick("( cd ${Root.q(scan.infoDir)} 2>/dev/null && grep -H -E '^(display_name|supported_extensions) *=' *.info 2>/dev/null )", 10_000).lines
             val tmp = HashMap<String, Pair<String?, Set<String>>>()
             for (line in lines) {
                 val file = line.substringBefore(':').removeSuffix("_libretro.info")
@@ -611,7 +611,7 @@ class EmulatorManager(
         if (settings.prefs.getString("$RA_CONFIG_STAMP:$pkg", null) == raConfigStamp() &&
             runCatching { Root.Shell.run("grep -q '^input_android_physical_keyboard *= *\"MainUI Keyboard\"' ${Root.q(raConfigPath(pkg))} && echo yes", 5000) }
                 .getOrNull()?.out?.contains("yes") == true) return
-        if (Root.exec("pidof $pkg").out.isNotBlank()) return
+        if (Root.quick("pidof $pkg").out.isNotBlank()) return
         val (ok, msg) = configureRetroArch()
         io.github.marsinsanity.mainui.core.SessionLog.log("RetroArch configured by itself: $ok $msg")
     }
@@ -674,9 +674,8 @@ class EmulatorManager(
             wanted["state_slot"] = "\"0\""
         }
         val merged = RetroArchCores.mergeConfig(cfg, wanted)
-            ?: return false to ("retroarch.cfg looks incomplete, so nothing was changed. RetroArch writes it in full the " +
-                "first time it is quit from its own menu: open RetroArch once from its icon, allow storage access, " +
-                "quit it (Main Menu > Quit RetroArch), then try again.\n\n$path")
+            ?: return false to ("retroarch.cfg is incomplete, nothing was changed. Open RetroArch from its icon, " +
+                "allow storage access, quit it from its menu (Quit RetroArch), then try again.\n$path")
         val w = Root.writeFile(path, merged, backup = true)
         if (w.ok) settings.prefs.edit().putString("$RA_CONFIG_STAMP:$pkg", raConfigStamp()).apply()
         return if (w.ok) true to "RetroArch configured for MainUI"

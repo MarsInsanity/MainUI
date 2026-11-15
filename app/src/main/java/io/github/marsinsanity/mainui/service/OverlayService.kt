@@ -205,8 +205,13 @@ class OverlayService : AccessibilityService() {
             // (The process popup stops apps: never left up for the lock screen.)
             if (i.action == Intent.ACTION_SCREEN_OFF) {
                 if (overlay?.scenes()?.firstOrNull() is io.github.marsinsanity.mainui.ui.scenes.ProcessPopupScene) removeOverlay()
+                // The in-game menu / Game Switcher would show over the lock screen on waking (an
+                // accessibility overlay is above the keyguard), where B resumed the game behind
+                // it: hidden until the device is unlocked, and meanwhile out of the way of the swipe.
+                else setOverlayHidden(true)
                 return
             }
+            if (i.action == Intent.ACTION_USER_PRESENT || (i.action == Intent.ACTION_SCREEN_ON && !locked())) setOverlayHidden(false)
             for (delay in longArrayOf(700, 2500)) main.postDelayed({ recheckForeground("after ${i.action?.substringAfterLast('.')}") }, delay)
         }
     }
@@ -351,7 +356,9 @@ class OverlayService : AccessibilityService() {
             opening = false
             openId++ // its late arrival is dropped (and its pause undone)
         }
-        if (overlay != null) return HomePress.CLOSE
+        // (Hidden for the lock screen: HOME there is the lock screen's, never Continue on the hidden
+        // menu, which would resume the game behind the lock screen.)
+        if (overlay != null) return if (overlayHidden || locked()) HomePress.PASS else HomePress.CLOSE
         // Its own press opens the menu; a second press while it opens must not close it again.
         if (opening) return HomePress.IGNORE
         // (A stale "MainUI is in front", from the lock screen after waking: the game is.)
@@ -633,9 +640,32 @@ class OverlayService : AccessibilityService() {
         return view
     }
 
+    /** The overlay is hidden for the lock screen (see [setOverlayHidden]). */
+    @Volatile private var overlayHidden = false
+
+    /**
+     * Hides the overlay ([hidden]) without closing it (the game stays paused behind it):
+     * transparent and not touchable, so the lock screen shows and gets the swipe, and its keys are
+     * ignored. It keeps the focus: handing it to a game frozen behind it, which can't answer, would
+     * get the game reported as not responding.
+     */
+    private fun setOverlayHidden(hidden: Boolean) {
+        val v = overlay ?: run { overlayHidden = false; return }
+        if (overlayHidden == hidden) return
+        val lp = v.layoutParams as? WindowManager.LayoutParams ?: return
+        val off = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        lp.flags = if (hidden) lp.flags or off else lp.flags and off.inv()
+        lp.alpha = if (hidden) 0f else 1f
+        overlayHidden = hidden
+        v.inputBlocked = hidden
+        runCatching { getSystemService(WindowManager::class.java).updateViewLayout(v, lp) }
+        if (!hidden) v.invalidate()
+    }
+
     fun removeOverlay() {
         val v = overlay ?: return
         overlay = null
+        overlayHidden = false
         val moved = v.takeMovedControllers()
         io.github.marsinsanity.mainui.core.SessionLog.log("overlay closed" + if (moved.isEmpty()) "" else ", controller axes moved on $moved")
         runCatching { getSystemService(WindowManager::class.java).removeView(v) }

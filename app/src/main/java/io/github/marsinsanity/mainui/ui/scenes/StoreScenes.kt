@@ -154,11 +154,24 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
             val versions = AppStore.installedVersions()
             // Newer builds signed by someone else than the installed app's: they can't update it.
             val blocked = all.filter { a -> otherSigner(a, versions) }.map { it.pkg }.toSet()
-            Loaded(all.filter { a ->
+            val found = all.filter { a ->
                 (q.isEmpty() || a.name.lowercase().contains(q) || a.summary.lowercase().contains(q) || a.pkg.contains(q)) &&
                     (category == null || category in a.categories) &&
                     (!updatesOnly || (a.pkg !in blocked && versions[a.pkg]?.let { v -> (a.apk?.versionCode ?: 0) > v } == true))
-            }, all.size, versions, blocked)
+            }
+            // A search lists the apps it names first: name starting with it, then a word of the name,
+            // then anywhere in the name, then summary / package hits ("nes" also matches "business").
+            // (Stable sort: alphabetical within each group.)
+            fun rank(a: AppStore.App): Int {
+                val n = a.name.lowercase()
+                return when {
+                    n.startsWith(q) -> 0
+                    Regex("""\b${Regex.escape(q)}""").containsMatchIn(n) -> 1
+                    n.contains(q) -> 2
+                    else -> 3
+                }
+            }
+            Loaded(if (q.isEmpty()) found else found.sortedBy { rank(it) }, all.size, versions, blocked)
         }) { (apps, total, versions, blocked) ->
             if (busy == "Loading apps...") busy = null
             // (the theme's own app icons, as for MainUI's apps in Apps)
@@ -475,9 +488,10 @@ class EmulatorDetailScene(host: SceneHost, private val id: String) : ListScene(h
                     sub = page.removePrefix("https://").removeSuffix("/"), preview = preview, onSelect = {
                     // Over an installed copy (maybe the stable one from elsewhere: DuckStation's page has
                     // the beta of its rewrite, which resets settings), only once the user has read why.
+                    // (Short: a dialog shows five lines; the entry's note is on the page itself.)
                     if (updates) host.push(DialogScene(host, "${e.def.name} from $site",
-                        "This installs $site's newest build over the installed ${e.def.name}." + (e.note?.let { "\n\n$it" } ?: ""),
-                        "INSTALL", "CANCEL") { get() })
+                        "Installs $site's newest build over the installed ${e.def.name}. Its settings may be reset: " +
+                            "your saves stay, but back up first.", "INSTALL", "CANCEL") { get() })
                     else get()
                 })
             }
@@ -552,7 +566,8 @@ class EmulatorUpdatesScene(host: SceneHost) : ListScene(host, "Emulator updates"
     override fun onResume() = build()
 
     private fun check() {
-        if (status != null) return
+        // (Not `status != null`: after a failed check that keeps its message, and Y must try again.)
+        if (checking) return
         status = "Checking..."
         checking = true
         build()
