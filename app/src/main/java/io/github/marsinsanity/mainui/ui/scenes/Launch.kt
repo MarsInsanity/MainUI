@@ -18,35 +18,68 @@ object Launch {
     fun gameSystem(id: String): GameSystem? =
         MainUI.games.systems(MainUI.settings.showUnknownFolders).firstOrNull { it.id == id }
 
+    /**
+     * When the game being started was asked for: a second A press meanwhile is ignored. Starting
+     * takes a while on a slow chip (root checks, a paused game to wake), and a second start would
+     * boot the game twice, use up its resume state and then save the fresh boot over it.
+     */
+    @Volatile private var launchingSince = 0L
+    private const val LAUNCH_GUARD_MS = 15_000L
+
+    /** The start ended (the emulator came up, or it failed and said why): A works again. */
+    fun launchDone() { launchingSince = 0L }
+
+    /**
+     * A game being closed by Exit Game: MainUI is already in front (so the game got its onPause /
+     * onStop) while it writes its last saves before it is stopped. Nothing starts meanwhile: a game
+     * sent to that emulator would be stopped with it.
+     */
+    @Volatile var exiting: String? = null
+
+    private fun stillExiting(host: SceneHost): Boolean {
+        if (exiting == null) return false
+        host.toast("Still closing the last game...")
+        return true
+    }
+
     /** Starts [game]; resumes it instead if it is the running session. */
     fun game(host: SceneHost, game: Game) {
+        if (stillExiting(host)) return
+        val now = android.os.SystemClock.uptimeMillis()
+        // (0 = no start pending: uptime itself is under the guard's length right after boot.)
+        if (launchingSince != 0L && now - launchingSince < LAUNCH_GUARD_MS) return
+        launchingSince = now
         val active = MainUI.sessions.active
         if (active != null && active.gameKey == game.key) {
             // Only bring the emulator back if it is still running the game; otherwise
             // relaunch the game (resuming a dead emulator would open it empty).
             // Off the UI thread: the running checks and the resume use root or wait for an answer.
             host.io({ MainUI.sessions.isRunning(active) && !MainUI.sessions.gameEnded(active) && MainUI.sessions.resume() }) { resumed ->
-                if (!resumed) launchFresh(host, game)
+                if (!resumed) launchFresh(host, game) else launchDone()
             }
             return
         }
-        launchFresh(host, game)
+        // A game left for another one, still running in its emulator: brought back where it was.
+        host.io({ MainUI.sessions.resumeLeft(game.key) }) { resumed -> if (!resumed) launchFresh(host, game) }
     }
 
     private fun launchFresh(host: SceneHost, game: Game) {
         if (game.isAndroid) { app(host, game.pkg!!, game.name, asGame = true); return }
         val def = systemDef(game.systemId)
-        if (def == null) { host.toast("Unknown system ${game.systemId}"); return }
+        if (def == null) { launchDone(); host.toast("Unknown system ${game.systemId}"); return }
         def.menuItemFor(game.file)?.let { launchMenuItem(host, def, game, it); return }
-        if (game.file?.exists() != true) { host.toast("File not found"); return }
+        if (game.file?.exists() != true) { launchDone(); host.toast("File not found"); return }
         if (io.github.marsinsanity.mainui.data.AndroidPorts.isPort(game.file)) { launchPort(host, game); return }
         val em = MainUI.emulators
         host.io({
+            // In MainUI's first seconds the emulators may not be detected yet: wait for that.
+            em.awaitDetection()
             // Cores may have been added in RetroArch since the last scan: look again before giving up.
             var opt = em.choose(def, game)
             if (opt != null && opt.isRetroArch && opt.installed != true) { em.refreshCores(); opt = em.choose(def, game) }
             opt
         }) { opt ->
+            if (!(opt == null || opt.installed != false)) launchDone()
             when {
                 opt == null || opt.installed != false -> start(host, def, game)
                 opt.isRetroArch && em.raPackage != null -> CoreInstall.offer(host, opt.core) { start(host, def, game) }
@@ -68,7 +101,8 @@ object Launch {
      * Switcher: always with the entry's emulator, and its file needn't exist.
      */
     private fun launchMenuItem(host: SceneHost, def: SystemDef, game: Game, item: io.github.marsinsanity.mainui.data.SystemMenuItem) {
-        host.io({ MainUI.emulators.optionFor(item.emulator) }) { opt ->
+        host.io({ MainUI.emulators.awaitDetection(); MainUI.emulators.optionFor(item.emulator) }) { opt ->
+            if (opt == null || opt.installed != true) launchDone()
             when {
                 opt == null -> host.toast("Unknown emulator ${item.emulator}")
                 opt.installed != true -> host.push(DialogScene(host, "Emulator not installed",
@@ -76,7 +110,7 @@ object Launch {
                     host.push(EmulatorDetailScene(host, item.emulator.removePrefix("sa:")))
                 })
                 else -> host.io({ MainUI.sessions.launch(def, game, opt) }) { err ->
-                    if (err != null) host.push(DialogScene(host, "Can't start ${item.name}", err, "OK", null))
+                    if (err != null) { launchDone(); host.push(DialogScene(host, "Can't start ${item.name}", err, "OK", null)) }
                 }
             }
         }
@@ -87,7 +121,8 @@ object Launch {
      * which can wait for the root shell.
      */
     fun app(host: SceneHost, pkg: String, label: String, asGame: Boolean) {
-        host.io({ MainUI.sessions.launchApp(pkg, label, asGame) }) { err -> if (err != null) host.toast(err) }
+        if (stillExiting(host)) return
+        host.io({ MainUI.sessions.launchApp(pkg, label, asGame) }) { err -> if (err != null) { launchDone(); host.toast(err) } }
     }
 
     /** An Android app in the Ports system: started as the app its port file names. */
@@ -97,13 +132,14 @@ object Launch {
             val pkg = io.github.marsinsanity.mainui.data.AndroidPorts.packageOf(f)
                 ?: return@io "${f.name} names no Android app (its first line must be a package name, like com.example.game)"
             MainUI.sessions.launchApp(pkg, game.name, asGame = true, port = game)
-        }) { err -> if (err != null) host.push(DialogScene(host, "Can't start ${game.name}", err, "OK", null)) }
+        }) { err -> if (err != null) { launchDone(); host.push(DialogScene(host, "Can't start ${game.name}", err, "OK", null)) } }
     }
 
     private fun start(host: SceneHost, def: SystemDef, game: Game) {
         val f = game.file
         if (def.unzip.isNotEmpty() && f != null && f.isFile && f.extension.equals("zip", true)) { startZipped(host, def, game, f); return }
         host.io({ MainUI.sessions.launch(def, game, null) }) { err ->
+            if (err != null) launchDone()
             if (err != null) host.push(io.github.marsinsanity.mainui.ui.DialogScene(host, "Can't start game",
                 "$err\n\nInstall it, or press SELECT on the game > Core to pick another emulator.", "OK", null))
         }
@@ -115,6 +151,9 @@ object Launch {
      */
     private fun startZipped(host: SceneHost, def: SystemDef, game: Game, zip: java.io.File) {
         host.io({ runCatching { ZipImages.images(zip, def.unzip) } }) { r ->
+            // What comes next (a disc picker, the unpack question, or starting an image unpacked
+            // earlier through Launch.game again) arms the guard itself when it starts the game.
+            launchDone()
             val images = r.getOrNull().orEmpty()
             if (images.isEmpty()) {
                 host.push(DialogScene(host, "Can't start game", r.exceptionOrNull()?.let { "${zip.name} can't be read: ${it.message}" }

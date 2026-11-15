@@ -363,14 +363,170 @@ Open, not started or paused:
   battery) are done. Lane B still needs a review. Lanes C (lists, pop-ups, dialogs) and D (Game
   Switcher, in-game menu) are open. Test them on the Pocket 2+, whose screen is the Miyoo's size.
 - **RetroArch auto state**: RetroArch's own auto-save state could in principle be older than the
-  game's in-game save (the hazard fixed for Dolphin). Not looked at yet.
+  game's in-game save (the hazard fixed for Dolphin). Confirmed by code review in the bug hunt
+  (section 10, open item "RetroArch auto state over a newer in-game save"); not fixed yet.
 - Relaunching the game that is already running logs "the game wasn't ready" for auto load. Harmless.
 - Standalone emulators other than RetroArch, PPSSPP and Dolphin are only partly tested on a real
   device. README "Known limitations" has the list. The light ones can be tested on the Pocket 2+.
 
 ---
 
-## 10. Quick start (copy in order)
+## 10. Usability bug hunt (2026-11-15)
+
+A hunt for bugs that ruin using MainUI, run from the PC with Claude Code agents: 12 agents each
+read one area of the code, device testers drove the Pocket 2+ over adb (one at a time), and
+reviewer agents checked every fix before it stayed. Every finding below was checked against the
+code before it was fixed or listed. Device-test results are at the end of this section.
+
+### Fixed
+
+Battery, heat and memory:
+- **The screen never turned off on MainUI or with the in-game menu open**: `MainActivity` and the
+  overlay window set `FLAG_KEEP_SCREEN_ON` for their whole life, so the screen timeout never applied. Now only a scene running a long job keeps it on
+  (`Scene.keepsScreenOn`: busy panels, store downloads, the emulator update check, a scrape).
+- **Idle redraws at 60 fps**: a selected name too long for its row scrolled with a full-screen redraw
+  every frame, pauses included. Now ~30 fps while it moves, nothing during the pauses.
+- **Pictures kept while a game runs**: box art, screenshots and icons (tens of MB) stayed decoded
+  behind games on a 2 GB device. They are dropped 10 s after MainUI stops (and on `onTrimMemory`,
+  which doesn't come while the overlay service keeps the process important).
+
+Crashes:
+- **A root command outliving its timeout killed the launcher**: its reader threads threw after
+  `destroyForcibly()` (`Root.run`).
+- **Out of memory during a big scrape killed the launcher**: the scraper's worker threads now catch
+  it; the game counts as an error.
+
+Lost progress or data:
+- **A game whose save failed could never be left** (found on the device: a RetroArch that hung, a
+  PPSSPP that couldn't write its states): Exit Game and the Game Switcher refused, with no way out
+  but a force stop. Now the message says so, and choosing Exit Game again exits without saving.
+- **Going back to a game still running in its emulator turned auto save off** (found on the
+  device): MainUI started it again, the emulator only came to the front, and the auto load waited
+  3 minutes for a fresh start that never came, keeping automatic saves off (progress lost on Exit).
+  With root, a game left for another one and still running is now brought back where it was.
+- **Exit Game stopped games while frozen**: behind the in-game menu a game never gets `onPause` /
+  `onStop`, where Android games, ports and many emulators save. With root it is now thawed, MainUI
+  comes in front, its writes finish, then it is stopped; nothing can be started meanwhile
+  ("Still closing the last game...").
+- **A twice started a game twice**, using up its resume state and then saving the fresh boot over it.
+  A start is now guarded until MainUI leaves the screen or the start fails.
+- **"MainUI data folder" moved data on every LEFT / RIGHT step** and could leave favorites, recents
+  and play time split over two folders. Now a choice with a confirmation; the whole MainUI folder is
+  copied (library first) before switching; "SD card" is refused when the card can't be written.
+- **Slot preview said "Empty"** for slots that hold a state saved outside MainUI's menu: now
+  "No preview".
+
+Things that didn't work:
+- **Short Home inside MainUI did nothing** (Android pauses the activity before `onNewIntent`, so
+  `resumed` was always false). Verified on the Pocket 2+: Home goes to the main menu, then the Game
+  Switcher.
+- **Games vanished**: a `.cue` / `.gdi` / `.m3u` hid the files it lists even in a system that can't
+  open it (PS2 `.cue`, Amiga or C64 `.m3u`).
+- **ES-DE / Batocera folder names weren't recognized**: `n3ds`, `fbneo`, `gamecube`, `pokemini`,
+  `colecovision`, `tg16`, `tg-cd`, `megacd`, `msx1` are now aliases (`systems.json`; note that
+  `tools/gen_systems.py` would drop them if `systems.json` were regenerated).
+- **Turning off the Emulators menu or the Android system made their apps unreachable**: they are
+  listed in Apps while their menu is off.
+- **"Emulator not installed" in MainUI's first seconds** (detection still running): launches wait
+  for the first detection.
+- **RetroArch never opened by hand hung on a black screen** (found on the device: it had no storage
+  permission, which its own first start asks for). With root, MainUI now grants an emulator the
+  storage permission it declares, at install and before each start (`pm grant`, only that
+  permission, never all of an app's). Verified on the Pocket 2+: µCity now loads in RetroArch.
+  "Configure RetroArch" now says what to do when `retroarch.cfg` is still a stub.
+- **A core download the user left with Home still started its game later** over the running one.
+- **Scraping one game gave up when ScreenScraper refused the account** (login, quota, closed); the
+  free sources are now tried, as in a full run.
+- **Long press opened the options of the selected item**, not the one under the finger (lists, grid,
+  row).
+- **Recents put the cursor on another game** after playing one.
+- **Holding Back for the process popup also left the screen** behind it; with hold-Back on, Back now
+  acts on release when it was a short press.
+- **App Store > Emulators jumped back to the top** after every emulator page.
+
+Store and updates:
+- **An emulator update that can never install (other signature) was offered and downloaded every
+  day**: now refused once, with the reason, and not offered again while the same app is installed.
+- **Debug builds got MainUI release notices** they can't install (release key over the PC's key):
+  none now, and Settings > Updates says to update from the PC.
+- Store icons and theme previews are kept out of the gallery (`MainUI/cache/.nomedia`); APKs handed
+  to Android's installer are deleted after an hour; the App Store list says when it stops at 1500.
+- **Process manager**: START (kill all) is in the hints and says what it did.
+
+### Emulators only on Google Play
+
+Checked each emulator whose only source in `emulators.json` was Google Play or a website:
+- **DuckStation**: its official beta APKs (signed like the Play version) are on
+  `downloads.duckstation.org/android-testing/`. New source type `"apkpage"`: MainUI installs the
+  newest APK that page links, and finds updates by the build number in its name (which is the
+  version code). Only a build that came from that page gets automatic updates; installing it over
+  another copy asks first, since the beta resets settings (saves, memory cards and BIOS stay). The
+  page says the APK may not be redistributed: MainUI downloads it from duckstation.org itself.
+- **DraStic**: no longer on Google Play (its page is gone) and not sold anywhere else: the Play link
+  is removed; the note points to SeedlessDS (DraStic's core, from GitHub).
+- **Redream** and **Yaba Sanshiro 2**: no Android download outside Google Play exists (Redream's site
+  has desktop builds only; Yaba Sanshiro's GitHub repository and website are gone). Their notes say
+  so and name what else runs those systems (Flycast; RetroArch's Saturn cores).
+- PPSSPP, Dolphin and Mupen64Plus AE are on F-Droid (found automatically). Kenji-NX's and Eden's
+  GitHub release repositories are blocked by a DMCA notice; not used.
+
+### Open (real, not fixed yet)
+
+Most severe first, each with the fix the review suggested:
+- **RetroArch auto save writes into the user's slot**: the Game Switcher / Exit auto save presses
+  RetroArch's save key on the slot it is on (slot 0, or the slot the user last used), replacing that
+  save; its preview isn't updated. Fix: step to RetroArch's auto slot (-1) for the auto save and back
+  (needs a device check that the slot keys reach -1). `emu/Controllers.kt` `saveToResume`.
+- **RetroArch auto state over a newer in-game save**: after RetroArch dies mid-game (crash, killed
+  for memory), it auto-loads `.state.auto`, older than the newest `.srm`; with SRAM in the state the
+  in-game save is overwritten. Fix: before a RetroArch launch, skip the auto state when the save
+  file is newer (as for Dolphin), or `block_sram_overwrite`.
+- **A second game in the same emulator from the Game Switcher**: emulators whose recipe has only
+  `NEW_TASK` (Flycast, PPSSPP, melonDS, Mupen64Plus, MAME4droid, Redream) may stack a second game
+  screen on the running one, and the previous game keeps running behind (both use CPU and RAM).
+  Fix: force-stop the running emulator (root) before starting another game in it.
+- **A session restored after MainUI's process restarts is never ended** when the game ended
+  meanwhile (Android kills MainUI under memory pressure during big games). Fix: on start, end a
+  restored session whose emulator isn't in front.
+- **Magisk's "granted Superuser" toast on every root command**: `Root.exec` starts a new `su` per
+  command (the process manager uses 2 per open / refresh, each return to MainUI 1+), and the toast
+  covers the footer hints. Fix: run them through the persistent `Root.Shell`; meanwhile set Magisk >
+  Settings > Superuser notification to None.
+- **Store screens swallow B while busy** (refresh, download): only Home leaves. Fix: B cancels
+  (`Http.Cancelled`) or leaves while it finishes. Similarly a background job that throws leaves a
+  scene's busy text set (`host.io` doesn't call `done`).
+- **Daily emulator update check downloads ~22 MB** of F-Droid and IzzyOnDroid indexes even when no
+  installed emulator comes from them. Fix: refresh only repositories that have an installed
+  emulator, at low priority, not during a game.
+- **Theme update unpacks over the installed theme** (files the new version dropped stay; a failed
+  unpack leaves it half-written). Fix: unpack to `.<name>.new`, then swap.
+- Smaller ones: generic pads sending `KEYCODE_BUTTON_1..16` can't select or go back; the on-screen
+  keyboard doesn't repeat B (delete); network previews load first-in-first-out (the selected one waits
+  behind skipped rows); package-manager label/icon lookups on the UI thread in the process lists;
+  SD card mount reloads run on the main thread; the folder picker stats files on the main thread;
+  games marked hidden in gamelist.xml can't be shown; a ScreenScraper screenshot is saved as box art
+  when SS has no box; whole-file CRCs of `.chd` / `.cso` can never match; free-source JPEGs are
+  re-encoded as PNG; with two RetroArch builds installed there is no way to pick one.
+
+### Device testing (Pocket 2+, LineageOS 19.1)
+
+- Navigation with an empty library (every menu, settings page, store page, theme screens, Game
+  Switcher, process manager, keyboard; rapid and held keys): no crash, no ANR, no freeze. Found the
+  Home, hold-Back and Emulators-list bugs above, and the Magisk toast.
+- Games (free homebrew: µCity in RetroArch, `cube.iso` in PPSSPP's MainUI build): launch from lists
+  and Recents with the right emulator and core; A twice starts once; real Home opens the menu with
+  the game paused; Save / Load with slots and previews; Native Menu; Exit with auto save stops the
+  emulator and MainUI comes back cleanly; "Still closing the last game..." right after Exit; auto
+  load after Exit and relaunch; resume from Recents; the Game Switcher; sleep / wake pauses and
+  resumes. Found the save-failed, auto-save-off, RetroArch-storage and overlay screen-on bugs above.
+  Open from it: the in-game menu shows over the lock screen after waking (B there resumes the game
+  behind the lock screen; fix: hide the overlay while the keyguard is up); PPSSPP's MainUI build
+  started straight into a game before its first-run setup has no memory stick (every save fails;
+  open it once by hand first, as section 5 says).
+
+---
+
+## 11. Quick start (copy in order)
 
 ```bash
 git clone https://github.com/MarsInsanity/MainUI.git

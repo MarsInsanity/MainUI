@@ -624,17 +624,27 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
         else -> false
     }
 
-    override fun onTap(x: Float, y: Float): Boolean {
-        if (tiles.isEmpty()) return false
+    /** The tile index at logical ([x], [y]) on the current page, or null. */
+    private fun tileAt(x: Float, y: Float): Int? {
+        if (tiles.isEmpty()) return null
         val cellW = 155f; val cellH = 170f
         val x0 = Gfx.centred(host.logicalWidth, 640f) + (640f - cols * cellW) / 2
         val y0 = gridTop(host.logicalHeight, MainUI.themes.current.onionLayout)
         val c = floor((x - x0) / cellW).toInt(); val r = floor((y - y0) / cellH).toInt()
-        if (c !in 0 until cols || r !in 0 until rows) return false
-        val idx = (index / (cols * rows)) * cols * rows + r * cols + c
-        if (idx >= tiles.size) return false
+        if (c !in 0 until cols || r !in 0 until rows) return null
+        return ((index / (cols * rows)) * cols * rows + r * cols + c).takeIf { it < tiles.size }
+    }
+
+    override fun onTap(x: Float, y: Float): Boolean {
+        val idx = tileAt(x, y) ?: return false
         if (idx == index) tiles[idx].open() else { index = idx; MainUI.settings.systemsIndex = index }
         return true
+    }
+
+    /** A held system is selected first, so the options (SELECT) that follow are its own. */
+    override fun onLongPress(x: Float, y: Float): Boolean {
+        tileAt(x, y)?.let { if (it != index) { index = it; MainUI.settings.systemsIndex = index } }
+        return false
     }
 }
 
@@ -775,28 +785,42 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
     override fun onDragEnd() { dragAcc = 0f }
     override fun onFling(vx: Float, vy: Float) = false
 
-    override fun onTap(x: Float, y: Float): Boolean {
-        if (tiles.isEmpty()) return false
+    /** The tile index at logical ([x], [y]), or null. */
+    private fun tileAt(x: Float, y: Float): Int? {
+        if (tiles.isEmpty()) return null
         // (The window as it is for the current tiles: they may have changed since the last frame.)
         if (strip != null) {
             strip.follow(index, tiles.size)
-            val idx = strip.hit(x, y, host.logicalWidth, host.logicalHeight, tiles.size) ?: return false
-            if (idx == index) tiles[idx].open() else { index = idx; if (early) movedEarly = true; MainUI.settings.systemsIndex = index }
-            return true
+            return strip.hit(x, y, host.logicalWidth, host.logicalHeight, tiles.size)
         }
         val vis = visible(host.logicalWidth)
         scrollTo(vis)
         val count = min(vis, tiles.size)
         val x0 = (host.logicalWidth - count * HomeScenes.CELL_W) / 2
         val y0 = Gfx.HEADER + (host.logicalHeight - Gfx.HEADER - Gfx.FOOTER - HomeScenes.CELL_H) / 2
-        if (y < y0 || y > y0 + HomeScenes.CELL_H) return false
+        if (y < y0 || y > y0 + HomeScenes.CELL_H) return null
         val c = floor((x - x0) / HomeScenes.CELL_W).toInt()
-        if (c !in 0 until count) return false
-        val idx = first + c
-        if (idx !in tiles.indices) return false
-        if (idx == index) tiles[idx].open() else { index = idx; if (early) movedEarly = true }
-        if (!early) { if (home) MainUI.settings.mainMenuIndex = index else MainUI.settings.systemsIndex = index }
+        if (c !in 0 until count) return null
+        return (first + c).takeIf { it in tiles.indices }
+    }
+
+    /** Selects tile [idx] (as a tap on another tile does) and remembers it. */
+    private fun select(idx: Int) {
+        index = idx; if (early) movedEarly = true
+        if (strip != null) MainUI.settings.systemsIndex = index
+        else if (!early) { if (home) MainUI.settings.mainMenuIndex = index else MainUI.settings.systemsIndex = index }
+    }
+
+    override fun onTap(x: Float, y: Float): Boolean {
+        val idx = tileAt(x, y) ?: return false
+        if (idx == index) tiles[idx].open() else select(idx)
         return true
+    }
+
+    /** A held tile is selected first, so the options (SELECT) that follow are its own. */
+    override fun onLongPress(x: Float, y: Float): Boolean {
+        tileAt(x, y)?.let { if (it != index) select(it) }
+        return false
     }
 }
 

@@ -87,11 +87,16 @@ object Updater {
         return u
     }
 
-    /** True when automatic checks are on and the last one was a while ago. */
-    fun isDue(): Boolean = MainUI.settings.let { it.updateAutoCheck && System.currentTimeMillis() - it.updateLastCheck >= CHECK_EVERY_MS }
+    /**
+     * True when automatic checks are on and the last one was a while ago. Never for a debug build:
+     * it is signed with the PC's key, so a release (the release key) can't update it, and it is
+     * updated from the PC; offering releases would only nag and download them for nothing.
+     */
+    fun isDue(): Boolean = !BuildConfig.DEBUG &&
+        MainUI.settings.let { it.updateAutoCheck && System.currentTimeMillis() - it.updateLastCheck >= CHECK_EVERY_MS }
 
-    /** Version available from the last check, if newer than this build ("" = none known). */
-    fun knownAvailable(): String = MainUI.settings.updateAvailable.takeIf { avail ->
+    /** Version available from the last check, if newer than this build ("" = none known; none for a debug build). */
+    fun knownAvailable(): String = if (BuildConfig.DEBUG) "" else MainUI.settings.updateAvailable.takeIf { avail ->
         avail.substringAfterLast('.').toIntOrNull()?.let { it > installed } == true
     } ?: ""
 
@@ -118,7 +123,7 @@ object Updater {
     }
 
     /** SHA-256 of an APK file's signing certificate, or null if it can't be read. */
-    private fun archiveSigner(f: File): String? = runCatching {
+    fun archiveSigner(f: File): String? = runCatching {
         val pm = MainUI.app.packageManager
         @Suppress("DEPRECATION")
         val sig = if (Build.VERSION.SDK_INT >= 28) pm.getPackageArchiveInfo(f.path, PackageManager.GET_SIGNING_CERTIFICATES)

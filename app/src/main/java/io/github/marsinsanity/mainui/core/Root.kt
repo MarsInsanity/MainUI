@@ -212,15 +212,21 @@ object Root {
             val p = ProcessBuilder(*argv).start()
             val out = StringBuilder()
             val err = StringBuilder()
-            val tOut = Thread { p.inputStream.bufferedReader().forEachLine { out.appendLine(it) } }
-            val tErr = Thread { p.errorStream.bufferedReader().forEachLine { err.appendLine(it) } }
+            // The readers must never throw: after a timeout destroyForcibly() closes the streams
+            // under them (a root child can keep the pipe open), and an uncaught exception in any
+            // thread kills the whole launcher. Daemon threads, so a stuck pipe never holds anything.
+            fun reader(s: java.io.InputStream, into: StringBuilder) = Thread {
+                runCatching { s.bufferedReader().forEachLine { line -> synchronized(into) { into.appendLine(line) } } }
+            }.apply { isDaemon = true }
+            val tOut = reader(p.inputStream, out)
+            val tErr = reader(p.errorStream, err)
             tOut.start(); tErr.start()
             if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
                 p.destroyForcibly()
-                return Result(-2, out.toString(), "timeout")
+                return Result(-2, synchronized(out) { out.toString() }, "timeout")
             }
             tOut.join(1000); tErr.join(1000)
-            Result(p.exitValue(), out.toString(), err.toString())
+            Result(p.exitValue(), synchronized(out) { out.toString() }, synchronized(err) { err.toString() })
         } catch (e: Exception) {
             Log.w(TAG, "exec failed: ${argv.joinToString(" ")}", e)
             Result(-1, "", e.message ?: "error")

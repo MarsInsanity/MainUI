@@ -723,8 +723,30 @@ class StandaloneController(
             onSaved()
             onResumeSaved()
         }
-        // (A save the game itself just made, or a memory card the emulator writes a moment later,
-        // is written out before the emulator is stopped: Dolphin flushes its cards a second after.)
+        if (Root.knownAvailable() || Root.available()) {
+            // Never stopped frozen or paused: thawed, with MainUI brought in front of it, the app
+            // gets its onPause / onStop, where Android games, ports and many emulators write their
+            // progress, memory cards and SRAM. (Behind the in-game menu it never left the foreground;
+            // frozen up to the force stop, it would lose them.) The session ends first, so MainUI
+            // coming back doesn't park (freeze) it again mid-write; and nothing is started until it
+            // is stopped. (Without root it can't be stopped: left as it was, see exitGame.)
+            unpause()
+            if (MainUI.sessions.active?.pkg == pkg) MainUI.sessions.endActive()
+            io.github.marsinsanity.mainui.ui.scenes.Launch.exiting = pkg
+            try {
+                runCatching {
+                    MainUI.app.startActivity(android.content.Intent(MainUI.app, io.github.marsinsanity.mainui.MainActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                Thread.sleep(700)
+                // (A save the game itself just made, or a memory card the emulator writes a moment
+                // later, is written out before it is stopped: Dolphin flushes its cards a second after.)
+                waitForWrites()
+                return Root.forceStop(pkg)
+            } finally {
+                io.github.marsinsanity.mainui.ui.scenes.Launch.exiting = null
+            }
+        }
         waitForWrites()
         return Root.forceStop(pkg)
     }

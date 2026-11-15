@@ -374,7 +374,13 @@ class Gfx {
                     t < pause + travel -> (t - pause) / 1000f * speed
                     else -> overflow
                 }
-                wantsFrame = true
+                // Frames only while it moves, ~30 a second (40 px/s needs no more); none during the
+                // pauses at either end. Every frame redraws the whole screen on a slow chip.
+                redrawAfter(when {
+                    t < pause -> pause - t
+                    t < pause + travel -> 33L
+                    else -> (cycle - t).coerceAtLeast(1L)
+                })
                 val left = when (align) { Align.LEFT -> x; Align.CENTER -> x - maxW / 2; Align.RIGHT -> x - maxW }
                 c.save()
                 c.clipRect(left, cy - size, left + maxW, cy + size)

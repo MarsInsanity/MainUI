@@ -15,6 +15,7 @@ import java.io.IOException
  *  - an F-Droid compatible repository that has the package (signed index),
  *  - the latest GitHub release of the project ("get.github" in emulators.json),
  *  - RetroArch's own builds from retroarch.com ("get.buildbot"),
+ *  - the newest APK linked on the project's own download page ("get.apkpage", DuckStation's),
  *  - the Google Play page or the project's website (opened, not installed).
  */
 object EmulatorStore {
@@ -53,7 +54,15 @@ object EmulatorStore {
         val note get() = def.get["note"]?.takeIf { it.isNotBlank() }
         val buildbot get() = def.get["buildbot"] == "true"
         val url get() = def.get["url"]?.takeIf { it.startsWith("http") }
-        val canDownload get() = fdroid?.apk != null || github != null || mainui != null || buildbot || url != null
+        /**
+         * The project's own download page that links its APKs ("apkpage"): the newest one is
+         * installed from there. Its file names carry the app's version code (duckstation-12126.apk).
+         */
+        val apkPage get() = def.get["apkpage"]?.takeIf { it.startsWith("https://") }
+        /** The download page's site for the list: "duckstation.org". */
+        val apkPageSite get() = apkPage?.let { runCatching { java.net.URI(it).host }.getOrNull() }
+            ?.removePrefix("www.")?.removePrefix("downloads.")
+        val canDownload get() = fdroid?.apk != null || github != null || mainui != null || buildbot || url != null || apkPage != null
 
         /** One word for the list: where it comes from; installed, which build (the list marks it installed). */
         val source: String get() = when {
@@ -63,6 +72,7 @@ object EmulatorStore {
             buildbot -> "retroarch.com"
             mainui != null -> "MainUI build"
             github != null -> "GitHub"
+            apkPage != null -> apkPageSite ?: "website APK"
             url != null -> "download"
             play != null -> "Play Store"
             page != null -> "website"
@@ -179,6 +189,42 @@ object EmulatorStore {
         return Release(version, name, "$buildbot/$version/android/$name", -1, null)
     }
 
+    /**
+     * The newest APK linked on a project's own download page [page] (an "apkpage"): the link whose
+     * file name has the highest number, which is the app's version code there
+     * (DuckStation: downloads/duckstation-12126.apk). Its version is that number.
+     */
+    fun latestFromPage(page: String): Release = newestApkLink(page, Http.text(page))
+        ?: throw IOException("No APK on $page")
+
+    /** Every build a download page links (newest first): their versions are their version codes. */
+    fun pageBuilds(page: String): List<Release> = apkLinks(page, Http.text(page))
+
+    /** The newest .apk link in [html] (relative links resolved against [page]), or null. */
+    fun newestApkLink(page: String, html: String): Release? = apkLinks(page, html).firstOrNull()
+
+    /**
+     * The https .apk links in [html], newest first. A link's build is the number its file name ends
+     * with ("duckstation-12126.apk"; else its last number).
+     */
+    fun apkLinks(page: String, html: String): List<Release> {
+        val base = java.net.URI(page)
+        return Regex("""href\s*=\s*["']([^"'#?]+\.apk)["']""", RegexOption.IGNORE_CASE).findAll(html)
+            .mapNotNull { m ->
+                val url = runCatching { base.resolve(m.groupValues[1].trim()).toString() }.getOrNull() ?: return@mapNotNull null
+                if (!url.startsWith("https://")) return@mapNotNull null
+                val name = url.substringAfterLast('/')
+                val stem = name.dropLast(4)
+                val build = Regex("""(\d+)$""").find(stem)?.groupValues?.get(1)?.toLongOrNull()
+                    ?: Regex("""\d+""").findAll(stem).mapNotNull { it.value.toLongOrNull() }.lastOrNull()
+                    ?: return@mapNotNull null
+                Release(build.toString(), name, url, -1, null)
+            }
+            .distinctBy { it.url }
+            .sortedByDescending { it.version.toLong() }
+            .toList()
+    }
+
     /** "1.22.2" > "1.9.9" (numeric, not text, order). */
     fun newestVersion(versions: List<String>): String? = versions.maxWithOrNull { a, b ->
         val x = a.split('.').map { it.toIntOrNull() ?: 0 }
@@ -204,7 +250,17 @@ object EmulatorStore {
                 file.delete()
                 return "Not installed: the download is $got, another app than the installed $replaces"
             }
+            // Signed by someone else than the installed app (Play, an APK site, F-Droid's own key):
+            // Android can't update it from here. Said now, and not offered again for this version.
+            val mine = AppStore.installedSigner(replaces)
+            val theirs = Updater.archiveSigner(file)
+            if (mine != null && theirs != null && !mine.equals(theirs, ignoreCase = true)) {
+                file.delete()
+                EmulatorUpdates.refuse(replaces, r.version, mine)
+                return "Not installed: the installed $replaces comes from another source (other signature). " +
+                    "Uninstall it first to switch to this one"
+            }
         }
-        return AppStore.installFile(file, name, r.sha256, progress)
+        return AppStore.installFile(file, name, r.sha256, progress, grantStorage = true)
     }
 }

@@ -27,7 +27,8 @@
    "id": "3ds",
    "name": "3DS",
    "folders": [
-    "3ds"
+    "3ds",
+    "n3ds"
    ],
    "extensions": [
     "3ds",
@@ -243,7 +244,8 @@
    "id": "arcade",
    "name": "Arcade",
    "folders": [
-    "arcade"
+    "arcade",
+    "fbneo"
    ],
    "extensions": [
     "zip",
@@ -563,7 +565,8 @@
    "id": "coleco",
    "name": "Colecovision",
    "folders": [
-    "coleco"
+    "coleco",
+    "colecovision"
    ],
    "extensions": [
     "rom",
@@ -1133,7 +1136,8 @@
    "id": "gc",
    "name": "Gamecube",
    "folders": [
-    "gc"
+    "gc",
+    "gamecube"
    ],
    "extensions": [
     "elf",
@@ -1415,7 +1419,8 @@
    "id": "msx",
    "name": "MSX",
    "folders": [
-    "msx"
+    "msx",
+    "msx1"
    ],
    "extensions": [
     "cas",
@@ -1822,7 +1827,8 @@
    "name": "PC Engine CD/TurboGraphx CD",
    "folders": [
     "pcenginecd",
-    "turbografxcd"
+    "turbografxcd",
+    "tg-cd"
    ],
    "extensions": [
     "pce",
@@ -1850,7 +1856,8 @@
    "name": "PC Engine/TurboGraphx-16",
    "folders": [
     "pcengine",
-    "turbografx"
+    "turbografx",
+    "tg16"
    ],
    "extensions": [
     "pce",
@@ -2096,7 +2103,8 @@
    "id": "pokemonmini",
    "name": "Pokemon Mini",
    "folders": [
-    "pokemonmini"
+    "pokemonmini",
+    "pokemini"
    ],
    "extensions": [
     "min",
@@ -2198,7 +2206,8 @@
    "id": "segacd",
    "name": "Sega CD",
    "folders": [
-    "segacd"
+    "segacd",
+    "megacd"
    ],
    "extensions": [
     "bin",

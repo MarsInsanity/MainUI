@@ -99,6 +99,9 @@ class Storage(private val ctx: Context, private val settings: Settings) {
         return f
     }
 
+    /** The data root [location] ("auto" / "sd" / "internal") would use, without switching to it. */
+    fun dataRootFor(location: String): File = findDataRoot(location)
+
     private fun findDataRoot(location: String): File {
         val vols = volumes()
         val choice = when (location) {
@@ -119,7 +122,12 @@ class Storage(private val ctx: Context, private val settings: Settings) {
     private val made = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     fun dataDir(sub: String): File = File(dataRoot(), sub).apply {
-        if (path !in made && (isDirectory || mkdirs())) made += path
+        if (path !in made && (isDirectory || mkdirs())) {
+            made += path
+            // Store icons, theme previews and box art downloads aren't the user's pictures: kept
+            // out of the gallery (one .nomedia covers everything under cache/).
+            if (sub == "cache" || sub.startsWith("cache/")) runCatching { File(dataRoot(), "cache/.nomedia").createNewFile() }
+        }
     }
 
     val configDir get() = dataDir("config")

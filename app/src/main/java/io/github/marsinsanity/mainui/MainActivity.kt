@@ -39,7 +39,8 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // No FLAG_KEEP_SCREEN_ON: the launcher follows the screen timeout. Long jobs keep the
+        // screen on while they run (Scene.keepsScreenOn, MainUIView).
         window.attributes = window.attributes.apply {
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
@@ -89,8 +90,11 @@ class MainActivity : Activity() {
         val isHome = intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME)
         if (handleExtras(intent)) return
         if (!isHome) return
+        // Android pauses a resumed activity before it hands it a new intent, so `resumed` is always
+        // false here; the window keeps its focus through that pause. MainUI on screen = HOME inside it.
+        val showing = resumed || hasWindowFocus()
         val session = MainUI.sessions.active
-        if (!resumed && session != null && leftForSession) {
+        if (!showing && session != null && leftForSession) {
             // HOME while a game session exists: the game may still be running behind, keep it.
             keepSession = true
             // HOME pressed inside the game without the accessibility overlay: the fallback menu.
@@ -106,7 +110,10 @@ class MainActivity : Activity() {
             }
             return
         }
-        if (resumed) {
+        if (showing) {
+            // The resume after this pause is never "the game ended": a game being brought back
+            // (resume / the Game Switcher's A, its session already marked shown) keeps its session.
+            keepSession = true
             // Setup is finished with B / Continue, which loads the real library (HOME would skip that).
             if (view.scenes().any { it is io.github.marsinsanity.mainui.ui.scenes.SetupScene }) return
             when (MainUI.settings.homeInMainUI) {
@@ -131,6 +138,33 @@ class MainActivity : Activity() {
         val s = MainUI.sessions.active ?: return
         if (view.top() is InGameMenuScene) return
         view.push(InGameMenuScene(view, s, null, overlayMode = false))
+    }
+
+    /**
+     * MainUI's decoded pictures (box art, screenshots, icons: tens of MB) are given back a little
+     * after its screens are hidden: behind a game a 2 GB device's emulator needs them more. Android's
+     * own onTrimMemory(UI_HIDDEN) doesn't come while the overlay service keeps the process important.
+     * (Delayed: a quick screen off / on keeps them.)
+     */
+    private val trimCaches = Runnable {
+        if (!resumed) runCatching {
+            io.github.marsinsanity.mainui.ui.Images.clear()
+            io.github.marsinsanity.mainui.ui.Glyphs.clear()
+            MainUI.apps.trimIcons()
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        window.decorView.removeCallbacks(trimCaches)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // A game being started has come up in front (or something else did): A starts games again.
+        // (Not onPause: HOME inside MainUI and a superuser prompt pause it without anything starting.)
+        io.github.marsinsanity.mainui.ui.scenes.Launch.launchDone()
+        if (!isChangingConfigurations) window.decorView.postDelayed(trimCaches, 10_000)
     }
 
     override fun onResume() {

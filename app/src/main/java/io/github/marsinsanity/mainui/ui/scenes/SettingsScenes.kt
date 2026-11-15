@@ -141,9 +141,48 @@ class ControlSettingsScene(host: SceneHost) : ListScene(host, "Controls") {
 
 class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
     override val showPreview = false
+    private val dataLocations = listOf("auto" to "Auto", "sd" to "SD card", "internal" to "Internal")
 
     override fun onEnter() = build()
     override fun onResume() = build()
+
+    /**
+     * Uses [choice] for MainUI's data. The whole MainUI folder (library, recipes, cores, fonts, state
+     * pictures; not its cache) comes along to a folder that has no data yet; otherwise it would look
+     * emptied and stay behind in the old one. Files already there are kept.
+     */
+    private fun moveData(choice: String) {
+        val busy = io.github.marsinsanity.mainui.ui.BusyScene(host, "Moving MainUI's data...")
+        host.push(busy)
+        host.io({
+            runCatching {
+                val st = MainUI.storage
+                val oldRoot = st.dataRoot()
+                // Copied first, switched after: until then MainUI keeps reading and writing the old
+                // folder (a library read from an empty new one would look emptied, and what was
+                // written there meanwhile would keep the copy from coming along).
+                val newRoot = st.dataRootFor(choice)
+                val sd = st.volumes().firstOrNull { it.removable }?.dir?.canonicalPath
+                if (choice == "sd" && (sd == null || !newRoot.canonicalPath.startsWith(sd)))
+                    return@runCatching "Can't write to the SD card: MainUI's data stays where it is"
+                if (newRoot.canonicalPath != oldRoot.canonicalPath && java.io.File(newRoot, "config").list().isNullOrEmpty()) {
+                    // The library (config) first, then the rest; files already there are kept.
+                    oldRoot.listFiles()?.filter { !it.name.equals("cache", ignoreCase = true) }
+                        ?.sortedBy { !it.name.equals("config", ignoreCase = true) }?.forEach { f ->
+                            runCatching { f.copyRecursively(java.io.File(newRoot, f.name), overwrite = false) { _, _ -> OnErrorAction.SKIP } }
+                        }
+                }
+                MainUI.settings.dataLocation = choice
+                st.invalidate()
+                null
+            }.getOrElse { "Couldn't move MainUI's data: ${it.message}" }
+        }) { problem ->
+            host.pop(busy)
+            MainUI.reloadStorage()
+            build()
+            problem?.let { host.toast(it, 3500) }
+        }
+    }
 
     private fun build() {
         val s = MainUI.settings
@@ -160,18 +199,16 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
                 { s.metadataSource }) { s.metadataSource = it; MainUI.games.invalidate() },
             toggle("Show unknown rom folders", { s.showUnknownFolders }) { s.showUnknownFolders = it; MainUI.games.invalidate() },
             toggle("Show hidden games", { s.showHiddenGames }) { s.showHiddenGames = it; MainUI.games.invalidate() },
-            multi("MainUI data folder", listOf("auto" to "Auto", "sd" to "SD card", "internal" to "Internal"), { s.dataLocation }) {
-                // The library (favorites, recents, play time...) comes along to a data folder that has
-                // none yet; otherwise it would look emptied, and stay behind in the old folder.
-                val choice = it
-                host.io({
-                    val old = MainUI.storage.configDir
-                    s.dataLocation = choice
-                    MainUI.storage.invalidate()
-                    val new = MainUI.storage.configDir
-                    if (new.canonicalPath != old.canonicalPath && new.list().isNullOrEmpty())
-                        runCatching { old.copyRecursively(new, overwrite = false) }
-                }) { MainUI.reloadStorage() }
+            // A choice and a confirmation, not a value stepped through with LEFT / RIGHT: every
+            // change moves MainUI's data, so looking at the options mustn't.
+            action("MainUI data folder", dataLocations.firstOrNull { it.first == s.dataLocation }?.second ?: "Auto") {
+                host.push(io.github.marsinsanity.mainui.ui.PopMenuScene(host, "MainUI data folder", dataLocations.map { (id, label) ->
+                    UiItem(label, sub = if (id == s.dataLocation) "in use" else null, onSelect = {
+                        if (id != s.dataLocation) host.push(DialogScene(host, "MainUI data folder",
+                            "Keep MainUI's data (favorites, recents, play time, recipes, cores) in: $label?\n" +
+                                "It is copied there when that folder has none yet.") { moveData(id) })
+                    })
+                }))
             },
             action("Rom folders", if (roots.isEmpty()) "none found" else "${roots.size}") { host.push(RomFoldersScene(host)) },
             action("Create dArkOS folders") {

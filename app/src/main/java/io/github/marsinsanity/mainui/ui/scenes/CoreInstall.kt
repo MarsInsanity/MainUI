@@ -57,11 +57,15 @@ object CoreInstall {
                 }
             }
         }) { results ->
+            // Still waiting for it (the panel on top, MainUI in front)? A user who left with Home
+            // or went back to a game must not get the game this was for started over theirs.
+            val stillWaiting = host.top() === busy &&
+                io.github.marsinsanity.mainui.MainActivity.instance?.isShowing != false
             host.pop(busy)
             val failed = results.filter { it.second.isFailure }
             if (failed.isEmpty()) {
                 host.toast(if (cores.size == 1) "${em.coreDisplayName(cores[0])} installed" else "${cores.size} cores installed", 2500)
-                then?.invoke()
+                if (stillWaiting) then?.invoke()
             } else {
                 host.push(DialogScene(host, "Core download failed", failed.joinToString("\n") { (c, r) ->
                     "${em.coreDisplayName(c)}: ${r.exceptionOrNull()?.message ?: "failed"}"
