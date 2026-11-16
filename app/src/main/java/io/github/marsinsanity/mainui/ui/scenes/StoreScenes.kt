@@ -126,7 +126,7 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
         host.io({
             val repos = AppStore.repos()
             val errors = AppStore.refreshAll(repos.filter { it.enabled }) { busy = it; host.invalidate() }
-            AppStore.saveRepos(repos) // stores trusted fingerprints / names
+            AppStore.saveRefreshed(repos) // stores trusted fingerprints / names (merged: the list may have changed meanwhile)
             errors
         }) { errors ->
             busy = null
@@ -222,7 +222,9 @@ class AppStoreScene(host: SceneHost) : ListScene(host, "App Store", large = true
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
-        if (busy != null) return true
+        // While it works (refreshing 20 MB of indexes on slow Wi-Fi can take minutes) B still
+        // leaves; the refresh finishes in the background.
+        if (busy != null) { if (b == Btn.B && !repeat) close(); return true }
         when (b) {
             Btn.Y -> { if (!repeat) search(); return true }
             Btn.SELECT -> { if (!repeat) pickCategory(); return true }
@@ -338,7 +340,7 @@ class RepoScene(host: SceneHost) : ListScene(host, "Repositories") {
         host.io({
             val repos = AppStore.repos()
             val errors = AppStore.refreshAll(repos.filter { it.enabled }) { busy = it; host.invalidate() }
-            AppStore.saveRepos(repos)
+            AppStore.saveRefreshed(repos)
             errors
         }) { errors ->
             busy = null
@@ -353,7 +355,8 @@ class RepoScene(host: SceneHost) : ListScene(host, "Repositories") {
     }
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
-        if (busy != null) return true
+        // (B leaves while a refresh runs; it finishes in the background.)
+        if (busy != null) { if (b == Btn.B && !repeat) close(); return true }
         val r = list.current?.data as? AppStore.Repo
         if (b == Btn.Y && !repeat && r != null) {
             host.push(DialogScene(host, "Remove repository", "Remove ${r.name}?") {

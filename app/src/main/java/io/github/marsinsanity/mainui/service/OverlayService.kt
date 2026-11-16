@@ -147,6 +147,8 @@ class OverlayService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // (Remembered: if Android turns it off later, a force stop of MainUI does, MainUI says so.)
+        runCatching { MainUI.settings.prefs.edit().putBoolean("overlay_was_on", true).apply() }
         Freezer.thawAll()
         updateHotkeyListener()
         runCatching {
@@ -165,6 +167,8 @@ class OverlayService : AccessibilityService() {
     override fun onDestroy() {
         runCatching { unregisterReceiver(wakeReceiver) }
         instance = null
+        // Turned off on purpose (not a force stop, which doesn't get here): no "service is off" notice.
+        runCatching { MainUI.settings.prefs.edit().putBoolean("overlay_was_on", false).apply() }
         hotkeyGen.incrementAndGet()
         synchronized(hotkeyGen) { hotkeys?.stop(); hotkeys = null }
         removeOverlay()

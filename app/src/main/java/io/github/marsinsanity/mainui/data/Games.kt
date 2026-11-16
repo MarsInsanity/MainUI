@@ -205,7 +205,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             if (f.isDirectory) {
                 if (n.lowercase() in SystemRegistry.IGNORED_FOLDERS || n.lowercase() in MEDIA_FOLDERS) continue
                 val entry = gl.get(f)
-                if (entry?.hidden == true) continue
+                if (entry?.hidden == true && !MainUIRef.showHidden()) continue // (shown with Show hidden games)
                 // Folders named like a rom (e.g. "Game.m3u/") count as a game, like ES-DE.
                 if (f.extension.isNotEmpty() && system.def.accepts(f)) {
                     out += Game(system.id, f, entry?.name ?: f.nameWithoutExtension, imagePath = entry?.image, desc = entry?.desc)
@@ -219,7 +219,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
             if (!system.def.accepts(f)) continue
             if (n.lowercase() in hiddenByCue) continue
             val entry = gl.get(f)
-            if (entry?.hidden == true) continue
+            if (entry?.hidden == true && !MainUIRef.showHidden()) continue // (gamelist.xml <hidden>: shown with Show hidden games)
             out += Game(system.id, f, entry?.name?.takeIf { it.isNotBlank() } ?: cleanName(f.nameWithoutExtension),
                 imagePath = entry?.image ?: entry?.thumbnail, desc = entry?.desc)
         }
@@ -321,7 +321,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
                         if (f.extension.isNotEmpty() && system.def.accepts(f)) count("$rel/${f.name}") else walk(f, "$rel/${f.name}", depth + 1, gl)
                     }
                 } else if (system.def.accepts(f) && f.name != "gamelist.xml" && !isMetaDat(system, f) && f.name.lowercase() !in hidden &&
-                    gl.get(f)?.hidden != true && !isHiddenFile(system, f)) count("$rel/${f.name}")
+                    (gl.get(f)?.hidden != true || MainUIRef.showHidden()) && !isHiddenFile(system, f)) count("$rel/${f.name}")
                 // Files it could play but that are hidden (BIOS sets, disc tracks) aren't "unplayable" ones.
                 else if (!system.def.accepts(f) && f.extension.isNotEmpty() && f.name != "gamelist.xml" && f.extension.lowercase() !in NOT_GAMES)
                     others.merge(f.extension.lowercase(), 1, Int::plus)

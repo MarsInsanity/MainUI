@@ -261,6 +261,8 @@ class KeyboardScene(
     private val onDone: (String) -> Unit,
 ) : Scene(host) {
     override val isOverlay = true
+    // Held B keeps deleting (a pre-filled search or address is cleared without a press per letter).
+    override fun repeats(b: Btn) = b == Btn.B
     private val sb = StringBuilder(initial)
     private var cursor = initial.length
     private var shift = false

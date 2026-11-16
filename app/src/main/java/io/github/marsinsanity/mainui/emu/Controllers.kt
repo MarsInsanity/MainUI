@@ -782,19 +782,8 @@ class StandaloneController(
      * write_bytes stay the same twice), so stopping it can't cut a big state (PS2, Wii, 3DS) or the
      * game's own save short.
      */
-    private fun waitForWrites() {
-        val cmd = "for p in \$(pidof ${Root.q(pkg)}); do grep write_bytes /proc/\$p/io; done | awk '{s+=\$2} END {print s+0}'"
-        Thread.sleep(800)
-        val t0 = android.os.SystemClock.uptimeMillis()
-        var last = -1L
-        var same = 0
-        while (same < 2 && android.os.SystemClock.uptimeMillis() - t0 < 15_000) {
-            val w = Root.Shell.run(cmd, 3000).out.trim().toLongOrNull() ?: return
-            same = if (w == last) same + 1 else 0
-            last = w
-            Thread.sleep(400)
-        }
-    }
+    private fun waitForWrites() = waitForWritesOf(pkg)
+
 
     /**
      * Sends a hotkey spec ("keys:KEYCODE_F1" or "keys:KEYCODE_SHIFT_LEFT+KEYCODE_F7"): on MainUI's
@@ -811,5 +800,26 @@ class StandaloneController(
     companion object {
         fun keyLabel(spec: String) = Hotkeys.label(spec)
         const val DEFAULT_LOAD_DELAY_MS = 6000L
+
+        /**
+         * Waits (at most 15 s) until [pkg] stops writing (its processes' write_bytes stay the same
+         * twice): stopping it then can't cut a state, memory card or the game's own save short.
+         */
+        fun waitForWritesOf(pkg: String) {
+            // (All its processes, "pkg:EmulationProcess" ones too: the game's writes happen there.
+            // A process gone between ps and grep: its error mustn't end the wait.)
+            val cmd = "for p in \$(ps -A -o PID,NAME | awk -v n=${Root.q(pkg)} '\$2 == n || index(\$2, n \":\") == 1 {print \$1}'); " +
+                "do grep write_bytes /proc/\$p/io 2>/dev/null; done | awk '{s+=\$2} END {print s+0}'"
+            Thread.sleep(800)
+            val t0 = android.os.SystemClock.uptimeMillis()
+            var last = -1L
+            var same = 0
+            while (same < 2 && android.os.SystemClock.uptimeMillis() - t0 < 15_000) {
+                val w = Root.Shell.run(cmd, 3000).out.trim().toLongOrNull() ?: return
+                same = if (w == last) same + 1 else 0
+                last = w
+                Thread.sleep(400)
+            }
+        }
     }
 }

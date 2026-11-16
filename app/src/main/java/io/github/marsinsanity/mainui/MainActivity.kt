@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     /** The last pause was MainUI bringing the game to the front (see SessionManager.shownAt). */
     private var leftForGame = false
     private var resumedAt = 0L
+    private var overlayChecked = false
     /** Set when we were brought forward on purpose while the game keeps running. */
     private var keepSession = false
 
@@ -174,8 +175,22 @@ class MainActivity : Activity() {
         view.takeMovedControllers() // from now on: what the game behind misses
         // (Not the game this process paused on purpose: HOME inside MainUI pauses and resumes it.)
         if (!MainUI.sessions.isParked) io.github.marsinsanity.mainui.emu.Freezer.thawAll()
-        // Cores downloaded in RetroArch while MainUI was in the background.
-        MainUI.worker.execute { runCatching { MainUI.emulators.refreshCoresIfStale(15_000) } }
+        // Cores downloaded in RetroArch while MainUI was in the background; and a session restored
+        // after MainUI's process restarted whose game was quit meanwhile is ended (once).
+        MainUI.worker.execute {
+            runCatching { MainUI.sessions.endRestoredIfGone() }
+            runCatching { MainUI.emulators.refreshCoresIfStale(15_000) }
+        }
+        // The in-game menu service was on before and isn't now: Android turns an app's accessibility
+        // service off when the app is force stopped, and HOME in games then does nothing much.
+        // Said once per process, a few seconds in (the service connects shortly after MainUI starts).
+        if (!overlayChecked) {
+            overlayChecked = true
+            window.decorView.postDelayed({
+                if (OverlayService.instance == null && MainUI.settings.prefs.getBoolean("overlay_was_on", false))
+                    view.toast("The in-game menu service is off: Settings > Permissions & setup", 5000)
+            }, 4000)
+        }
         immersive()
         if (MainUI.sessions.active != null && leftForSession && !keepSession) {
             // Back in MainUI without a HOME press: the emulator / app closed itself.

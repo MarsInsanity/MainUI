@@ -90,10 +90,15 @@ data class EmuOption(
     val isRetroArch get() = ref.startsWith("ra:")
     val core get() = ref.removePrefix("ra:")
 
-    /** "Nintendo - Game Boy Advance (mGBA) (RetroArch)" -> "mGBA"; standalone names stay. */
+    /**
+     * "Nintendo - Game Boy Advance (mGBA) (RetroArch)" -> "mGBA, RetroArch"; standalone names stay.
+     * (A core says RetroArch: "Default (Flycast)" beside the standalone "Flycast" told them apart
+     * from nothing.)
+     */
     val shortName: String get() {
         if (!name.contains(" - ")) return name
-        return Regex("""\(([^()]+)\)""").find(name.substringAfter(" - "))?.groupValues?.get(1) ?: name
+        val core = Regex("""\(([^()]+)\)""").find(name.substringAfter(" - "))?.groupValues?.get(1) ?: return name
+        return if (isRetroArch) "$core, RetroArch" else core
     }
 }
 
@@ -224,12 +229,29 @@ class EmulatorManager(
         val read = android.Manifest.permission.READ_EXTERNAL_STORAGE
         val pm = ctx.packageManager
         val info = runCatching { pm.getPackageInfo(pkg, android.content.pm.PackageManager.GET_PERMISSIONS) }.getOrNull() ?: return
-        if (info.requestedPermissions?.contains(read) != true) return
-        if (android.os.Build.VERSION.SDK_INT >= 33 && (info.applicationInfo?.targetSdkVersion ?: 0) >= 33) return
-        if (pm.checkPermission(read, pkg) == android.content.pm.PackageManager.PERMISSION_GRANTED) return
         if (!Root.knownAvailable()) return
-        val r = Root.exec("pm grant ${Root.q(pkg)} $read; pm grant ${Root.q(pkg)} android.permission.WRITE_EXTERNAL_STORAGE", timeoutSec = 15)
-        io.github.marsinsanity.mainui.core.SessionLog.log("$pkg had no storage access: granted (${if (r.ok) "ok" else r.err.trim().take(80)})")
+        val asks = info.requestedPermissions.orEmpty()
+        val target = info.applicationInfo?.targetSdkVersion ?: 0
+        if (read in asks && !(android.os.Build.VERSION.SDK_INT >= 33 && target >= 33) &&
+            pm.checkPermission(read, pkg) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            // (Each on its own: WRITE is refused for apps declaring it only up to an older Android.)
+            val r = Root.exec("pm grant ${Root.q(pkg)} $read", timeoutSec = 15)
+            Root.exec("pm grant ${Root.q(pkg)} android.permission.WRITE_EXTERNAL_STORAGE 2>/dev/null", timeoutSec = 15)
+            io.github.marsinsanity.mainui.core.SessionLog.log("$pkg had no storage access: granted (${if (r.ok) "ok" else r.err.trim().take(80)})")
+        }
+        // Apps for Android 11+ read roms with "All files access" (an app-op, asked for on their first
+        // start): the same when it declares it and it was never given.
+        val manage = "android.permission.MANAGE_EXTERNAL_STORAGE"
+        if (android.os.Build.VERSION.SDK_INT >= 30 && manage in asks && target >= 30) {
+            val uid = info.applicationInfo?.uid ?: return
+            val ops = ctx.getSystemService(android.app.AppOpsManager::class.java)
+            // ("android:manage_external_storage": the op's name; its constant isn't in the public SDK.)
+            val mode = runCatching { ops.unsafeCheckOpNoThrow("android:manage_external_storage", uid, pkg) }.getOrNull()
+            if (mode != null && mode != android.app.AppOpsManager.MODE_ALLOWED) {
+                val r = Root.exec("appops set --uid ${Root.q(pkg)} MANAGE_EXTERNAL_STORAGE allow", timeoutSec = 15)
+                io.github.marsinsanity.mainui.core.SessionLog.log("$pkg had no All files access: granted (${if (r.ok) "ok" else r.err.trim().take(80)})")
+            }
+        }
     }
 
     /** The first detection (started with the app, slow on a small chip) has finished. */

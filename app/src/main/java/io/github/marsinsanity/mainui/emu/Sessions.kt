@@ -9,6 +9,7 @@ import io.github.marsinsanity.mainui.core.Storage
 import io.github.marsinsanity.mainui.data.Game
 import io.github.marsinsanity.mainui.data.Library
 import io.github.marsinsanity.mainui.data.SystemDef
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -96,6 +97,29 @@ class SessionManager(
     }.getOrNull()?.takeIf { it.startedAt >= bootTime() - 60_000 }
         private set
 
+    /** The session restored from disk when this process started (MainUI was killed during it). */
+    @Volatile private var restored: Session? = active
+
+    /**
+     * A session restored after MainUI's process restarted whose emulator isn't running any more
+     * (the game was quit while MainUI was gone): ended, or its game would count as still playing
+     * (play time, resume instead of start, "is running: exit it first" on Delete ROM). Once per
+     * process, with root to know. Off the UI thread.
+     */
+    fun endRestoredIfGone() {
+        val s = restored ?: return
+        restored = null
+        if (active !== s || !Root.knownAvailable()) return
+        // (A root call that failed or timed out, slow right after a restart: unknown, kept.)
+        val procs = Root.processes(s.pkg) ?: return
+        // (Or it runs at its own menus, the game quit there: a MainUI build says so.)
+        if (procs.isEmpty() || gameEnded(s)) {
+            io.github.marsinsanity.mainui.core.SessionLog.log("${s.name}: restored session, but its game isn't running in ${s.pkg}: ended")
+            // Only that session: one started meanwhile (the Game Switcher during these checks) stays.
+            endActive(only = s)
+        }
+    }
+
     /**
      * When MainUI last brought the session's game to the front (started or resumed it), uptime ms.
      * MainActivity compares it with its own pause to tell "left for the game" from "left for
@@ -129,17 +153,21 @@ class SessionManager(
         // The new session is in place before the game appears (MainActivity.onPause reads it while
         // the start is still under way); the previous one comes back if the start fails.
         val sw = swapIn(s)
-        // Another game still running in this same emulator (left for this one): stopped first (root)
-        // when the recipe doesn't clear its task. Sent a second game, such an emulator can stack a
-        // second, empty game screen on the running one (Flycast does), with the old game still
-        // running behind. (The Game Switcher saved it on leaving; a CLEAR_TASK emulator such as
-        // RetroArch replaces it the same way.)
+        // Another game still running in this same emulator (left for this one): stopped first (root).
+        // Sent a second game, an emulator without CLEAR_TASK can stack a second, empty game screen on
+        // the running one (Flycast does), with the old game still running behind; and RetroArch
+        // (CLEAR_TASK) deadlocks tearing its old game down. (The Game Switcher saved it on leaving.)
         // (Not an emulator opened by itself: a game started in its own menu, unknown to MainUI and
         // never saved by it, would be lost.)
         val other = (sw.prev?.takeIf { it.pkg == pkg } ?: leftRunning[pkg])?.takeIf { it.gameKey != s.gameKey && !isAdopted(it) }
-        if (other != null && pkg.isNotEmpty() && (intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TASK) == 0 && Root.knownAvailable() &&
-            Root.quick("pidof ${Root.q(pkg)}").out.isNotBlank()) {
+        // (Of the CLEAR_TASK recipes only RetroArch, which hangs as "not responding" tearing its old
+        // game down, seen on the device; the others close their old game themselves, saving as they
+        // do. A standalone emulator gets its writes finished first: it was frozen behind MainUI a
+        // moment ago, maybe mid-save.)
+        val stopsItself = !option.isRetroArch && (intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TASK) != 0
+        if (other != null && !stopsItself && pkg.isNotEmpty() && Root.knownAvailable() && Root.processes(pkg)?.isNotEmpty() == true) {
             io.github.marsinsanity.mainui.core.SessionLog.log("${other.name} still runs in $pkg: stopped before starting ${s.name}")
+            if (!option.isRetroArch) StandaloneController.waitForWritesOf(pkg)
             Root.forceStop(pkg)
             leftRunning.remove(pkg)
             Thread.sleep(300)
@@ -162,8 +190,24 @@ class SessionManager(
         return null
     }
 
-    /** Games left for another one (Game Switcher, Recents) whose emulator kept running them, by package. */
-    private val leftRunning = java.util.concurrent.ConcurrentHashMap<String, Session>()
+    /**
+     * Games left for another one (Game Switcher, Recents) whose emulator kept running them, by
+     * package. Kept on disk (this boot's only, like [active]): after MainUI's process restarts, such
+     * a game picked again is still brought back, and another game in its emulator still stops it.
+     */
+    private val leftRunning = object : java.util.concurrent.ConcurrentHashMap<String, Session>() {
+        fun save() = runCatching {
+            settings.prefs.edit().putString("left_running", JSONArray().apply { values.forEach { put(it.json()) } }.toString()).apply()
+        }
+        override fun put(key: String, value: Session): Session? = super.put(key, value).also { save() }
+        override fun remove(key: String): Session? = super.remove(key).also { if (it != null) save() }
+    }.apply {
+        runCatching {
+            val a = JSONArray(settings.prefs.getString("left_running", "[]"))
+            for (i in 0 until a.length()) runCatching { Session.from(a.getJSONObject(i)) }.getOrNull()
+                ?.takeIf { it.startedAt >= bootTime() - 60_000 }?.let { put(it.pkg, it) }
+        }
+    }
 
     /**
      * [gameKey] is a game left for another one and still running in its emulator: it becomes the
@@ -191,7 +235,9 @@ class SessionManager(
      */
     private fun swapIn(s: Session): Swapped {
         unpark()
-        val sw = synchronized(this) { Swapped(active, shownAt, loadPending).also { active = s } }
+        // (Whether the pending auto load was kept on disk: a State API one is in memory only.)
+        val persisted = loadPendingField?.let { settings.prefs.getString("load_pending", null) == "${it.gameKey}|${it.startedAt}" } == true
+        val sw = synchronized(this) { Swapped(active, shownAt, loadPending, persisted).also { active = s } }
         loadPending = null
         shownAt = android.os.SystemClock.uptimeMillis()
         launchedPackages += s.pkg
@@ -200,7 +246,7 @@ class SessionManager(
     }
 
     /** What [swapIn] replaced: the previous session and its state, back if the start fails. */
-    private class Swapped(val prev: Session?, val shownAt: Long, val loadPending: Session?)
+    private class Swapped(val prev: Session?, val shownAt: Long, val loadPending: Session?, val pendingPersisted: Boolean = false)
 
     /**
      * The start of [s] failed: the previous session (still running) is the session again, as it
@@ -208,7 +254,11 @@ class SessionManager(
      */
     private fun swapBack(s: Session, sw: Swapped) {
         synchronized(this) {
-            if (active === s) { active = sw.prev; shownAt = sw.shownAt; loadPending = sw.loadPending }
+            if (active === s) {
+                active = sw.prev; shownAt = sw.shownAt
+                // Back as it was: on disk only if it was (a State API pending stays in memory).
+                if (sw.pendingPersisted) loadPending = sw.loadPending else loadPendingField = sw.loadPending
+            }
         }
         persist()
         park()
@@ -278,6 +328,9 @@ class SessionManager(
             val def = s.emuRef?.let { emulators.defFor(it) }
             val api = def != null && StateApi.version(s.pkg) >= 2
             if (!api && (!settings.freezeStandalone || !Root.knownAvailable())) return@Thread
+            // Not to an emulator that isn't running: the pause broadcast would start it again in the
+            // background (and, refused for having no game, it would then be frozen there).
+            if (api && Root.knownAvailable() && Root.processes(s.pkg)?.isEmpty() == true) return@Thread
             synchronized(parkLock) {
                 if (!parkWanted || parked != null || active !== s) return@Thread
                 if (api) {
@@ -287,7 +340,8 @@ class SessionManager(
                     apiParker.execute {
                         val r = StateApi.call(s.pkg, "pause", timeoutMs = 2000)
                         if (r.ok) ApiPauses.paused(s.pkg)
-                        // Answered but refused (no game yet, can't pause): frozen like emulators without the API.
+                        // Answered but refused (no game yet, can't pause): frozen like emulators without the
+                        // API. (Picking its game unparks it before asking whether the game ended.)
                         else if (r.extras != null && settings.freezeStandalone && Root.knownAvailable()) synchronized(parkLock) {
                             if (parked === mark && Freezer.freeze(s.pkg, def?.freezeOnly)) parked = s.pkg to Freezer.generation
                         }
@@ -316,7 +370,7 @@ class SessionManager(
             // (Always sent: a pause that answered late still took effect.)
             apiParker.submit {
                 // Not to an emulator just force-stopped: the broadcast would start it again.
-                if (!Root.knownAvailable() || Root.quick("pidof ${Root.q(p.first)}").out.isNotBlank())
+                if (!Root.knownAvailable() || Root.processes(p.first)?.isNotEmpty() != false)
                     StateApi.call(p.first, "resume", timeoutMs = 2000)
                 ApiPauses.resumed(p.first)
             }
@@ -351,10 +405,12 @@ class SessionManager(
     }
 
     /** Ends the running session (play time accounting). Does not kill anything. */
-    fun endActive() {
+    /** Ends the active session ([only]: only if it is still that one; another started meanwhile stays). */
+    fun endActive(only: Session? = null) {
+        if (only != null && active !== only) return
         unpark()
         // Taken under the lock, so two callers at once (exit thread, onResume) count it once.
-        val s = synchronized(this) { active.also { active = null } } ?: return
+        val s = synchronized(this) { active?.takeIf { only == null || it === only }.also { if (it != null) active = null } } ?: return
         loadPending = null
         loadAsking = null
         ApiPauses.resumed(s.pkg) // (stopped or left: nothing to resume after a restart)
@@ -459,7 +515,8 @@ class SessionManager(
 
     fun isRunning(s: Session): Boolean {
         if (!Root.knownAvailable()) return true // can't tell, assume so
-        return Root.quick("pidof ${s.pkg}").out.isNotBlank()
+        // (Its "pkg:..." processes too: the game may run in one while the main process is gone.)
+        return Root.processes(s.pkg)?.isNotEmpty() ?: true
     }
 
     /**
@@ -587,7 +644,19 @@ class SessionManager(
      * Until it is loaded the running game is a fresh start: an automatic save now (leaving for
      * the Game Switcher, Exit) would overwrite the real save with it, so those skip the save.
      */
-    @Volatile private var loadPending: Session? = null
+    @Volatile private var loadPendingField: Session? =
+        active?.takeIf { settings.prefs.getString("load_pending", null) == "${it.gameKey}|${it.startedAt}" }
+
+    /**
+     * Kept with the session on disk: MainUI killed while a game starts (its biggest memory moment)
+     * would otherwise come back thinking nothing is pending, and save the fresh start over the state.
+     */
+    private var loadPending: Session?
+        get() = loadPendingField
+        set(v) {
+            loadPendingField = v
+            settings.prefs.edit().putString("load_pending", v?.let { "${it.gameKey}|${it.startedAt}" }).apply()
+        }
 
     /** True while [s]'s auto load hasn't happened yet (see [loadPending]). */
     fun autoLoadPending(s: Session?) = s != null && loadPending === s
@@ -673,7 +742,9 @@ class SessionManager(
         val log = io.github.marsinsanity.mainui.core.SessionLog::log
         if (c.loadDelayMs <= 0) { log("auto load ${s.name}: turned off for this emulator"); return }
         log("auto load ${s.name}: ${s.pkg} loads MainUI's resume state once the game runs (State API)")
-        if (marked) loadPending = s else loadAsking = s
+        // (In memory only, not kept on disk: a MainUI build loads the state itself even when MainUI
+        // dies meanwhile, and a restored flag nothing clears would keep automatic saves off.)
+        if (marked) loadPendingField = s else loadAsking = s
         Thread({
             val r = StateApi.call(s.pkg, "load", StateApi.RESUME_SLOT, waitMs = 180_000, settleMs = 2_000, notBefore = s.startedUptime)
             if (loadAsking === s) loadAsking = null

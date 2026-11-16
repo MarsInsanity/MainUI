@@ -81,6 +81,21 @@ object AppStore {
     private val configLock = Any()
 
     /**
+     * After a refresh: the names (and pinned keys) [refreshed] learned, merged into repos.json as it
+     * is now. The list the refresh started from may be stale: a repository turned off, removed or
+     * added meanwhile (B leaves a slow refresh) stays as the user left it.
+     */
+    fun saveRefreshed(refreshed: List<Repo>) = synchronized(configLock) {
+        val byAddress = refreshed.associateBy { it.address.trimEnd('/') }
+        val now = repos()
+        for (r in now) byAddress[r.address.trimEnd('/')]?.let { f ->
+            r.name = f.name
+            if (r.fingerprint == null) r.fingerprint = f.fingerprint
+        }
+        saveRepos(now)
+    }
+
+    /**
      * Writes repos.json. A key pinned there meanwhile (a refresh on another thread trusted it) is
      * kept even if [list] was read before that: a pin is never replaced by "none".
      */

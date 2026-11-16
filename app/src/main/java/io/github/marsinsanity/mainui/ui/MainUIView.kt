@@ -301,6 +301,18 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
             KeyEvent.KEYCODE_BUTTON_MODE, KeyEvent.KEYCODE_MENU -> Btn.MENU
             KeyEvent.KEYCODE_BUTTON_THUMBL -> Btn.L3
             KeyEvent.KEYCODE_BUTTON_THUMBR -> Btn.R3
+            // Generic pads Android has no layout for (DInput "USB Gamepad"s) report numbered
+            // buttons: the usual order, so such a pad can at least select, go back and page.
+            KeyEvent.KEYCODE_BUTTON_1 -> if (swap) Btn.B else Btn.A
+            KeyEvent.KEYCODE_BUTTON_2 -> if (swap) Btn.A else Btn.B
+            KeyEvent.KEYCODE_BUTTON_3 -> if (swap) Btn.Y else Btn.X
+            KeyEvent.KEYCODE_BUTTON_4 -> if (swap) Btn.X else Btn.Y
+            KeyEvent.KEYCODE_BUTTON_5 -> Btn.L1
+            KeyEvent.KEYCODE_BUTTON_6 -> Btn.R1
+            KeyEvent.KEYCODE_BUTTON_7 -> Btn.L2
+            KeyEvent.KEYCODE_BUTTON_8 -> Btn.R2
+            KeyEvent.KEYCODE_BUTTON_9 -> Btn.SELECT
+            KeyEvent.KEYCODE_BUTTON_10 -> Btn.START
             else -> null
         }
     }
@@ -343,7 +355,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
         when (event.action) {
             KeyEvent.ACTION_DOWN -> when {
                 event.repeatCount == 0 -> press(b, timerRepeat = false)
-                b.isDirection || b == Btn.L1 || b == Btn.R1 -> dispatch(b, true)
+                b.isDirection || b == Btn.L1 || b == Btn.R1 || stack.lastOrNull()?.repeats(b) == true -> dispatch(b, true)
             }
             KeyEvent.ACTION_UP -> release(b)
         }
