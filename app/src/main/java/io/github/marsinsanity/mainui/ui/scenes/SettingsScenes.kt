@@ -338,7 +338,12 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
                         UiItem(label, onSelect = {
                             host.push(DialogScene(host, "Create folders",
                                 "Create roms/<system> folders for every dArkOS system on $label?\nExisting folders are kept and used, nothing is overwritten.") {
-                                host.io({ createFolders(v) }) { host.toast("Created $it folders on $label", 2500); build() }
+                                host.io({ createFolders(v) }) { n ->
+                                    // (Not writable: no All files access, or Android 10's SD card. "Created 0" looked done.)
+                                    host.toast(if (n < 0) "Can't write to $label: no folders created" + (if (MainUI.storage.hasAllFilesAccess()) "" else " (All files access is off)")
+                                        else "Created $n folders on $label", 3000)
+                                    build()
+                                }
                             })
                         })
                     }))
@@ -353,9 +358,11 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
      * folder names (e.g. "genesis" for "megadrive") already exists. Nothing is
      * ever overwritten, moved or deleted.
      */
+    /** The number of folders made, or -1 when [vol] can't be written. */
     private fun createFolders(vol: io.github.marsinsanity.mainui.core.Storage.Volume): Int {
         val roms = vol.dir.listFiles()?.firstOrNull { it.isDirectory && it.name.equals("roms", true) } ?: java.io.File(vol.dir, "roms")
         roms.mkdirs()
+        if (!roms.isDirectory || !roms.canWrite()) return -1
         val existing = (roms.listFiles()?.filter { it.isDirectory }?.map { it.name.lowercase() } ?: emptyList()).toSet()
         var n = 0
         for (d in MainUI.systems.defs) {
@@ -513,7 +520,11 @@ class CoresScene(host: SceneHost) : ListScene(host, "RetroArch cores") {
             .sortedBy { em.coreDisplayName(it).lowercase() }
         val items = mutableListOf<UiItem>()
         val needed = needed
-        items += UiItem("Get cores for my games", sub = if (needed.isEmpty()) "nothing missing" else "${needed.size} to download",
+        // Without root RetroArch's cores can't be read (unknown, not "nothing missing"): where to get them.
+        if (em.raPackage != null && em.raCores == null && !Root.knownAvailable())
+            items += UiItem("Cores can't be read without root", sub = "open RetroArch > Online Updater > Core Downloader",
+                onSelect = { CoreInstall.openRetroArch(host) })
+        else items += UiItem("Get cores for my games", sub = if (needed.isEmpty()) "nothing missing" else "${needed.size} to download",
             disabled = needed.isEmpty(), onSelect = { CoreInstall.install(host, needed) { rescan() } })
         items += UiItem("Download all cores", sub = "everything on the libretro buildbot",
             onSelect = { CoreInstall.installAll(host) { rescan() } })

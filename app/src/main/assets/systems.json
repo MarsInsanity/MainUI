@@ -2008,6 +2008,7 @@
    ],
    "emulators": [
     "sa:armsx2",
+    "sa:armsx2_legacy",
     "sa:nethersx2"
    ],
    "screenscraper": 58,

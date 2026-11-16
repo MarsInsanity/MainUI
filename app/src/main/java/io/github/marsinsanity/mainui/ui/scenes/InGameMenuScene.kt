@@ -151,7 +151,11 @@ class InGameMenuScene(
             items += UiItem("Native Menu", data = Action.NATIVE)
             items += UiItem("Game Switcher", data = Action.SWITCHER)
             // (After a failed save the next Exit doesn't save: said where it is chosen.)
-            items += UiItem(if (saveFailedFor == sessionId) "Exit without saving" else "Exit Game", data = Action.EXIT)
+            items += UiItem(when {
+                saveFailedFor == sessionId -> "Exit without saving"
+                notSavedOnLeaving(exiting = true) -> "Exit Game (not saved)"
+                else -> "Exit Game"
+            }, data = Action.EXIT)
             // RetroArch's hotkeys are its own defaults; standalone emulators get theirs set here (root presses
             // them). MainUI builds (the State API) need no keys.
             if (sa != null && Root.knownAvailable() && controller.states != StateSupport.DIRECT) items += UiItem("Save / load keys...", data = Action.BIND)
@@ -291,7 +295,12 @@ class InGameMenuScene(
                 if (controller.load(slot)) { MainUI.sessions.loadDone(session); "State loaded from slot $slot" } else "Load failed"
             } else hotkeyAction("Load") { controller.load(if (controller.hasSlots) slot else 0).also { ok -> if (ok) MainUI.sessions.loadDone(session) } }
             // From the fallback menu the game's task comes back first, which takes longer.
-            Action.STATES_MENU, Action.NATIVE -> leaveThen(if (overlayMode) 250L else keyDelay) { controller.openNativeMenu() }
+            Action.STATES_MENU, Action.NATIVE -> leaveThen(if (overlayMode) 250L else keyDelay) {
+                // (No root and no in-game menu service: no way to press the emulator's menu key. Said,
+                // not the game coming back as if nothing was asked.)
+                if (!controller.openNativeMenu()) MainUI.sessions.toast("MainUI can't open $emuName's menu without root or the " +
+                    "in-game menu service (Settings > Permissions & setup): use the emulator's own button for it")
+            }
             Action.SWITCHER -> {
                 if (autoSave && controller.savesToResume) {
                     // OnionOS: leaving a game for the Game Switcher saves it (RetroArch: its auto
@@ -315,7 +324,7 @@ class InGameMenuScene(
                     }
                     return
                 }
-                sayNotSaved()
+                sayNotSaved(exiting = false)
                 resumeOnce()
                 closeMenu()
                 if (overlayMode) {
@@ -487,10 +496,24 @@ class InGameMenuScene(
         if (it) io.github.marsinsanity.mainui.core.SessionLog.log("${session.name}: not saved on leaving, its last save wasn't loaded yet")
     } && !MainUI.sessions.autoLoadAsking(session)
 
+    /**
+     * Auto save is on, but MainUI can't save this game on leaving: its emulator saves only through
+     * its own menu (and RetroArch or a standalone emulator's keys need root). Exit then closed it
+     * with nothing written and nothing said.
+     */
+    private fun notSavedOnLeaving(exiting: Boolean) = MainUI.settings.autoSaveOnExit && !session.isAndroidApp &&
+        controller.states != StateSupport.NONE && !controller.savesToResume &&
+        // (RetroArch with network commands and root: Exit's QUIT has it write its own auto state,
+        // which MainUI configured; only leaving it running for the Game Switcher saves nothing.)
+        !(exiting && controller.states == StateSupport.API && Root.knownAvailable())
+
     /** Auto save is on but this game isn't saved on leaving (its last save wasn't loaded yet): said. */
-    private fun sayNotSaved() {
+    private fun sayNotSaved(exiting: Boolean) {
         if (MainUI.settings.autoSaveOnExit && MainUI.sessions.autoLoadPending(session))
             MainUI.sessions.toast("${session.name} wasn't saved: its last save wasn't loaded yet (Load it from this menu first)")
+        else if (notSavedOnLeaving(exiting))
+            MainUI.sessions.toast("${session.name} wasn't saved: MainUI can't save $emuName" +
+                (if (Root.knownAvailable()) "" else " without root") + ". Save in the game or its own menu first")
     }
 
     /** This session, as [saveFailedFor] names it. */
@@ -535,7 +558,7 @@ class InGameMenuScene(
             }
             return
         }
-        if (!forced) sayNotSaved()
+        if (!forced) sayNotSaved(exiting = true)
         busy = "Exiting..."
         invalidate()
         resumed = true // quitting: force stop also kills a frozen process

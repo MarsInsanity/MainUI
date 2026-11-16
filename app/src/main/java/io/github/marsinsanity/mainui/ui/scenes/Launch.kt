@@ -81,7 +81,22 @@ object Launch {
             opt
         }) { opt ->
             if (!(opt == null || opt.installed != false)) launchDone()
+            // Without root RetroArch's cores can't be read (installed unknown) and its storage can't be
+            // granted, and the retroarch.com build has no cores: its first game opened on a missing core,
+            // black or at RetroArch's menu, and nothing said why. Said once per RetroArch build.
+            val raPkg = em.raPackage
+            val raNeedsSetup = opt != null && opt.isRetroArch && opt.installed == null && raPkg != null &&
+                !io.github.marsinsanity.mainui.core.Root.knownAvailable() && !MainUI.settings.prefs.getBoolean("ra_noroot_told:$raPkg", false)
             when {
+                raNeedsSetup -> {
+                    launchDone()
+                    MainUI.settings.prefs.edit().putBoolean("ra_noroot_told:$raPkg", true).apply()
+                    host.push(io.github.marsinsanity.mainui.ui.DialogScene(host, "RetroArch, first game",
+                        "Without root MainUI can't see RetroArch's cores or give it storage access. Once, before playing: " +
+                            "open RetroArch from its icon, allow storage access, and get the ${em.coreDisplayName(opt!!.core ?: "")} core " +
+                            "(Online Updater > Core Downloader). Then start the game again.",
+                        "OPEN RETROARCH", "LATER") { CoreInstall.openRetroArch(host) })
+                }
                 opt == null || opt.installed != false -> start(host, def, game)
                 opt.isRetroArch && em.raPackage != null -> CoreInstall.offer(host, opt.core) { start(host, def, game) }
                 else -> {

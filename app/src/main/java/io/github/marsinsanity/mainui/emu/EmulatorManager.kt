@@ -613,7 +613,14 @@ class EmulatorManager(
             .replace("%CORE_PATH%", if (core != null) raCorePath(pkg, core) else "")
             .replace("%RA_CONFIG%", raConfigPath(pkg))
 
-        val intent = Intent(def.action ?: Intent.ACTION_MAIN)
+        // The action filled in like the rest (melonDS's MainUI build takes "<its id>.LAUNCH_ROM");
+        // "none": no action (Vita3K's game activity only has a USB filter now, which an intent
+        // without an action still matches; Android 13+ drops one that matches no filter).
+        val intent = when (val a = def.action) {
+            "none" -> Intent()
+            null -> Intent(Intent.ACTION_MAIN)
+            else -> Intent(sub(a))
+        }
         if (activity != null) intent.component = ComponentName(pkg, activity) else intent.setPackage(pkg)
         def.category?.let { intent.addCategory(it) }
         def.data?.let { d ->
@@ -651,8 +658,13 @@ class EmulatorManager(
     /** Brings an already running emulator task to the front without restarting it. */
     fun resumeIntent(pkg: String, activity: String?): Intent? {
         if (activity != null) {
-            return Intent(Intent.ACTION_MAIN).setComponent(ComponentName(pkg, activity))
+            val direct = Intent(Intent.ACTION_MAIN).setComponent(ComponentName(pkg, activity))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            // Android 13+ drops a MAIN start to a game activity whose only filter is another one
+            // (Azahar's VIEW, melonDS's LAUNCH_ROM, Vita3K's USB): resuming failed, and the game was
+            // started again from its title. The app's own launcher start then, as without an activity.
+            if (android.os.Build.VERSION.SDK_INT < 33 || runCatching { ctx.packageManager.queryIntentActivities(direct, 0).isNotEmpty() }.getOrDefault(true))
+                return direct
         }
         return ctx.packageManager.getLaunchIntentForPackage(pkg)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)

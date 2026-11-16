@@ -165,7 +165,7 @@ object CoreInstall {
         return "${failed.size} failed:\n" + failed.take(4).joinToString("\n") { "${it.first}: ${it.second}" }.take(260)
     }
 
-    private fun openRetroArch(host: SceneHost) {
+    fun openRetroArch(host: SceneHost) {
         val pkg = MainUI.emulators.raPackage ?: return
         host.hostContext.packageManager.getLaunchIntentForPackage(pkg)?.let {
             host.hostContext.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
