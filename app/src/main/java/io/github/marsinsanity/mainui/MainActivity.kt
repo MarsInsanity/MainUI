@@ -47,6 +47,11 @@ class MainActivity : Activity() {
         }
         view = MainUIView(this)
         setContentView(view)
+        // Opened from the old launcher's icon first, then made the home app (Setup): HOME makes a
+        // second MainUI in the home task, and the first one kept getting Exit Game and the Game
+        // Switcher while HOME showed this one. Only one stays: the older, not the home one, goes.
+        instance?.takeIf { it !== this && !it.isFinishing && !it.isDestroyed && intent?.hasCategory(Intent.CATEGORY_HOME) == true }
+            ?.let { old -> runCatching { old.finishAndRemoveTask() } }
         instance = this
         view.setRoot(HomeScenes.root(view))
         if (!MainUI.settings.setupDone || !MainUI.storage.hasAllFilesAccess()) view.push(SetupScene(view))

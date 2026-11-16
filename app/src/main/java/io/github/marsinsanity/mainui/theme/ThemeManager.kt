@@ -77,11 +77,18 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         }
     }
 
-    /** The Themes folder at the top of internal storage or the SD card ([onSd]), created if needed. */
+    /**
+     * The Themes folder at the top of internal storage or the SD card ([onSd]), created if needed.
+     * An SD card MainUI can't write to (Android 10 keeps apps off removable cards): internal storage,
+     * not a download that fails every time.
+     */
     fun userThemesDir(onSd: Boolean): File {
-        val vol = (if (onSd) storage.sdCard else null) ?: storage.internal
-        return vol.dir.listFiles()?.firstOrNull { it.isDirectory && it.name.equals("Themes", true) }
-            ?: File(vol.dir, "Themes").apply { mkdirs() }
+        fun on(vol: io.github.marsinsanity.mainui.core.Storage.Volume) =
+            vol.dir.listFiles()?.firstOrNull { it.isDirectory && it.name.equals("Themes", true) }
+                ?: File(vol.dir, "Themes").apply { mkdirs() }
+        val sd = if (onSd) storage.sdCard else null
+        if (sd != null) on(sd).takeIf { it.isDirectory && it.canWrite() }?.let { return it }
+        return on(storage.internal)
     }
 
     /** Unpacks bundled theme [dir] if it isn't, or is older than the APK's; true when it did. */

@@ -225,6 +225,7 @@ object HomeScenes {
     private fun count(host: SceneHost, refresh: Boolean, gen: Int): List<GameSystem> {
         if (MainUI.settings.showAndroidSystem) androidCount = runCatching { MainUI.apps.androidGames().size }.getOrDefault(androidCount)
         val list = MainUI.games.systems(MainUI.settings.showUnknownFolders, refresh)
+        lastSystems = list
         var shown = android.os.SystemClock.uptimeMillis()
         for (s in list.filter { it.gameCount < 0 || refresh }) {
             // (Found again meanwhile: these systems are old, the count starts over.)
@@ -238,6 +239,23 @@ object HomeScenes {
             }
         }
         return list
+    }
+
+    /**
+     * Why the Games screen has no system (null: it has some): no All files access, or no rom
+     * folders, with where to fix it. Read from the last count (no file access while drawing).
+     */
+    @Volatile var lastSystems: List<GameSystem> = emptyList()
+
+    fun noRomsHint(): String? {
+        val ports = io.github.marsinsanity.mainui.data.AndroidPorts.SYSTEM
+        // Not while counting (a system not counted yet isn't empty), nor for Android games or ports only.
+        if (lastSystems.any { it.gameCount < 0 && it.id != ports } || androidCount > 0 ||
+            lastSystems.any { it.id == ports && it.gameCount > 0 }) return null
+        val sys = lastSystems.filter { it.id != ports && (it.gameCount > 0 || it.unplayableSummary != null) }
+        if (sys.isNotEmpty()) return null
+        return if (!MainUI.storage.hasAllFilesAccess()) "All files access is off, so MainUI can't see your games: Settings > Permissions & setup"
+        else "No games yet: put them in roms/<system>/ on internal storage or the SD card (Settings > Library & storage > Create dArkOS folders)"
     }
 
     /** Theme artwork for a tile, or null (caller draws the built-in replacement). */
@@ -655,6 +673,11 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
             val idx = page * perPage + i
             if (idx >= tiles.size) break
             HomeScenes.drawCell(g, tiles[idx], x0 + (i % cols) * cellW, y0 + (i / cols) * cellH, idx == index)
+        }
+        // Only Search, Android and Ports (always there): where games go, said where the second row
+        // would be (the "No roms found" text above never showed, the grid isn't empty).
+        if (!loading && tiles.size <= cols) HomeScenes.noRomsHint()?.let {
+            g.paragraph(it, g.theme.list, g.W / 2, y0 + cellH + 20f, g.W - 60f, align = Align.CENTER, maxLines = 4)
         }
         // (OnionOS: no dots, the page number in the footer)
         if (!onion) g.dots(pages, page, g.H - Gfx.FOOTER - 18f)

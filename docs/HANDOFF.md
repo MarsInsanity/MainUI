@@ -594,6 +594,30 @@ Store and updates:
   the game: window events from other displays are ignored.
 - **The App Store offered apps Android 14 refuses** (made for Android 5 or older, or with a max SDK
   below the device's): marked incompatible.
+- **Game Switcher auto load picked the wrong game** (reported by the user on Wii; any two games in
+  one emulator): after leaving a game, Android killed the emulator behind MainUI (memory, or a
+  broadcast it was too busy to take) but kept its task, so starting another game in it only
+  brought the old one back, and the auto load loaded the old game's state for the new one. With
+  root the emulator is now stopped before the new game also when it no longer runs. Found and
+  fixed by agent W1, verified on the device (Dolphin, GameCube and Wii homebrew).
+- **Android 13+ dropped MainUI's launch of several emulators** (a start that matches none of the
+  emulator's intent filters; the Android 12 test device never shows it, the user's Pocket Mini V2
+  does): Azahar / Lime3DS / Citra now get VIEW, Flycast its game activity, SeedlessDS its
+  filter-less alias (also for names like "Dr. Mario.nds"), ARMSX2 / ARMSX3 their splash screen,
+  melonDS's builds their own action, Vita3K the USB action both its builds declare; MAME4droid
+  keeps its own roms folder; a game whose activity takes only its own start is resumed through the
+  app's launcher start. A launch Android would drop is said in words.
+  Flycast and SeedlessDS verified on the device (Android 12); reviewed against each emulator's source.
+- **Without root, a first-time user's RetroArch game opened on a missing core** with nothing said:
+  a one-time dialog says what RetroArch needs, and the cores screen no longer says "nothing missing".
+- **Without root, Exit closed games MainUI can't save without a word**: the menu says "Exit Game
+  (not saved)" and why; a native menu that can't be opened says so; a second RetroArch game closes
+  the first RetroArch (Android 10-13), which hung "not responding".
+- **Two MainUI screens after opening it from the old launcher, then making it the home app**: the
+  older one is closed when the home one starts.
+- **An empty library never said where games go** (the Android and Ports tiles hid the hint); "Create
+  dArkOS folders" said "Created 0" when it couldn't write; theme downloads failed every time on
+  Android 10 with an SD card (now internal storage).
 
 ### Emulators only on Google Play
 
@@ -636,6 +660,19 @@ Most severe first, each with the fix the review suggested:
   reaches later systems (it now says the list is cut). Fix: rank across systems, or stream results.
 - **Root.foregroundPackage takes the first resumed activity** of `dumpsys`: on a two-screen device
   (AYN Thor) after waking it can be the other screen's. Fix: the default display's.
+- **MainUI's park pause can get a slow emulator killed**: the State API "pause" goes on the
+  foreground broadcast queue (10 s) right after MainUI comes in front, while the emulator's main
+  thread is still writing its state (Dolphin, Wii): Android kills it (background ANR). The fix above
+  makes that harmless for the next game. Fix: skip park's pause for emulators that pause themselves
+  in the background, or send it later.
+- **Android 13+: Mupen64Plus refuses rom names with an extra dot** ("Dr. Mario 64 (USA).z64": its
+  path patterns stop at the first dot); MainUI says so. Its MAIN start with the rom as an extra
+  works (tried on the device) but restarts a re-picked game without root. Fix: use that start only
+  when the VIEW one is refused.
+- **Without root on Android 14, a second RetroArch game can still hang RetroArch** (Android no longer
+  lets MainUI end it). Close RetroArch from Recents first.
+- **Vita3K's store entry installs the 2024 build** (Vita3K/Vita3K-Android); newer builds are on
+  vita3k.org and in Vita3K/Vita3K's continuous release. The recipe now launches both.
 - Smaller ones: network previews load first-in-first-out (the selected one waits behind skipped
   rows); package-manager label/icon lookups on the UI thread in the process lists; SD card mount
   reloads run on the main thread; a ScreenScraper screenshot is saved as box art when SS has no box;
@@ -686,6 +723,8 @@ Most severe first, each with the fix the review suggested:
   homebrew (Snes9xGX .dol, ftpd .3dsx); Expert, Settings > Device, Emulators & cores. Found the
   no-folder, dead-emulator, HOME-under-pressure and slow failed-save bugs above. Mupen64Plus AE
   crashes on N64NICCC by itself (glide64mk2); MainUI handles it.
+- Wii and GameCube in Dolphin (agent W1, Snes9xGX homebrew), recipes changed for Android 13 (Flycast,
+  SeedlessDS; Mupen64Plus's MAIN start tried) and the no-folder message for ARMSX2. Found the Game Switcher wrong-game bug above.
 ---
 
 ## 11. Quick start (copy in order)

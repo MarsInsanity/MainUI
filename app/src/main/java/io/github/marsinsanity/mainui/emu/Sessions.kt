@@ -162,6 +162,15 @@ class SessionManager(
         val intent = try { emulators.buildIntent(game, option) } catch (e: IllegalStateException) { return e.message }
         val rootLaunch = emulators.defFor(option.ref)?.rootLaunch == true
         if (rootLaunch && !Root.available()) return "${option.name} can only be started by MainUI with root"
+        // Android 13+ drops a start from another app that matches none of the emulator's intent
+        // filters (an emulator version whose launch changed): said in words before anything
+        // changes, not "Unable to find explicit activity class". (Where the platform doesn't apply
+        // that to this query, the list isn't empty and nothing changes.)
+        if (!rootLaunch && android.os.Build.VERSION.SDK_INT >= 33 && intent.component != null &&
+            runCatching { ctx.packageManager.queryIntentActivities(intent, 0).isEmpty() }.getOrDefault(false))
+            return "Android doesn't let MainUI start ${option.name} with this game: this version of it doesn't take " +
+                "MainUI's launch, or this file name (some emulators only take names without extra dots). Update " +
+                "${option.name} or MainUI, rename the file, or pick another emulator (SELECT on the game > Core)"
         val pkg = intent.component?.packageName ?: intent.`package` ?: option.pkg ?: ""
         if (pkg.isNotEmpty()) runCatching { emulators.grantStorageIfMissing(pkg) }
         val s = Session(game.key, game.systemId, game.file?.absolutePath, game.name, option.ref, pkg,
@@ -181,12 +190,33 @@ class SessionManager(
         // do. A standalone emulator gets its writes finished first: it was frozen behind MainUI a
         // moment ago, maybe mid-save.)
         val stopsItself = !option.isRetroArch && (intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TASK) != 0
-        if (other != null && !stopsItself && pkg.isNotEmpty() && Root.knownAvailable() && Root.processes(pkg)?.isNotEmpty() == true) {
-            io.github.marsinsanity.mainui.core.SessionLog.log("${other.name} still runs in $pkg: stopped before starting ${s.name}")
-            if (!option.isRetroArch) StandaloneController.waitForWritesOf(pkg)
-            Root.forceStop(pkg)
+        if (other != null && !stopsItself && pkg.isNotEmpty() && Root.knownAvailable()) {
+            // Stopped too when it doesn't run any more (Android killed it behind MainUI: for memory,
+            // or for a broadcast it was too busy to take): its task outlives it, and this start
+            // would only bring that task back. Android restarts the old game's screen from its saved
+            // state and drops this game (seen with Dolphin: the GameCube game came back for the Wii
+            // game picked in the Game Switcher, and the auto load loaded the GameCube game's state).
+            // (Root couldn't tell: left as it is.)
+            val running = Root.processes(pkg)?.isNotEmpty()
+            if (running == true) {
+                io.github.marsinsanity.mainui.core.SessionLog.log("${other.name} still runs in $pkg: stopped before starting ${s.name}")
+                if (!option.isRetroArch) StandaloneController.waitForWritesOf(pkg)
+            } else if (running == false)
+                io.github.marsinsanity.mainui.core.SessionLog.log("${other.name}'s $pkg was closed by Android, its screen kept: cleared before starting ${s.name}")
+            if (running != null) {
+                Root.forceStop(pkg)
+                leftRunning.remove(pkg)
+                Thread.sleep(300)
+            }
+        }
+        // Without root RetroArch can't be stopped as above, and a second game sent to the one still
+        // running hangs it ("not responding"). Android 10-13 let MainUI, in front, end a background
+        // app's process (14+ doesn't). Its in-game saves are flushed every 10 s.
+        if (other != null && option.isRetroArch && pkg.isNotEmpty() && !Root.knownAvailable() && android.os.Build.VERSION.SDK_INT < 34) {
+            io.github.marsinsanity.mainui.core.SessionLog.log("${other.name} in $pkg: closed (no root) before starting ${s.name}")
+            runCatching { ctx.getSystemService(android.app.ActivityManager::class.java).killBackgroundProcesses(pkg) }
             leftRunning.remove(pkg)
-            Thread.sleep(300)
+            Thread.sleep(500)
         }
         val err = try {
             if (rootLaunch) Root.startActivity(intent)?.let { "Could not start ${option.name}: $it" }
