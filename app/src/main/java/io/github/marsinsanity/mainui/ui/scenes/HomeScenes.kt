@@ -72,7 +72,9 @@ object HomeScenes {
     }
 
     /** Tiles for the systems grid / row: Search, Android, then every system with games. */
-    fun systemTiles(host: SceneHost, systems: List<GameSystem>, includeSearch: Boolean, onRescan: () -> Unit = {}): List<Tile> {
+    /** [counted]: only systems counted already (while a first count runs: empty folders aren't known yet). */
+    fun systemTiles(host: SceneHost, systems: List<GameSystem>, includeSearch: Boolean, counted: Boolean = false,
+                    onRescan: () -> Unit = {}): List<Tile> {
         val s = MainUI.settings
         val out = mutableListOf<Tile>()
         if (includeSearch && s.showSearchTile) out += Tile("search", "Search", "search", icons = listOf("search"), short = "?") {
@@ -97,6 +99,7 @@ object HomeScenes {
             // (Ports is listed even empty: it is where Android apps can be put. Settings > User
             // interface > Show Ports system off: only while it has ports.)
             val ports = sys.id == io.github.marsinsanity.mainui.data.AndroidPorts.SYSTEM
+            if (counted && sys.gameCount < 0 && !ports && sys.menu.isEmpty()) continue
             if (ports && !s.showPortsSystem && sys.gameCount <= 0) continue
             if (!ports && !s.showEmptySystems && sys.gameCount == 0 && unplayable == null && menu.isEmpty()) continue
             out += Tile(sys.id, sys.name, "game", icons = sys.def.icons, short = sys.def.short,
@@ -121,7 +124,7 @@ object HomeScenes {
             host.push(PopMenuScene(host, sys.name, listOf(
                 UiItem("Add an Android app...", onSelect = { host.push(AppPickerScene.ports(host, onRescan)) }),
                 UiItem("Rescan folder", onSelect = {
-                    MainUI.games.invalidate()
+                    MainUI.games.portsChanged()
                     // (The system as it is now: its folder may have appeared since the tile was made.)
                     host.io({ MainUI.games.countGames(MainUI.games.systems(MainUI.settings.showUnknownFolders).firstOrNull { it.id == sys.id } ?: sys) }) {
                         host.toast("${sys.name}: ${plural(it, "port")}"); onRescan()
@@ -136,7 +139,7 @@ object HomeScenes {
                 onSelect = { host.push(CoreSelectScene(host, sys.def, null)) }),
             UiItem("Scrape artwork", onSelect = { host.push(ScraperScene(host, listOf(sys.id))) }),
             UiItem("Rescan folder", onSelect = {
-                MainUI.games.invalidate()
+                MainUI.games.changed(sys.id)
                 host.io({ MainUI.games.countGames(sys) }) { host.toast("${sys.name}: ${plural(it, "game")}"); onRescan() }
             }),
         ) + listOfNotNull(
@@ -172,14 +175,69 @@ object HomeScenes {
     /** The Android tile's count, from the last [loadSystems] (-1: not counted yet). */
     @Volatile private var androidCount = -1
 
-    /** Loads systems + game counts in the background. */
-    fun loadSystems(host: SceneHost, refresh: Boolean = false, done: (List<GameSystem>) -> Unit) {
-        host.io({
-            if (MainUI.settings.showAndroidSystem) androidCount = runCatching { MainUI.apps.androidGames().size }.getOrDefault(androidCount)
-            val list = MainUI.games.systems(MainUI.settings.showUnknownFolders, refresh)
-            list.filter { it.gameCount < 0 || refresh }.forEach { runCatching { MainUI.games.countGames(it) } } // (one unreadable system never blanks the others)
-            list
-        }, done)
+    /** The count running ([loadSystems]) and who waits for it: screen off / on, B and back, a cold start's two calls. */
+    private val loadLock = Any()
+    private var loadRunning = false
+    private val loadDone = ArrayList<(List<GameSystem>) -> Unit>()
+    private val loadProgress = ArrayList<(List<GameSystem>) -> Unit>()
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * Loads systems + game counts in the background. One count at a time: a call while one runs
+     * waits for it (two counted the whole library at once). [progress]: the systems so far, every
+     * moment while a long count runs (a big library on an SD card), on the UI thread.
+     */
+    fun loadSystems(host: SceneHost, refresh: Boolean = false, progress: ((List<GameSystem>) -> Unit)? = null,
+                    done: (List<GameSystem>) -> Unit) {
+        // (A rescan's count runs on its own: the one running may be of the systems as they were.)
+        if (refresh) { host.io({ count(host, refresh = true, gen = -1) }, done); return }
+        synchronized(loadLock) {
+            loadDone += done
+            progress?.let { loadProgress += it }
+            if (loadRunning) return
+            loadRunning = true
+        }
+        startShared(host)
+    }
+
+    /** The shared count ([loadSystems]): never left "running", or every later call would wait for it. */
+    private fun startShared(host: SceneHost) {
+        val gen = MainUI.games.generation
+        val job = host.io({
+            try { count(host, refresh = false, gen = gen) }
+            catch (e: Throwable) { synchronized(loadLock) { loadRunning = false; loadDone.clear(); loadProgress.clear() }; throw e }
+        }) { list ->
+            // The library was found again meanwhile (Rescan, a Library setting, a rom folder added):
+            // counted again for those waiting, not handed the old systems.
+            if (MainUI.games.generation != gen) { startShared(host); return@io }
+            val waiting = synchronized(loadLock) {
+                loadRunning = false
+                loadProgress.clear()
+                loadDone.toList().also { loadDone.clear() }
+            }
+            waiting.forEach { runCatching { it(list) } }
+        }
+        // Cancelled (the screen recreated: a font size or language change mid-count): no callback
+        // comes, and nothing may keep waiting for this count.
+        job.invokeOnCompletion { e -> if (e != null) synchronized(loadLock) { loadRunning = false; loadDone.clear(); loadProgress.clear() } }
+    }
+
+    private fun count(host: SceneHost, refresh: Boolean, gen: Int): List<GameSystem> {
+        if (MainUI.settings.showAndroidSystem) androidCount = runCatching { MainUI.apps.androidGames().size }.getOrDefault(androidCount)
+        val list = MainUI.games.systems(MainUI.settings.showUnknownFolders, refresh)
+        var shown = android.os.SystemClock.uptimeMillis()
+        for (s in list.filter { it.gameCount < 0 || refresh }) {
+            // (Found again meanwhile: these systems are old, the count starts over.)
+            if (!refresh && MainUI.games.generation != gen) break
+            runCatching { MainUI.games.countGames(s) } // (one unreadable system never blanks the others)
+            val now = android.os.SystemClock.uptimeMillis()
+            if (!refresh && now - shown >= 400) {
+                shown = now
+                val ps = synchronized(loadLock) { loadProgress.toList() }
+                if (ps.isNotEmpty()) mainHandler.post { ps.forEach { runCatching { it(list) } }; host.invalidate() }
+            }
+        }
+        return list
     }
 
     /** Theme artwork for a tile, or null (caller draws the built-in replacement). */
@@ -557,12 +615,25 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
     override fun onEnter() = reload(false)
     override fun onResume() = reload(false)
 
+    /** Moved while the first count ran: the tile picked stays selected as more come in. */
+    private var moved = false
+
     private fun reload(refresh: Boolean) {
-        HomeScenes.loadSystems(host, refresh) { list ->
-            tiles = HomeScenes.systemTiles(host, list, includeSearch = true) { reload(false) }
-            index = index.coerceIn(0, max(0, tiles.size - 1))
+        HomeScenes.loadSystems(host, refresh, progress = { list ->
+            // The first count of a big library: the systems counted so far, not "Loading..." until all are.
+            if (loading) setTiles(HomeScenes.systemTiles(host, list, includeSearch = true, onRescan = { reload(false) }, counted = true))
+        }) { list ->
+            setTiles(HomeScenes.systemTiles(host, list, includeSearch = true) { reload(false) })
+            if (loading && !moved) index = MainUI.settings.systemsIndex.coerceIn(0, max(0, tiles.size - 1))
             loading = false
         }
+    }
+
+    private fun setTiles(t: List<Tile>) {
+        val picked = if (moved) tiles.getOrNull(index)?.id else null
+        tiles = t
+        if (picked != null) tiles.indexOfFirst { it.id == picked }.takeIf { it >= 0 }?.let { index = it }
+        index = index.coerceIn(0, max(0, tiles.size - 1))
     }
 
     override fun draw(g: Gfx) {
@@ -598,6 +669,7 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
 
     override fun onKey(b: Btn, repeat: Boolean): Boolean {
         if (tiles.isEmpty()) { if (b == Btn.B) { close(); return true }; return false }
+        val before = index
         val perPage = cols * rows
         when (b) {
             Btn.LEFT -> if (index > 0) index-- else if (!repeat) index = tiles.size - 1 else return false
@@ -614,7 +686,9 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
             Btn.MENU -> if (!repeat) host.push(GameSwitcherScene(host))
             else -> return false
         }
-        MainUI.settings.systemsIndex = index
+        // (Only a real move while systems stream in: MENU, Y... keep the remembered system.)
+        if (loading && index != before) moved = true
+        if (!loading || moved) MainUI.settings.systemsIndex = index
         return true
     }
 
@@ -637,7 +711,7 @@ class SystemsGridScene(host: SceneHost) : Scene(host) {
 
     override fun onTap(x: Float, y: Float): Boolean {
         val idx = tileAt(x, y) ?: return false
-        if (idx == index) tiles[idx].open() else { index = idx; MainUI.settings.systemsIndex = index }
+        if (idx == index) tiles[idx].open() else { index = idx; MainUI.settings.systemsIndex = index; if (loading) moved = true }
         return true
     }
 
@@ -673,6 +747,10 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
                 savedIndex = index
                 index = index.coerceIn(0, max(0, tiles.size - 1))
             }
+        } else if (tiles.isEmpty()) {
+            // The Games screen: systems shown as they are counted ([early] as on the top-level page).
+            early = true
+            savedIndex = index
         }
         reload(false)
     }
@@ -692,7 +770,16 @@ class RowScene(host: SceneHost, private val title: String?, private val home: Bo
     }
 
     private fun reload(refresh: Boolean) {
-        HomeScenes.loadSystems(host, refresh) { list ->
+        HomeScenes.loadSystems(host, refresh, progress = { list ->
+            // A long first count (a big library): the systems counted so far, the selected tile kept.
+            if (early) {
+                val sys = HomeScenes.systemTiles(host, list, includeSearch = true, onRescan = { reload(false) }, counted = true)
+                val picked = tiles.getOrNull(index)?.id
+                tiles = if (home) menuParts().let { (front, back) -> front + sys + back } else sys
+                if (picked != null) tiles.indexOfFirst { it.id == picked }.takeIf { it >= 0 }?.let { index = it }
+                index = index.coerceIn(0, max(0, tiles.size - 1))
+            }
+        }) { list ->
             val sys = HomeScenes.systemTiles(host, list, includeSearch = true) { reload(false) }
             val picked = if (early && movedEarly) tiles.getOrNull(index)?.id else null
             tiles = if (home) {

@@ -417,6 +417,7 @@ object AppStore {
 
     private fun readApk(r: JsonReader, abis: Set<String>): Pair<Apk, Boolean> {
         var vc = 0L; var vn = ""; var an = ""; var size = 0L; var hash: String? = null; var minSdk = 1; var signer: String? = null
+        var targetSdk = 0; var maxSdk = Int.MAX_VALUE
         val native = ArrayList<String>()
         r.beginObject()
         while (r.hasNext()) {
@@ -428,12 +429,18 @@ object AppStore {
                 "hash" -> hash = r.nextString()
                 "signer" -> signer = r.nextString()
                 "minSdkVersion" -> minSdk = r.nextString().toIntOrNull() ?: runCatching { r.nextInt() }.getOrDefault(1)
+                "targetSdkVersion" -> targetSdk = r.nextString().toIntOrNull() ?: 0
+                "maxSdkVersion" -> maxSdk = r.nextString().toIntOrNull() ?: Int.MAX_VALUE
                 "nativecode" -> { r.beginArray(); while (r.hasNext()) native += r.nextString(); r.endArray() }
                 else -> r.skipValue()
             }
         }
         r.endObject()
-        val ok = an.isNotEmpty() && minSdk <= Build.VERSION.SDK_INT && (native.isEmpty() || native.any { it in abis })
+        // Android 14 refuses apps made for Android 5 and older (target below 23): offered, downloaded,
+        // then "App not installed". (Unknown target: 0, allowed.)
+        val sdk = Build.VERSION.SDK_INT
+        val ok = an.isNotEmpty() && minSdk <= sdk && sdk <= maxSdk && !(sdk >= 34 && targetSdk in 1 until 23) &&
+            (native.isEmpty() || native.any { it in abis })
         return Apk(vc, vn, an, size, hash, signer) to ok
     }
 

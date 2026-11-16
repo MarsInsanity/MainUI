@@ -152,6 +152,8 @@ class MainActivity : Activity() {
             io.github.marsinsanity.mainui.ui.Images.clear()
             io.github.marsinsanity.mainui.ui.Glyphs.clear()
             MainUI.apps.trimIcons()
+            // Parsed gamelists and DATs too (tens of MB on a big scraped library; the lists keep their games).
+            MainUI.games.trim()
         }
     }
 

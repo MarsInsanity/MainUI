@@ -72,6 +72,8 @@ class InGameMenuScene(
     companion object {
         const val ROW_H = 56f
         private const val PANEL_W = 300f
+        /** How often the open menu checks its game's emulator still runs ([watchdog]). */
+        private const val WATCH_MS = 3000L
         /** The session whose last Exit couldn't save it: the next Exit leaves without saving. */
         @Volatile private var saveFailedFor: String? = null
     }
@@ -93,6 +95,33 @@ class InGameMenuScene(
             if (f.isFile) screenshot = Images.decode(f, 1600)
         } else {
             host.io({ MainUI.sessions.saveScreenshot(session.gameKey, shot) })
+        }
+        if (overlayMode && session.pkg.isNotEmpty()) main.postDelayed(watchdog, WATCH_MS)
+    }
+
+    /**
+     * The game's emulator died under the menu (crashed, or stopped by Android for memory): the menu
+     * stayed up saying PAUSED, and Continue, Save or the Game Switcher started the emulator again,
+     * empty, reporting a save that never happened. Checked every few seconds (root: its processes);
+     * gone, the menu closes and says so, and the session ends.
+     */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (resumed || busy != null) return
+            host.io({ if (Root.knownAvailable()) Root.processes(session.pkg) else null }) { procs ->
+                if (resumed || busy != null) return@io
+                if (procs == null || procs.isNotEmpty()) { main.postDelayed(this, WATCH_MS); return@io }
+                io.github.marsinsanity.mainui.core.SessionLog.log("${session.name}: $emuName is gone (closed or crashed) with the menu open")
+                resumed = true // (nothing to resume: no broadcast that would start it again)
+                busy = "$emuName closed"; invalidate() // (no more keys: it's closing)
+                val ctx = host.hostContext
+                host.io({ MainUI.sessions.endActive(session) }) {
+                    Toast.makeText(ctx, "$emuName closed (it crashed or Android stopped it): what wasn't saved is lost",
+                        Toast.LENGTH_LONG).show()
+                    closeMenu()
+                    if (overlayMode) ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }
         }
     }
 
@@ -443,6 +472,7 @@ class InGameMenuScene(
     override fun onExit() {
         // A late auto-continue must not close whatever menu is showing by then.
         main.removeCallbacks(autoContinue)
+        main.removeCallbacks(watchdog)
         // Safety net (overlay torn down some other way): never leave the game paused.
         resumeOnce()
     }

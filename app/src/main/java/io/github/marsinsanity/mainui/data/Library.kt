@@ -43,6 +43,8 @@ class Library(private val storage: Storage) {
     private val lock = Any()
     private val recents = mutableListOf<Entry>()
     private val favorites = mutableListOf<Entry>()
+    /** [favorites]' keys, made when first asked after a change: every row of a list asks (O(n) each, a big folder froze). */
+    private var favoriteKeys: HashSet<String>? = null
     private val androidGames = linkedSetOf<String>()
     private val hiddenApps = linkedSetOf<String>()
     /** Apps put into the Emulators menu by hand, and detected emulators moved back to Apps. */
@@ -72,6 +74,7 @@ class Library(private val storage: Storage) {
     fun load() = synchronized(lock) {
         loadedDir = storage.configDir
         recents.clear(); favorites.clear(); androidGames.clear(); hiddenApps.clear(); coreChoices.clear(); playTime.clear()
+        favoriteKeys = null
         hiddenGames.clear(); shownBios.clear(); emuAdded.clear(); emuRemoved.clear()
         readObject("emulator_apps.json")?.let { o ->
             o.optJSONArray("added")?.let { a -> for (i in 0 until a.length()) emuAdded += a.getString(i) }
@@ -150,12 +153,15 @@ class Library(private val storage: Storage) {
 
     // ---- favorites -----------------------------------------------------------------
     fun favorites(): List<Entry> = synchronized(lock) { current(); favorites.sortedBy { it.name.lowercase() } }
-    fun isFavorite(key: String) = synchronized(lock) { current(); favorites.any { it.key == key } }
+    fun isFavorite(key: String) = synchronized(lock) { current();
+        (favoriteKeys ?: favorites.mapTo(HashSet()) { it.key }.also { favoriteKeys = it }).contains(key)
+    }
 
     /** Returns the new favorite state. */
     fun toggleFavorite(g: Game): Boolean = synchronized(lock) { current();
         val had = favorites.removeAll { it.key == g.key }
         if (!had) favorites += Entry.of(g)
+        favoriteKeys = null
         saveFavorites()
         !had
     }

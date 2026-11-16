@@ -59,6 +59,7 @@ class App : Application() {
             io.github.marsinsanity.mainui.ui.Images.clear()
             io.github.marsinsanity.mainui.ui.Glyphs.clear()
             MainUI.apps.trimIcons()
+            MainUI.games.trim()
         }
     }
 

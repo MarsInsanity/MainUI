@@ -213,7 +213,7 @@ object Launch {
             }
         }) { r ->
             host.pop(busy)
-            MainUI.games.invalidate()
+            MainUI.games.changed(game.systemId)
             val img = r.getOrElse { err ->
                 host.push(DialogScene(host, "Can't unpack ${game.name}", err.message ?: err.toString(), "OK", null))
                 return@io
@@ -227,7 +227,7 @@ object Launch {
             host.push(DialogScene(host, "Unpacked",
                 "Delete ${zip.name} to free ${ZipImages.gb(zip.length())}? MainUI launches the unpacked image from now on.",
                 "DELETE", "KEEP", onConfirm = {
-                    zip.delete(); MainUI.games.invalidate()
+                    zip.delete(); MainUI.games.changed(game.systemId)
                     // The zip's favorite goes to the image that replaces it.
                     val g = imageGame(game, img)
                     if (MainUI.library.isFavorite(game.key)) { MainUI.library.toggleFavorite(game); if (!MainUI.library.isFavorite(g.key)) MainUI.library.toggleFavorite(g) }

@@ -173,7 +173,8 @@ internal object GameItems {
             MainUI.library.setCoreForGame(k, null)
             Images.invalidate("art:$k")
         }
-        MainUI.games.invalidate()
+        // (Only this system counted again: the lists see the change themselves.)
+        MainUI.games.changed(g.systemId)
         return failed
     }
 }
@@ -202,8 +203,9 @@ class GameListScene(host: SceneHost, private var sys: GameSystem, private val di
             // Android ports: their apps known before drawing (icons).
             games.forEach { g -> if (AndroidPorts.isPort(g.file)) AndroidPorts.packageOf(g.file!!) }
             if (sys.id == AndroidPorts.SYSTEM && sys.gameCount < 0) runCatching { MainUI.games.countGames(sys) }
-            menu to games
-        }) { (menu, games) ->
+            // The rows made here, not on the UI thread: thousands in a big folder, on every return.
+            Triple(menu, games, games.map { GameItems.item(host, sys, it) })
+        }) { (menu, games, items) ->
             // With the emulator app's icon (the PICO-8 app for Splore).
             val top = menu.map { g ->
                 GameItems.item(host, sys, g).also { item ->
@@ -214,7 +216,7 @@ class GameListScene(host: SceneHost, private var sys: GameSystem, private val di
             }
             if (sys.id == AndroidPorts.SYSTEM && dir == null) {
                 // Ports: its apps; empty, how to add one (PortMaster's .sh ports don't run here yet).
-                list.set(top + games.map { GameItems.item(host, sys, it) } + Ports.hints(sys, games.isEmpty()), keepIndex = loaded)
+                list.set(top + items + Ports.hints(sys, games.isEmpty()), keepIndex = loaded)
                 if (!loaded || list.current?.disabled == true) {
                     (0 until list.size).firstOrNull { list.items[it].disabled.not() }?.let { list.active = it }
                 }
@@ -237,7 +239,7 @@ class GameListScene(host: SceneHost, private var sys: GameSystem, private val di
                 if (!loaded || list.current?.disabled == true) {
                     (0 until list.size).firstOrNull { list.items[it].disabled.not() }?.let { list.active = it }
                 }
-            } else list.set(top + games.map { GameItems.item(host, sys, it) }, keepIndex = loaded)
+            } else list.set(top + items, keepIndex = loaded)
             menuKeys = menu.map { it.key }.toSet()
             loaded = true
         }
@@ -383,6 +385,9 @@ class FavoritesScene(host: SceneHost) : EntryListScene(host, "Favorites") {
     }
 }
 
+/** Search results shown (GameRepository.search's default limit). */
+private const val SEARCH_LIMIT = 500
+
 class SearchResultsScene(host: SceneHost, private val query: String, private val system: GameSystem? = null) :
     ListScene(host, if (system == null) "Search: $query" else "${system.def.short}: $query") {
     private var done = false
@@ -399,12 +404,15 @@ class SearchResultsScene(host: SceneHost, private val query: String, private val
                     .map { Game(SystemDef.ANDROID.id, null, it.label, pkg = it.pkg) }
                 roms + android
             }.also { it.forEach(::warmPort) }
-        }) { results ->
+        }) { found ->
             done = true
+            // (The search stops one past its limit: there are more than it shows.)
+            val more = found.count { !it.isAndroid } > SEARCH_LIMIT
+            val results = if (more) found.filter { it.isAndroid } + found.filter { !it.isAndroid }.take(SEARCH_LIMIT) else found
             list.set(results.map { g ->
                 GameItems.item(host, null, g, Launch.systemDef(g.systemId)?.short ?: g.systemId)
-            }, false)
-            title = (if (system == null) "Search: $query" else "${system.def.short}: $query") + " (${results.size})"
+            } + listOfNotNull(if (more) UiItem("Only the first $SEARCH_LIMIT: type more to narrow it down", disabled = true) else null), false)
+            title = (if (system == null) "Search: $query" else "${system.def.short}: $query") + " (${results.size}${if (more) "+" else ""})"
         }
     }
 

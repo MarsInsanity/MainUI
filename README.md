@@ -63,7 +63,10 @@ Screenshots use the bundled **MainUI** theme and placeholder roms; any OnionOS t
 2. Open MainUI. The setup screen walks you through:
    - **All files access** (required, to read roms and themes).
    - **Set MainUI as home app** so the Home button returns to it.
-   - **In-game menu overlay**: Android Settings > Accessibility > *MainUI in-game menu*.
+   - **In-game menu overlay**: Android Settings > Accessibility > *MainUI in-game menu*. On Android 13
+     and newer, an APK installed from a file has it greyed out ("Restricted setting"): open
+     Settings > Apps > MainUI, then the three-dot menu > *Allow restricted settings*, and turn it on
+     again (Setup has a shortcut to App info).
    - **Root**: grant MainUI superuser in Magisk (core detection, process manager, key injection, force stop).
 3. In **Settings > Emulators & cores**, run **Configure RetroArch for MainUI** once. It makes RetroArch
    pause itself while MainUI's menu is open, flush in-game saves every 10 s, auto save / load states,

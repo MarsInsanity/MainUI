@@ -93,24 +93,84 @@ class LogiqxDat(val file: File) : MetaLookup {
      * elements as written) so [save] can write it back; off for DATs that are only read for
      * names (an arcade DAT has 100 000+ roms: that would cost tens of MB).
      */
-    fun load(keepRaw: Boolean = false): LogiqxDat {
+    fun load(keepRaw: Boolean = false, streamAbove: Long = STREAM_ABOVE): LogiqxDat {
         keptRaw = keepRaw
-        rootTag = "datafile"; rootAttrs.clear(); doctype = null
-        games.clear(); header.clear(); byFile.clear(); byName.clear(); byCrc.clear()
-        headerRaw.clear(); others.clear(); parseError = null
+        reset()
         loadedMtime = file.lastModified()
         if (!file.isFile) return this
+        // A big DAT only read for names (a full arcade set: 20-60 MB) is parsed straight from the
+        // file: read whole, as text and its sanitized copy, it took several times its size at once
+        // and never loaded on a 2 GB device (the names silently missing).
+        if (!keepRaw && file.length() > streamAbove) {
+            try {
+                openUtf8(file).use { parse(it, keepRaw = false) }
+                return this
+            } catch (e: Exception) {
+                if (e is java.nio.charset.CharacterCodingException || e.cause is java.nio.charset.CharacterCodingException) {
+                    reset() // Not UTF-8: read whole below, in its own encoding.
+                } else {
+                    parseError = e.message ?: e.javaClass.simpleName
+                    runCatching { android.util.Log.w("MainUI.Logiqx", "Failed to parse ${file.path}: ${e.message}") }
+                    return this
+                }
+            } catch (e: OutOfMemoryError) {
+                reset(); parseError = "too big to read"
+                runCatching { android.util.Log.w("MainUI.Logiqx", "${file.path} is too big to read") }
+                return this
+            }
+        }
         // (A UTF-8 byte order mark is not text: the parser would take it as junk before the declaration.)
         var lossy = false
         val raw = runCatching { GameListXml.readXmlText(file) { lossy = true } }.getOrElse { parseError = "unreadable: ${it.message}"; return this }
         if (GameListXml.isEmptyXml(raw)) return this
         doctype = doctypeOf(raw)
-        val p = GameListXml.newParser()
-        p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         try {
             // DOCTYPE declarations are fine for the pull parser; external DTDs are never fetched.
-            p.setInput(StringReader(GameListXml.sanitize(raw)))
+            parse(StringReader(GameListXml.sanitize(raw)), keepRaw)
+            if (lossy) parseError = "not valid UTF-8 (read, but not rewritten)"
+        } catch (e: Exception) {
+            parseError = e.message ?: e.javaClass.simpleName
+            runCatching { android.util.Log.w("MainUI.Logiqx", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
+        } catch (e: OutOfMemoryError) {
+            // A full arcade set's DAT: unreadable, and remembered as such (not read again for every game).
+            reset()
+            parseError = "too big to read"
+            runCatching { android.util.Log.w("MainUI.Logiqx", "${file.path} is too big to read") }
+        }
+        return this
+    }
+
+    private fun reset() {
+        rootTag = "datafile"; rootAttrs.clear(); doctype = null
+        games.clear(); header.clear(); byFile.clear(); byName.clear(); byCrc.clear()
+        headerRaw.clear(); others.clear(); parseError = null
+    }
+
+    /** The file as UTF-8 (strict: anything else throws, for the whole-file path), sanitized as it is read. */
+    private fun openUtf8(f: File): java.io.Reader {
+        val ins = java.io.BufferedInputStream(f.inputStream(), 1 shl 16)
+        ins.mark(4)
+        val b = ByteArray(3)
+        val n = ins.read(b)
+        if (!(n == 3 && b[0] == 0xEF.toByte() && b[1] == 0xBB.toByte() && b[2] == 0xBF.toByte())) ins.reset()
+        val dec = Charsets.UTF_8.newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+        return GameListXml.Companion.SanitizingReader(java.io.InputStreamReader(ins, dec))
+    }
+
+    /**
+     * Reads the DAT from [input] (already sanitized). Read only (not [keepRaw]): only what the lists
+     * use is kept (the fields [READ_FIELDS], the file names of its roms; no hashes, sizes or other
+     * elements): an arcade DAT has 100 000+ roms.
+     */
+    private fun parse(input: java.io.Reader, keepRaw: Boolean) {
+        val p = GameListXml.newParser()
+        p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+        p.setInput(input)
+        run {
             var game: Game? = null
+            val romNames = ArrayList<String>()
             var inHeader = false
             var depth = 0
             var sawRoot = false
@@ -131,16 +191,20 @@ class LogiqxDat(val file: File) : MetaLookup {
                             depth == 2 && tag == "header" -> inHeader = true
                             depth == 2 && (tag == "game" || tag == "machine" || tag == "software") -> {
                                 game = Game(p.getAttributeValue(null, "name") ?: "", isMachine = tag == "machine", tag = tag)
-                                for (i in 0 until p.attributeCount) game.attrs[p.getAttributeName(i)] = p.getAttributeValue(i)
+                                if (keepRaw) for (i in 0 until p.attributeCount) game.attrs[p.getAttributeName(i)] = p.getAttributeValue(i)
+                                romNames.clear()
                             }
-                            depth == 2 && tag != "header" -> { GameListXml.readElement(p).let { if (keepRaw) others += it.raw }; depth-- }
+                            depth == 2 && tag != "header" -> { if (keepRaw) others += GameListXml.readElement(p).raw else skip(p); depth-- }
                             depth == 3 && inHeader -> {
                                 val el = GameListXml.readElement(p); depth--
                                 if (!keepRaw) header[tag] = el.text
                                 else if (el.simple && tag !in header) header[tag] = el.text else headerRaw += el.raw
                             }
+                            depth == 3 && game != null && (tag == "rom" || tag == "disk") && !keepRaw -> {
+                                p.getAttributeValue(null, "name")?.let { romNames += it }
+                            }
                             depth == 3 && game != null && (tag == "rom" || tag == "disk") -> {
-                                val attrs = if (!keepRaw) null else LinkedHashMap<String, String>().also { a ->
+                                val attrs = LinkedHashMap<String, String>().also { a ->
                                     for (i in 0 until p.attributeCount) a[p.getAttributeName(i)] = p.getAttributeValue(i)
                                 }
                                 game.roms += Rom(
@@ -152,18 +216,22 @@ class LogiqxDat(val file: File) : MetaLookup {
                                     tag, attrs,
                                 )
                             }
+                            depth == 3 && game != null && !keepRaw -> {
+                                // Read only: the text of what the lists use (an attributed <description>
+                                // still names the game); the rest (MAME's inputs, dipswitches...) skipped.
+                                if (tag in READ_FIELDS) game.fields[tag] = GameListXml.readElement(p).text else skip(p)
+                                depth--
+                            }
                             depth == 3 && game != null -> {
                                 val el = GameListXml.readElement(p); depth--
-                                // Read only: the text, as before (an attributed <description> still names the game).
-                                if (!keepRaw) game.fields[tag] = el.text
-                                else if (el.simple && tag !in game.fields) game.fields[tag] = el.text else game.raw += el.raw
+                                if (el.simple && tag !in game.fields) game.fields[tag] = el.text else game.raw += el.raw
                             }
                         }
                     }
                     XmlPullParser.END_TAG -> {
                         if (depth == 2) {
                             if (inHeader) inHeader = false
-                            game?.let { add(it) }
+                            game?.let { if (keepRaw) add(it) else add(it, romNames) }
                             game = null
                         }
                         depth--
@@ -175,25 +243,35 @@ class LogiqxDat(val file: File) : MetaLookup {
             if (!sawRoot) throw org.xmlpull.v1.XmlPullParserException("no XML elements in it")
             // Cut short (a copy that didn't finish): the parser just stops, with elements still open.
             if (depth != 0) throw org.xmlpull.v1.XmlPullParserException("unexpected end of file")
-            if (lossy) parseError = "not valid UTF-8 (read, but not rewritten)"
-        } catch (e: Exception) {
-            parseError = e.message ?: e.javaClass.simpleName
-            runCatching { android.util.Log.w("MainUI.Logiqx", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
-        } catch (e: OutOfMemoryError) {
-            // A full arcade set's DAT: unreadable, and remembered as such (not read again for every game).
-            games.clear(); byFile.clear(); byName.clear(); byCrc.clear()
-            parseError = "too big to read"
         }
-        return this
     }
+
+    /** Past the element just started (its END_TAG consumed), keeping nothing of it. */
+    private fun skip(p: XmlPullParser) {
+        var d = 1
+        while (d > 0) when (p.next()) {
+            XmlPullParser.START_TAG -> d++
+            XmlPullParser.END_TAG -> d--
+            XmlPullParser.END_DOCUMENT -> throw org.xmlpull.v1.XmlPullParserException("unexpected end of file")
+        }
+    }
+
+    private fun fileKey(name: String) = name.substringAfterLast('/').substringAfterLast('\\').lowercase()
 
     private fun add(g: Game) {
         games += g
         byName[g.name.lowercase()] = g
         for (r in g.roms) {
-            byFile.putIfAbsent(r.name.substringAfterLast('/').substringAfterLast('\\').lowercase(), g)
+            byFile.putIfAbsent(fileKey(r.name), g)
             r.crc?.let { byCrc.putIfAbsent(it, g) }
         }
+    }
+
+    /** Read only: indexed by its roms' file names, which aren't kept. */
+    private fun add(g: Game, romNames: List<String>) {
+        games += g
+        byName[g.name.lowercase()] = g
+        for (n in romNames) byFile.putIfAbsent(fileKey(n), g)
     }
 
     fun all(): List<Game> = games
@@ -316,6 +394,14 @@ class LogiqxDat(val file: File) : MetaLookup {
     }
 
     companion object {
+        /** Bigger read-only DATs are parsed from the file as it is read (see [load]). */
+        const val STREAM_ABOVE = 4L shl 20
+
+        /** What a read-only DAT keeps of a game's children: what [toEntry] uses. */
+        private val READ_FIELDS = setOf("description", "desc", "synopsis", "comment", "year", "manufacturer", "publisher",
+            "developer", "image", "thumbnail", "marquee", "video", "genre", "players", "rating", "hidden", "favorite",
+            "boxart", "cover", "screenshot")
+
         /** The `<!DOCTYPE ...>` at the start of [raw] (with its inline DTD, if any), or null. */
         fun doctypeOf(raw: String): String? {
             val start = raw.indexOf("<!DOCTYPE")

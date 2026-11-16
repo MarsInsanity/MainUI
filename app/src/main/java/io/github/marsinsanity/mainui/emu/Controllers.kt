@@ -684,7 +684,8 @@ class StandaloneController(
         if (apiPaused || resumeOwed) {
             apiPaused = false
             resumeOwed = false
-            StateApi.call(pkg, "resume", timeoutMs = 2000)
+            // (A dead emulator isn't started again, empty, just to be told to resume.)
+            if (!gone()) StateApi.call(pkg, "resume", timeoutMs = 2000)
             ApiPauses.resumed(pkg)
         }
     }
@@ -693,13 +694,28 @@ class StandaloneController(
     fun noGame(): Boolean =
         StateApi.call(pkg, "status", timeoutMs = 3000).let { it.ok && it.extras?.getBoolean("running", true) == false }
 
+    /**
+     * Its process is gone (crashed, or stopped by Android), known with root. A State API call would
+     * start it again, empty, and its "no game is running" then read as "nothing to save".
+     */
+    private fun gone(): Boolean = Root.knownAvailable() && Root.processes(pkg)?.isEmpty() == true
+
+    private val emuName get() = def?.name ?: "The emulator"
+
     override fun save(slot: Int): Boolean {
         if (direct) {
-            val r = StateApi.call(pkg, "save", slot, waitMs = 20_000, settleMs = 500)
-            saveProblem = r.error?.let { "${def?.name ?: "The emulator"} couldn't save: $it" }
-            return r.ok.also { if (it) onSaved() }
+            // Said at once, not after the save's 20 s wait (the emulator opened at its own list or setup).
+            if (gone()) { saveProblem = "$emuName isn't running any more (it closed or crashed)"; return false }
+            if (noGame()) { saveProblem = "$emuName couldn't save: no game is running"; return false }
+            return saveDirect(slot)
         }
         return keys(saveSpec).also { if (it) onSaved() }
+    }
+
+    private fun saveDirect(slot: Int): Boolean {
+        val r = StateApi.call(pkg, "save", slot, waitMs = 20_000, settleMs = 500)
+        saveProblem = r.error?.let { "$emuName couldn't save: $it" }
+        return r.ok.also { if (it) onSaved() }
     }
 
     /** Why the last State API load failed, in words for the user. */
@@ -708,6 +724,8 @@ class StandaloneController(
 
     override fun load(slot: Int): Boolean {
         if (direct) {
+            if (gone()) { loadProblem = "$emuName isn't running any more (it closed or crashed)"; return false }
+            if (noGame()) { loadProblem = "$emuName couldn't load: no game is running"; return false }
             val r = StateApi.call(pkg, "load", slot, waitMs = 20_000, settleMs = 500)
             loadProblem = r.error?.let { "${def?.name ?: "The emulator"} couldn't load: $it" }
             return r.ok
@@ -717,8 +735,13 @@ class StandaloneController(
 
     /** State API: MainUI's own resume state, apart from the user's slots. */
     override fun saveToResume(): Boolean {
-        if (direct && noGame()) { saveProblem = null; return true }
-        return save(if (direct) StateApi.RESUME_SLOT else 0).also { if (it) onResumeSaved() }
+        if (direct) {
+            // Not running at all is no "nothing to save": said, and the next start isn't a silent fresh one.
+            if (gone()) { saveProblem = "$emuName isn't running any more (it closed or crashed): nothing was saved"; return false }
+            if (noGame()) { saveProblem = null; return true }
+            return saveDirect(StateApi.RESUME_SLOT).also { if (it) onResumeSaved() }
+        }
+        return save(0).also { if (it) onResumeSaved() }
     }
 
     override fun openNativeMenu(): Boolean {
@@ -740,8 +763,9 @@ class StandaloneController(
         if (autoSave && direct) {
             unpause()
             // Not stopped without its save: false with saveProblem set, the game keeps running.
-            if (!noGame()) {
-                if (!save(StateApi.RESUME_SLOT)) return false
+            // (Gone: nothing to save, and nothing started again by asking.)
+            if (!gone() && !noGame()) {
+                if (!saveDirect(StateApi.RESUME_SLOT)) return false
                 onResumeSaved()
             }
         } else if (autoSave && states == StateSupport.HOTKEY && saveSpec != null) {

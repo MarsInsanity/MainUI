@@ -110,6 +110,11 @@ class GameListXml(val dir: File) : MetaLookup {
         } catch (e: Exception) {
             parseError = e.message ?: e.javaClass.simpleName
             runCatching { android.util.Log.w("MainUI.GameList", "Failed to parse ${file.path}: ${e.message} (it won't be overwritten)") }
+        } catch (e: OutOfMemoryError) {
+            // Remembered as unreadable (and never overwritten), not read again for every list and picture.
+            entries.clear(); others.clear(); prelude.clear()
+            parseError = "too big to read"
+            runCatching { android.util.Log.w("MainUI.GameList", "${file.path} is too big to read") }
         }
         return this
     }
@@ -240,6 +245,88 @@ class GameListXml(val dir: File) : MetaLookup {
         private val BAD_CHARS = Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]")
 
         private val CDATA = Regex("<!\\[CDATA\\[.*?]]>", RegexOption.DOT_MATCHES_ALL)
+
+        /**
+         * [sanitize] while reading, for a file too big to hold as text at once (a full arcade set's
+         * DAT: 20-60 MB, several times that as one string and its sanitized copy).
+         */
+        class SanitizingReader(private val input: java.io.Reader) : java.io.Reader() {
+            private val buf = CharArray(1 shl 16)
+            private var pos = 0
+            private var lim = 0
+            private var eof = false
+            private var inCdata = false
+            /** Output still to return ("&amp;", "<![CDATA["...). */
+            private var pending: String? = null
+            private var pendingAt = 0
+
+            /** At least [k] characters from [pos] in [buf], unless the input ends first. */
+            private fun ensure(k: Int): Boolean {
+                if (lim - pos >= k) return true
+                if (eof) return false
+                if (pos > 0) { System.arraycopy(buf, pos, buf, 0, lim - pos); lim -= pos; pos = 0 }
+                while (lim - pos < k && !eof) {
+                    val r = input.read(buf, lim, buf.size - lim)
+                    if (r < 0) eof = true else lim += r
+                }
+                return lim - pos >= k
+            }
+
+            private fun at(s: String): Boolean {
+                if (!ensure(s.length)) return false
+                for (i in s.indices) if (buf[pos + i] != s[i]) return false
+                return true
+            }
+
+            /** After the "&" at [pos]: an entity the parser knows ([BARE_AMP]'s list). */
+            private fun entity(): Boolean {
+                ensure(MAX_ENTITY)
+                val end = minOf(lim, pos + MAX_ENTITY)
+                var i = pos + 1
+                for (n in ENTITY_NAMES) {
+                    if (i + n.length < end && n.indices.all { buf[i + it] == n[it] } && buf[i + n.length] == ';') return true
+                }
+                if (i >= end || buf[i] != '#') return false
+                i++
+                val hex = i < end && buf[i] == 'x'
+                if (hex) i++
+                val start = i
+                while (i < end && (buf[i] in '0'..'9' || (hex && (buf[i] in 'a'..'f' || buf[i] in 'A'..'F')))) i++
+                return i > start && i < end && buf[i] == ';'
+            }
+
+            private fun bad(c: Char) = c <= '\u0008' || c == '\u000B' || c == '\u000C' || (c in '\u000E'..'\u001F')
+
+            override fun read(cbuf: CharArray, off: Int, len: Int): Int {
+                if (len == 0) return 0
+                var n = 0
+                while (n < len) {
+                    val p = pending
+                    if (p != null) {
+                        while (n < len && pendingAt < p.length) cbuf[off + n++] = p[pendingAt++]
+                        if (pendingAt >= p.length) pending = null
+                        continue
+                    }
+                    if (!ensure(1)) break
+                    val c = buf[pos]
+                    when {
+                        inCdata -> if (c == ']' && at("]]>")) { pos += 3; inCdata = false; pending = "]]>"; pendingAt = 0 }
+                            else { pos++; if (!bad(c)) cbuf[off + n++] = c }
+                        c == '<' && at("<![CDATA[") -> { pos += 9; inCdata = true; pending = "<![CDATA["; pendingAt = 0 }
+                        c == '&' -> { val known = entity(); pos++; if (known) cbuf[off + n++] = '&' else { pending = "&amp;"; pendingAt = 0 } }
+                        else -> { pos++; if (!bad(c)) cbuf[off + n++] = c }
+                    }
+                }
+                return if (n == 0) -1 else n
+            }
+
+            override fun close() = input.close()
+
+            private companion object {
+                const val MAX_ENTITY = 16
+                val ENTITY_NAMES = listOf("amp", "lt", "gt", "quot", "apos")
+            }
+        }
 
         /** Bare "&" escaped and control characters dropped, outside CDATA sections (their text is literal). */
         fun sanitize(s: String): String {
