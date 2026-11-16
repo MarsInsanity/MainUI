@@ -115,9 +115,20 @@ object EmulatorUpdates {
     private fun checkLocked(progress: (String) -> Unit): List<Update> {
         val pm = MainUI.app.packageManager
         val previous = known().associateBy { it.id + "/" + it.pkg }
-        progress("Refreshing app repositories...")
+        // Only the repositories an installed emulator comes from (F-Droid's index alone is ~18 MB, and
+        // this runs daily, often right before a game); all of them while none was ever downloaded.
+        val installedPkgs = runCatching {
+            EmulatorStore.entries().flatMap { e -> e.def.packages.filter { AppStore.installedVersion(it) != null } }.toSet()
+        }.getOrDefault(emptySet())
+        val cached = runCatching { AppStore.apps() }.getOrDefault(emptyList())
+        val enabled = AppStore.repos().filter { it.enabled }
+        // (Also one never downloaded yet: its first refresh failed, and it may have an emulator.)
+        val repos = if (cached.isEmpty()) enabled
+            else enabled.filter { r -> AppStore.lastRefresh(r) == 0L || cached.any { it.repo == r.address && it.pkg in installedPkgs } }
+        if (repos.isNotEmpty()) progress("Refreshing app repositories...")
         // A repository that couldn't be reached (offline at boot) makes it a failed check, retried soon.
-        val repoErrors = runCatching { AppStore.refreshAll(AppStore.repos().filter { it.enabled }) {} }.getOrElse { listOf(it.message.orEmpty()) }
+        val repoErrors = if (repos.isEmpty()) emptyList()
+            else runCatching { AppStore.refreshAll(repos) {} }.getOrElse { listOf(it.message.orEmpty()) }
         val out = ArrayList<Update>()
         var failed = if (repoErrors.isNotEmpty()) 1 else 0
         val entries = EmulatorStore.entries().filter { it.installed != null }

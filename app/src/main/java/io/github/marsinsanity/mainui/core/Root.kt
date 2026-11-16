@@ -403,6 +403,21 @@ object Root {
      */
     fun quick(cmd: String, timeoutMs: Long = 5000): Result = Shell.run(cmd, timeoutMs)
 
+    /**
+     * The pids of [pkg]'s processes, its own and its "pkg:name" ones (an emulator running its game in
+     * "pkg:EmulationProcess", as Mupen64Plus does: `pidof pkg` misses it, and once Android killed the
+     * idle main process the game looked gone). Null when it couldn't be checked.
+     */
+    fun processes(pkg: String): List<String>? {
+        val r = quick("ps -A -o PID,NAME 2>/dev/null")
+        if (!r.ok) return null
+        return r.out.lineSequence().mapNotNull { l ->
+            val parts = l.trim().split(Regex("\\s+"), limit = 2)
+            val name = parts.getOrNull(1) ?: return@mapNotNull null
+            parts[0].takeIf { name == pkg || name.startsWith("$pkg:") }
+        }.toList()
+    }
+
     data class WriteResult(val ok: Boolean, val error: String = "", val writtenTo: String? = null)
 
     /**

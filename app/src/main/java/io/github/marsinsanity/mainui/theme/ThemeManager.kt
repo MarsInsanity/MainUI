@@ -174,7 +174,7 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
     fun apply(entry: ThemeEntry): String? {
         if (isBundled(entry.dir)) runCatching { ensureBundled(entry.dir!!) }.onFailure { return "Could not unpack ${entry.name}" }
         settings.themePath = if (entry.zip != null) {
-            (install(entry.zip) ?: return "Could not extract ${entry.zip.name}").absolutePath
+            (install(entry.zip, reloadCurrent = false) ?: return "Could not extract ${entry.zip.name}").absolutePath
         } else entry.key
         reload()
         return null
@@ -200,7 +200,8 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
         for (root in storage.themeDirs()) {
             val children = root.listFiles()?.sortedBy { it.name.lowercase() } ?: continue
             for (f in children) {
-                if (f.isDirectory) {
+                // (Hidden folders: an install's staging folder and the old copy it replaces.)
+                if (f.isDirectory && !f.name.startsWith(".")) {
                     for (d in themeFolders(f)) {
                         val o = runCatching { JSONObject(File(d, "config.json").readText()) }.getOrNull()
                         val e = ThemeEntry(d, null, o?.optString("name")?.ifEmpty { null } ?: d.name,
@@ -263,29 +264,62 @@ class ThemeManager(private val ctx: Context, private val storage: Storage, priva
      * Extracts an Onion theme .zip next to itself: the theme at its root, in a top folder, or each
      * theme of a pack ("CyberOnion (2-pack)", also with the pack's own folder on top).
      */
-    fun install(zip: File): File? {
+    /** One install at a time: they share the staging folder (a download and a dropped zip at once). */
+    private val installLock = Any()
+
+    /** [reloadCurrent]: reload the theme in use if this replaced it (false when the caller reloads anyway). */
+    fun install(zip: File, reloadCurrent: Boolean = true): File? = synchronized(installLock) {
         val themesDir = zip.parentFile ?: return null
-        val created = mutableListOf<File>()
-        val dirs = runCatching {
-            readZip(zip) { zf ->
-                val entries = zf.entries().toList().filter { !it.name.startsWith("__MACOSX/") }
-                val names = HashSet<String>()
-                themeRoots(entries.map { it.name }).mapNotNull { root ->
-                    val name = if (root.isEmpty()) zip.nameWithoutExtension else root.substringAfterLast('/')
-                    // (two themes of the same name are not merged into one folder: the first one is kept)
-                    if (!names.add(name.lowercase())) return@mapNotNull null
-                    val target = File(themesDir, name)
-                    if (!target.exists()) created += target
-                    extract(zf, entries, themesDir, root, name)
+        // Unpacked beside the installed themes first, then each swapped in whole: an update replaces
+        // the theme (files the new version dropped don't stay and keep overriding), and an unpack
+        // that fails part-way (card full, bad entry) leaves the installed theme as it was.
+        val staging = File(themesDir, ".mainui-unpack")
+        staging.deleteRecursively()
+        try {
+            staging.mkdirs()
+            val dirs = runCatching {
+                readZip(zip) { zf ->
+                    val entries = zf.entries().toList().filter { !it.name.startsWith("__MACOSX/") }
+                    val names = HashSet<String>()
+                    themeRoots(entries.map { it.name }).mapNotNull { root ->
+                        val name = if (root.isEmpty()) zip.nameWithoutExtension else root.substringAfterLast('/')
+                        // (two themes of the same name are not merged into one folder: the first one is kept)
+                        if (!names.add(name.lowercase())) return@mapNotNull null
+                        extract(zf, entries, staging, root, name)
+                    }
                 }
+            }.getOrNull()
+            // Only usable themes count (and free the zip); anything else keeps the zip, fails and leaves nothing behind.
+            if (dirs.isNullOrEmpty() || !dirs.all { isTheme(it) }) return null
+            val installed = dirs.map { d ->
+                val target = File(themesDir, d.name)
+                val old = File(themesDir, ".${d.name}.old")
+                old.deleteRecursively()
+                if (target.exists() && !target.renameTo(old)) target.deleteRecursively()
+                try {
+                    if (!d.renameTo(target)) d.copyRecursively(target, overwrite = true)
+                } catch (e: Exception) {
+                    // (A copy that failed part-way, card full: the theme as it was, not half of the new one.)
+                    target.deleteRecursively()
+                    if (old.exists()) old.renameTo(target)
+                    throw e
+                }
+                old.deleteRecursively()
+                target
             }
-        }.getOrNull()
-        // Only usable themes count (and free the zip); anything else keeps the zip, fails and leaves nothing behind.
-        if (dirs.isNullOrEmpty() || !dirs.all { isTheme(it) }) { created.forEach { it.deleteRecursively() }; return null }
-        // The pack's own name has no folder: remembered, so the Theme Downloader knows it is installed.
-        if (dirs.size > 1) runCatching { packMarker(themesDir, zip.nameWithoutExtension).writeText(dirs.joinToString("\n") { it.name }) }
-        zip.delete()
-        return dirs.first()
+            // The pack's own name has no folder: remembered, so the Theme Downloader knows it is installed.
+            if (installed.size > 1) runCatching { packMarker(themesDir, zip.nameWithoutExtension).writeText(installed.joinToString("\n") { it.name }) }
+            zip.delete()
+            // The theme in use updated: drawn from the new files (not a mix with cached old pictures).
+            if (reloadCurrent && installed.any { it.absolutePath == settings.themePath })
+                android.os.Handler(android.os.Looper.getMainLooper()).post { reload() }
+            return installed.first()
+        } catch (e: Exception) {
+            android.util.Log.w("MainUI.Themes", "theme install failed: ${zip.name}", e)
+            return null
+        } finally {
+            staging.deleteRecursively()
+        }
     }
 
     /** Opens [zip], with the zip format's old CP437 names when they aren't UTF-8. */

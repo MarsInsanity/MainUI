@@ -18,8 +18,14 @@ object RomIdent {
     /** Checksummed even when a serial was found (cheap for cartridge sized files). */
     const val SMALL = 64L * 1024 * 1024
 
+    /**
+     * Compressed / container disc formats: the DATs list their tracks' CRCs (bin, iso), never the
+     * container's, so a whole-file CRC can't match and only reads up to 256 MB from the card.
+     */
+    private val CONTAINERS = setOf("chd", "cso", "zso", "rvz", "wbfs", "pbp", "7z", "gcz", "wia", "ciso", "rar")
+
     fun crcs(f: File, alsoLarge: Boolean): List<String> {
-        if (!f.isFile) return emptyList()
+        if (!f.isFile || f.extension.lowercase() in CONTAINERS) return emptyList()
         if (f.extension.equals("zip", true)) return runCatching {
             ZipFile(f).use { z -> z.entries().asSequence().filter { !it.isDirectory && it.crc >= 0 }
                 .sortedByDescending { it.size }.map { "%08X".format(it.crc) }.toList() }

@@ -269,7 +269,10 @@ object FreeArt {
         val dat = dat(s, src) ?: return emptyList()
         val names = LinkedHashSet<String>()
         val serials = RomIdent.serials(file, systemId)
-        val crcs = listOfNotNull(crcHint?.uppercase()) + runCatching { RomIdent.crcs(file, alsoLarge = serials.isEmpty()) }.getOrDefault(emptyList())
+        // (A file's CRC already computed for ScreenScraper isn't read again; a zip's entries still are.)
+        val computed = if (crcHint != null && !file.extension.equals("zip", true)) emptyList()
+            else runCatching { RomIdent.crcs(file, alsoLarge = serials.isEmpty()) }.getOrDefault(emptyList())
+        val crcs = listOfNotNull(crcHint?.uppercase()) + computed
         crcs.forEach { names += dat.crc(it) }
         serials.forEach { names += dat.serial(it) }
         names += dat.file(file.name)

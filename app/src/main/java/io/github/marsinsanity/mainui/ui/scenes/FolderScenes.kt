@@ -97,6 +97,20 @@ class FolderPickerScene(
     private fun show(d: File?, select: String? = null) {
         dir = d
         title = d?.let { RomFoldersScene.pretty(it) } ?: purpose
+        // Listed off the UI thread: a rom root on an SD card has thousands of entries, each a slow
+        // file-system call, which froze the screen. (A result for a folder already left is dropped;
+        // meanwhile nothing of the previous folder can be picked as this one.)
+        list.set(listOf(UiItem("Loading...", disabled = true)), keepIndex = false)
+        host.io({ items(d) }) { items ->
+            if (dir != d) return@io
+            list.set(items, keepIndex = false)
+            if (select != null) list.active = list.items.indexOfFirst { (it.data as? File)?.name == select }.coerceAtLeast(0)
+            else d?.let { positions[it.absolutePath] }?.let { list.active = it.coerceIn(0, maxOf(0, list.size - 1)) }
+            list.ensureVisible()
+        }
+    }
+
+    private fun items(d: File?): List<UiItem> {
         val items = mutableListOf<UiItem>()
         if (d == null) {
             for (v in MainUI.storage.volumes()) {
@@ -119,10 +133,7 @@ class FolderPickerScene(
                     sub = if (systems >= 2) "$systems systems" else null)
             }
         }
-        list.set(items, keepIndex = false)
-        if (select != null) list.active = list.items.indexOfFirst { (it.data as? File)?.name == select }.coerceAtLeast(0)
-        else d?.let { positions[it.absolutePath] }?.let { list.active = it.coerceIn(0, maxOf(0, list.size - 1)) }
-        list.ensureVisible()
+        return items
     }
 
     override fun activate() {

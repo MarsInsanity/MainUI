@@ -417,6 +417,14 @@ Lost progress or data:
   game screen on the running one, with the old game still running behind. With root the emulator is
   now stopped before another game starts in it (the Game Switcher saved the old one on leaving);
   never an emulator the user opened by itself (its game is unknown to MainUI and unsaved by it).
+  RetroArch too: switching between two RetroArch games deadlocked it ("isn't responding", found on
+  the device) while it tore its old game down; stopped first, the second game starts (verified).
+  (Other CLEAR_TASK emulators close their old game themselves and aren't stopped; a standalone one
+  that is gets its writes finished first.)
+- **Emulators running their game in a sub-process looked stopped** (found on the device: Mupen64Plus
+  runs it in `pkg:EmulationProcess`, and `pidof pkg` missed it once Android killed the idle main
+  process): MainUI started the game again, its auto load waited for nothing, automatic saves stayed
+  off and Exit lost the progress. Running checks now count every `pkg:*` process (`Root.processes`).
 - **The in-game menu showed over the lock screen** after waking (B there resumed the game behind the
   lock screen; with the screen timeout now applying, this happened whenever the menu was left open).
   It is now transparent and ignores keys, touches and HOME until the device is unlocked; it keeps
@@ -475,6 +483,38 @@ Things that didn't work:
 - **Holding Back for the process popup also left the screen** behind it; with hold-Back on, Back now
   acts on release when it was a short press.
 - **App Store > Emulators jumped back to the top** after every emulator page.
+- **A session restored after MainUI's process restarted was never ended** when its game was quit
+  meanwhile (Android kills MainUI under memory pressure during big games): its game counted as still
+  playing (play time, resume instead of start, "is running" on Delete ROM). With root, MainUI now
+  checks once after a restart and ends it when its emulator (or a MainUI build's game) isn't running.
+- **A MainUI build's emulator that wasn't running was started and frozen in the background**: each
+  return to MainUI and each screen-off sent it "pause", which starts a stopped app, and its "no game
+  is running" answer then got it frozen; picking its game later brought back the emulator's own
+  menus. "pause" now goes only to a running emulator, one with no game is never frozen, and the
+  game is unpaused before MainUI asks whether it ended.
+- **MainUI killed while a game started forgot that its auto load was pending**, and the next leave
+  saved the fresh start over the state: the pending load is now kept with the session on disk.
+  The list of games left running in their emulators is kept on disk too (a restart lost it).
+- **The core list couldn't tell RetroArch's cores from standalone emulators** ("Default (Flycast)"
+  beside "Flycast"): cores now read "Flycast, RetroArch".
+- **A force stop of MainUI turns its in-game menu service off** (Android does that) without a word:
+  MainUI now says so after it restarts.
+- **The App Store and its repository page swallowed B while refreshing** (minutes on slow Wi-Fi with
+  20 MB of indexes): B now leaves; the refresh finishes in the background.
+- **The daily emulator update check downloaded ~22 MB** of F-Droid and IzzyOnDroid indexes every day:
+  it now refreshes only the repositories an installed emulator comes from (all of them only while
+  none was ever downloaded).
+- **A theme update unpacked over the installed theme** (files the new version dropped stayed; a
+  failed unpack left it half-written, and the theme in use kept old cached pictures): themes are now
+  unpacked beside it and swapped in whole, and the theme in use is reloaded.
+- **Emulators for Android 11+ never opened by hand couldn't read roms** (they read with "All files
+  access", asked for on their first start): with root it is granted when the app declares it, like
+  the storage permission.
+- Smaller: generic pads sending `KEYCODE_BUTTON_1..10` (DInput "USB Gamepad"s) can select, go back and
+  page; holding B on the on-screen keyboard keeps deleting; the folder picker lists folders off the
+  UI thread (it froze on big rom folders); games marked hidden in gamelist.xml show with "Show hidden
+  games"; the scraper no longer reads `.chd` / `.cso` files whole for a CRC that can't match, nor a
+  file twice when ScreenScraper already hashed it.
 - **Magisk's "granted Superuser" toast covered the footer hints on most screens** (49 toasts in 38
   minutes of device testing): every root command started its own `su`. The frequent, short ones
   (process list, `pidof`, the core scan and `retroarch.cfg` read on each return to MainUI, the SAF
@@ -510,27 +550,28 @@ Checked each emulator whose only source in `emulators.json` was Google Play or a
 ### Open (real, not fixed yet)
 
 Most severe first, each with the fix the review suggested:
-- **A session restored after MainUI's process restarts is never ended** when the game ended
-  meanwhile (Android kills MainUI under memory pressure during big games). Fix: on start, end a
-  restored session whose emulator isn't in front.
 - **Magisk's "granted Superuser" toast for the remaining root commands**: the frequent ones now go
   through the persistent `Root.Shell` (see Fixed); writes, installs and long jobs still start their
   own `su`. Set Magisk > Settings > Superuser notification to None to hide the rest.
-- **Store screens swallow B while busy** (refresh, download): only Home leaves. Fix: B cancels
-  (`Http.Cancelled`) or leaves while it finishes. Similarly a background job that throws leaves a
-  scene's busy text set (`host.io` doesn't call `done`).
-- **Daily emulator update check downloads ~22 MB** of F-Droid and IzzyOnDroid indexes even when no
-  installed emulator comes from them. Fix: refresh only repositories that have an installed
-  emulator, at low priority, not during a game.
-- **Theme update unpacks over the installed theme** (files the new version dropped stay; a failed
-  unpack leaves it half-written). Fix: unpack to `.<name>.new`, then swap.
-- Smaller ones: generic pads sending `KEYCODE_BUTTON_1..16` can't select or go back; the on-screen
-  keyboard doesn't repeat B (delete); network previews load first-in-first-out (the selected one waits
-  behind skipped rows); package-manager label/icon lookups on the UI thread in the process lists;
-  SD card mount reloads run on the main thread; the folder picker stats files on the main thread;
-  games marked hidden in gamelist.xml can't be shown; a ScreenScraper screenshot is saved as box art
-  when SS has no box; whole-file CRCs of `.chd` / `.cso` can never match; free-source JPEGs are
-  re-encoded as PNG; with two RetroArch builds installed there is no way to pick one.
+- **A background job that throws leaves a scene's busy text set** (`host.io` shows a toast but
+  doesn't call `done`); rare (out of memory on a huge catalog). Fix: wrap such jobs in `runCatching`.
+- **Dreamcast games start in RetroArch's Flycast core even with Flycast's MainUI build installed**
+  (systems.json lists the core first; found on the device). Not changed: preferring the MainUI build
+  would hide existing players' RetroArch memory cards and states. Pick it per system (SELECT on the
+  Dreamcast tile > Core), or prefer a MainUI build only over a RetroArch core of the same emulator.
+- **Upgrading from v0.1.118 or older**: resume states from before v0.1.119 have no "fresh" mark, so
+  the first start of each game skips them and its first leave saves over them (one time per game).
+  Fix: a one-time migration marking states saved before the update.
+- **A copied `MainUI/emulators.json` hides later recipe fixes** (an override entry replaces the
+  built-in one whole). Fix: merge override fields over the built-in recipe, or say in Settings that
+  N recipes are overridden.
+- **A session from before a reboot can come back** when the clock is set back at boot (drained
+  battery): sessions tell boots apart by the wall clock. Fix: store `Settings.Global.BOOT_COUNT`.
+- Smaller ones: network previews load first-in-first-out (the selected one waits behind skipped
+  rows); package-manager label/icon lookups on the UI thread in the process lists; SD card mount
+  reloads run on the main thread; a ScreenScraper screenshot is saved as box art when SS has no box;
+  free-source JPEGs are re-encoded as PNG; with two RetroArch builds installed there is no way to
+  pick one; the in-game menu opened at the moment the screen turns off can show over the lock screen.
 
 ### Device testing (Pocket 2+, LineageOS 19.1)
 
@@ -553,6 +594,13 @@ Most severe first, each with the fix the review suggested:
   index takes ~3 minutes to read on this chip). App Store search, categories, app pages and the
   "N more apps" end work. Found the DAT download, dialog and search bugs above.
 
+- Standalone MainUI builds (Mupen64Plus AE, SeedlessDS, Flycast; free homebrew): each one's first-run
+  folder picker, Save / Load with previews, Exit (stops), auto load on relaunch, sleep / wake with
+  the game running and with the menu open (lock screen, menu back after unlocking), the Game
+  Switcher across emulators ("continued where it was") and within one (Flycast: "stopped before
+  starting"). Found the RetroArch switch deadlock, the sub-process and the Dreamcast default bugs
+  above. Flycast's MainUI build answers "can't pause" once MainUI is in front, so it is frozen
+  instead (sound comes back on resume).
 ---
 
 ## 11. Quick start (copy in order)

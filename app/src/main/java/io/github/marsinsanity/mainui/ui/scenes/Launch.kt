@@ -54,7 +54,8 @@ object Launch {
             // Only bring the emulator back if it is still running the game; otherwise
             // relaunch the game (resuming a dead emulator would open it empty).
             // Off the UI thread: the running checks and the resume use root or wait for an answer.
-            host.io({ MainUI.sessions.isRunning(active) && !MainUI.sessions.gameEnded(active) && MainUI.sessions.resume() }) { resumed ->
+            // (Unparked first: a frozen emulator can't answer whether its game ended.)
+            host.io({ MainUI.sessions.unpark(); MainUI.sessions.isRunning(active) && !MainUI.sessions.gameEnded(active) && MainUI.sessions.resume() }) { resumed ->
                 if (!resumed) launchFresh(host, game) else launchDone()
             }
             return
