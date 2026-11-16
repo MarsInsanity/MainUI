@@ -32,21 +32,28 @@ data class Session(
      * while the handheld sleeps (sessions are only restored within the same boot).
      */
     val startedUptime: Long = android.os.SystemClock.uptimeMillis(),
+    /** Android's boot count at the start (-1 unknown): sessions are only restored within the same boot. */
+    val boot: Int = bootCount(),
 ) {
     val isRetroArch get() = emuRef?.startsWith("ra:") == true
     val isAndroidApp get() = emuRef == null
 
     fun json() = JSONObject().put("gameKey", gameKey).put("system", systemId).put("path", path).put("name", name)
         .put("emu", emuRef).put("pkg", pkg).put("activity", activity).put("startedAt", startedAt).put("launch", launchUri)
-        .put("startedUptime", startedUptime)
+        .put("startedUptime", startedUptime).put("boot", boot)
 
     companion object {
         fun from(o: JSONObject) = Session(o.getString("gameKey"), o.getString("system"), o.optString("path").ifEmpty { null },
             o.getString("name"), o.optString("emu").ifEmpty { null }, o.getString("pkg"),
             o.optString("activity").ifEmpty { null }, o.getLong("startedAt"), o.optString("launch").ifEmpty { null },
-            o.optLong("startedUptime", android.os.SystemClock.uptimeMillis()))
+            o.optLong("startedUptime", android.os.SystemClock.uptimeMillis()), o.optInt("boot", -1))
     }
 }
+
+/** Settings.Global.BOOT_COUNT, or -1 when it can't be read. */
+fun bootCount(): Int = runCatching {
+    android.provider.Settings.Global.getInt(io.github.marsinsanity.mainui.MainUI.app.contentResolver, android.provider.Settings.Global.BOOT_COUNT)
+}.getOrDefault(-1)
 
 /** Android tasks, from `dumpsys activity recents` (root). */
 object Tasks {
@@ -94,7 +101,7 @@ class SessionManager(
      */
     @Volatile var active: Session? = runCatching {
         settings.prefs.getString("active_session", null)?.let { Session.from(JSONObject(it)) }
-    }.getOrNull()?.takeIf { it.startedAt >= bootTime() - 60_000 }
+    }.getOrNull()?.takeIf { sameBoot(it) }
         private set
 
     /** The session restored from disk when this process started (MainUI was killed during it). */
@@ -129,6 +136,15 @@ class SessionManager(
         private set
 
     private fun bootTime() = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()
+
+    /**
+     * [s] was started in this boot: by Android's boot count (a clock set back at boot, after a
+     * drained battery, let last boot's session pass the clock test); by the clock when unknown.
+     */
+    private fun sameBoot(s: Session): Boolean {
+        val now = bootCount()
+        return if (s.boot >= 0 && now >= 0) s.boot == now else s.startedAt >= bootTime() - 60_000
+    }
 
     /** Package names of every app launched from MainUI in this boot (for the process manager). */
     val launchedPackages: MutableSet<String> = linkedSetOf()
@@ -205,7 +221,7 @@ class SessionManager(
         runCatching {
             val a = JSONArray(settings.prefs.getString("left_running", "[]"))
             for (i in 0 until a.length()) runCatching { Session.from(a.getJSONObject(i)) }.getOrNull()
-                ?.takeIf { it.startedAt >= bootTime() - 60_000 }?.let { put(it.pkg, it) }
+                ?.takeIf { sameBoot(it) }?.let { put(it.pkg, it) }
         }
     }
 

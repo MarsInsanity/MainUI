@@ -497,6 +497,20 @@ Things that didn't work:
   The list of games left running in their emulators is kept on disk too (a restart lost it).
 - **The core list couldn't tell RetroArch's cores from standalone emulators** ("Default (Flycast)"
   beside "Flycast"): cores now read "Flycast, RetroArch".
+- **A session (or a State API pause) from before a reboot could come back** when the clock was set
+  back at boot (a drained battery): boots are now told apart by Android's boot count
+  (`Settings.Global.BOOT_COUNT`), the clock only when it is unknown.
+- **A copied `MainUI/emulators.json` silently hid MainUI's later recipe fixes** (an entry replaces the
+  built-in recipe whole): Settings > Emulators & cores now lists the recipes it replaces.
+- **HOME skipped the in-game menu after a permission prompt flashed over the game at its start**
+  (found on the device: Android 13 asks for notifications on most apps' first start; LineageOS Clock
+  every time): MainUI took the permission screen for the app in front and HOME went to MainUI with
+  the game running on. Permission and install prompts over another app no longer count as the
+  app in front (over MainUI's own screens they still do, so HOME there isn't taken for the game).
+- **Two stray taps deleted a ROM** (found on the device): a tap on the footer strip hit a tall pop
+  menu's half-hidden last row ("Delete ROM", "Uninstall"), and a tap anywhere on a dialog's box
+  confirmed it. The footer strip is no menu row now, and a two-button dialog is confirmed only by
+  its confirm hint or A (a tap beside it still cancels). Verified on the device.
 - **A force stop of MainUI turns its in-game menu service off** (Android does that) without a word:
   MainUI now says so after it restarts.
 - **The App Store and its repository page swallowed B while refreshing** (minutes on slow Wi-Fi with
@@ -529,6 +543,21 @@ Store and updates:
 - Store icons and theme previews are kept out of the gallery (`MainUI/cache/.nomedia`); APKs handed
   to Android's installer are deleted after an hour; the App Store list says when it stops at 1500.
 - **Process manager**: START (kill all) is in the hints and says what it did.
+- **SD card games failed in emulators that open roms through a folder grant** (found on the device:
+  SeedlessDS, Flycast and the other `%ROMSAF%` recipes with only an internal `roms` folder
+  granted got a link they can't open). MainUI now checks the emulator's folder grants before
+  starting and says which folder to add in that emulator ("SeedlessDS has no access to SD
+  card/roms/nds..."); the grants are read again (not from the minute's cache) before refusing. The
+  launch error's "Install it" hint now shows only when the emulator is missing. Verified on the
+  device (and that the internal copy still starts).
+- **Switching "MainUI data folder" back silently brought back an old copy** (found on the device):
+  a folder that already held MainUI data (left by an earlier move) got nothing copied, so
+  favorites, recents and play time went back in time. MainUI now asks which data to keep: the data
+  in use (the older MainUI folder is set aside whole as `MainUI.old`, `MainUI.old2`..., nothing of
+  it deleted or merged) or the older data; B backs out. Asking creates no folder (an empty SD card
+  `MainUI` folder would have become Auto's data), the library is copied before the setting changes
+  and a failed copy undoes everything, and "Auto" shows where it resolves ("Auto (Internal)",
+  "Auto (SD card)"). Verified on the device: Internal > SD card > Internal > Auto, and backing out.
 
 ### Emulators only on Google Play
 
@@ -562,16 +591,18 @@ Most severe first, each with the fix the review suggested:
 - **Upgrading from v0.1.118 or older**: resume states from before v0.1.119 have no "fresh" mark, so
   the first start of each game skips them and its first leave saves over them (one time per game).
   Fix: a one-time migration marking states saved before the update.
-- **A copied `MainUI/emulators.json` hides later recipe fixes** (an override entry replaces the
-  built-in one whole). Fix: merge override fields over the built-in recipe, or say in Settings that
-  N recipes are overridden.
-- **A session from before a reboot can come back** when the clock is set back at boot (drained
-  battery): sessions tell boots apart by the wall clock. Fix: store `Settings.Global.BOOT_COUNT`.
+- **"Auto" follows the first volume holding a `MainUI` folder, SD card first**: a card carrying a
+  `MainUI` folder (another device's, or an earlier move's) takes over Auto's data silently. Fix:
+  store the folder Auto resolved to and ask when another one appears.
+- **A game on both volumes (same folder and name) starts the SD card copy**, so saves and states
+  beside the internal copy go unused. Fix: show both, or prefer the copy last played.
 - Smaller ones: network previews load first-in-first-out (the selected one waits behind skipped
   rows); package-manager label/icon lookups on the UI thread in the process lists; SD card mount
   reloads run on the main thread; a ScreenScraper screenshot is saved as box art when SS has no box;
   free-source JPEGs are re-encoded as PNG; with two RetroArch builds installed there is no way to
-  pick one; the in-game menu opened at the moment the screen turns off can show over the lock screen.
+  pick one; the in-game menu opened at the moment the screen turns off can show over the lock
+  screen; the in-game menu stays up when Android kills the emulator under it (B closes it, but its
+  "resume" wakes the emulator's process just to hear that no game is running).
 
 ### Device testing (Pocket 2+, LineageOS 19.1)
 
@@ -601,6 +632,14 @@ Most severe first, each with the fix the review suggested:
   starting"). Found the RetroArch switch deadlock, the sub-process and the Dreamcast default bugs
   above. Flycast's MainUI build answers "can't pause" once MainUI is in front, so it is frozen
   instead (sound comes back on resume).
+- Touch, Android apps, Ports, process manager: taps, swipes, flings, long presses (the pressed
+  item's options), footer hints, the keyboard, Settings, dialogs and pop menus, the in-game menu and
+  Game Switcher by touch; hiding apps, Android games, Ports and Emulators moves and launches; the
+  process manager with a game behind and the hold-Back popup over games. Found the permission-prompt
+  HOME and the stray-tap delete bugs above.
+- SD card roms, folder grants, scraper art, data folder: games on the SD card in RetroArch and the
+  standalone builds, emulators without an SD card grant, moving MainUI's data between Internal,
+  the SD card and Auto and back. Found the folder-grant and data-folder bugs above.
 ---
 
 ## 11. Quick start (copy in order)

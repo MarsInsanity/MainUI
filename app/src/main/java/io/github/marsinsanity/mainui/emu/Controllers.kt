@@ -196,7 +196,8 @@ object ApiPauses {
     private const val PREF = "api_paused_pkg"
 
     fun paused(pkg: String) {
-        MainUI.settings.prefs.edit().putString(PREF, pkg).putLong("${PREF}_at", System.currentTimeMillis()).apply()
+        MainUI.settings.prefs.edit().putString(PREF, pkg).putLong("${PREF}_at", System.currentTimeMillis())
+            .putInt("${PREF}_boot", bootCount()).apply()
     }
 
     fun resumed(pkg: String) {
@@ -208,8 +209,12 @@ object ApiPauses {
         val p = MainUI.settings.prefs
         val pkg = p.getString(PREF, null) ?: return
         p.edit().remove(PREF).apply()
-        val boot = System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()
-        if (p.getLong("${PREF}_at", 0) < boot) return
+        // This boot's only: by Android's boot count, by the clock when unknown (a clock set back at
+        // boot would otherwise pass, and the resume broadcast start a stopped emulator).
+        val then = p.getInt("${PREF}_boot", -1)
+        val now = bootCount()
+        if (then >= 0 && now >= 0) { if (then != now) return }
+        else if (p.getLong("${PREF}_at", 0) < System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()) return
         Thread({ StateApi.call(pkg, "resume", timeoutMs = 5000) }, "api-resume").apply { isDaemon = true }.start()
     }
 }

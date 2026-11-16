@@ -20,15 +20,16 @@ object SafGrants {
 
     /** Tree document ids ("primary:roms/psx", "1234-ABCD:Roms") granted to [pkg] (user id [uid]). */
     @Synchronized
-    fun trees(pkg: String, uid: Int): List<String> {
+    /** [fresh]: read again (a folder the user has just added in the emulator, before refusing a game). */
+    fun trees(pkg: String, uid: Int, fresh: Boolean = false): List<String> {
         val now = System.currentTimeMillis()
-        cache[pkg]?.let { (at, v) -> if (now - at < 60_000) return v }
+        if (!fresh) synchronized(cache) { cache[pkg] }?.let { (at, v) -> if (now - at < 60_000) return v }
         if (!Root.knownAvailable() && !Root.available()) return emptyList()
         val dump = Root.quick("dumpsys activity permissions 2>/dev/null", 15_000).out
         val xml = Root.quick("f=/data/system/urigrants.xml; head -c 5 \$f 2>/dev/null | grep -q '<' && cat \$f 2>/dev/null", 15_000).out
         val found = (fromDumpsys(dump, uid) + fromXml(xml, pkg)).distinct()
         Log.d(TAG, "$pkg folders: $found")
-        cache[pkg] = now to found
+        synchronized(cache) { cache[pkg] = now to found }
         return found
     }
 

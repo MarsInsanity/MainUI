@@ -161,13 +161,16 @@ class DialogScene(
     }
 
     /**
-     * A tap on the box confirms; a tap beside it backs out, like B (never "Download all cores" or
-     * "Remove" by tapping away). An OK-only dialog closes on any tap.
+     * Confirmed only by its confirm hint (or A): a tap on the box itself, a natural spot to read or
+     * dismiss it, did confirm, and two stray taps deleted a ROM (seen on the device). A tap beside
+     * the box backs out, like B. An OK-only dialog closes on any tap.
      */
     override fun onTap(x: Float, y: Float): Boolean {
+        if (cancelLabel == null) { close(); onConfirm(); return true }
         val inside = box?.contains(x, y) ?: true
+        if (inside) return true
         close()
-        if (inside || cancelLabel == null) onConfirm() else onCancel()
+        onCancel()
         return true
     }
 }
@@ -233,6 +236,9 @@ class PopMenuScene(
     private var panel = android.graphics.RectF()
 
     override fun onTap(x: Float, y: Float): Boolean {
+        // The footer is drawn over a tall menu's last row: a tap on the footer (not on one of its
+        // hints, those are handled first) is no tap on that half-hidden item ("Delete ROM").
+        if (y >= host.logicalHeight - Gfx.FOOTER) return true
         if (!panel.contains(x, y)) { close(); return true }
         val rows = minOf(list.size, 6)
         // (The panel's own padding is no row: below the last one is a hidden item.)

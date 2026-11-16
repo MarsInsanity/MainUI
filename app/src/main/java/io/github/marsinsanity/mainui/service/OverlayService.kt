@@ -193,6 +193,14 @@ class OverlayService : AccessibilityService() {
         // Any keyboard (SwiftKey, ...): it comes and goes over the game, which sends no event when
         // it is back, so the keyboard must never count as the app in front.
         if (pkg != foregroundPackage && (event.className?.toString() == "android.inputmethodservice.SoftInputWindow" || isKeyboard(pkg))) return
+        // The same for permission and install prompts: a game asking for a permission on its start
+        // (notifications on Android 13, often with nothing shown) flashes one over itself and sends
+        // no event when it's gone, so HOME went to MainUI instead of the in-game menu (seen on the
+        // device). A permission screen opened on its own shows over the app it came from anyway.
+        // Over MainUI's own screens (an uninstall, a store install, its storage request) the prompt
+        // does count: MainUI is not showing then, and HOME must not take it for the game parked
+        // behind (the in-game menu would open over the prompt).
+        if (pkg in TRANSIENT_PROMPTS && foregroundPackage != null && foregroundPackage != packageName) return
         if (pkg != foregroundPackage) Log.d(TAG, "foreground: $pkg")
         foregroundPackage = pkg
         lastWindowChangeAt = SystemClock.uptimeMillis()
@@ -743,6 +751,12 @@ class OverlayService : AccessibilityService() {
     }
 
     companion object {
+        /** Permission and install prompts: shown over an app, never "the app in front" themselves. */
+        private val TRANSIENT_PROMPTS = setOf(
+            "com.android.permissioncontroller", "com.google.android.permissioncontroller",
+            "com.android.packageinstaller", "com.google.android.packageinstaller",
+        )
+
         /**
          * After MainUI's menu or screen had focus: has every controller whose sticks / triggers
          * moved meanwhile report them again, now to the game ([moved], device ids). Otherwise
