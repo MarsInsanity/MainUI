@@ -18,14 +18,25 @@ object SafGrants {
     private const val AUTHORITY = "com.android.externalstorage.documents"
     private val cache = HashMap<String, Pair<Long, List<String>>>()
 
-    /** Tree document ids ("primary:roms/psx", "1234-ABCD:Roms") granted to [pkg] (user id [uid]). */
-    @Synchronized
-    /** [fresh]: read again (a folder the user has just added in the emulator, before refusing a game). */
-    fun trees(pkg: String, uid: Int, fresh: Boolean = false): List<String> {
+    /**
+     * Tree document ids ("primary:roms/psx", "1234-ABCD:Roms") granted to [pkg] (user id [uid]);
+     * empty also when they can't be read (no root): see [known].
+     * [fresh]: read again (a folder the user has just added in the emulator, before refusing a game).
+     */
+    fun trees(pkg: String, uid: Int, fresh: Boolean = false): List<String> = known(pkg, uid, fresh).orEmpty()
+
+    /**
+     * Like [trees], but null when the grant table couldn't be read (no root, the dump failed): an
+     * empty list is "none" for sure (an emulator never pointed at a folder, before its first-run
+     * setup), which Android would refuse every game of.
+     */
+    fun known(pkg: String, uid: Int, fresh: Boolean = false): List<String>? {
         val now = System.currentTimeMillis()
         if (!fresh) synchronized(cache) { cache[pkg] }?.let { (at, v) -> if (now - at < 60_000) return v }
-        if (!Root.knownAvailable() && !Root.available()) return emptyList()
+        if (!Root.knownAvailable() && !Root.available()) return null
         val dump = Root.quick("dumpsys activity permissions 2>/dev/null", 15_000).out
+        // (Its header: the table was read, whatever it holds.)
+        if (!dump.contains("URI PERMISSIONS")) return null
         val xml = Root.quick("f=/data/system/urigrants.xml; head -c 5 \$f 2>/dev/null | grep -q '<' && cat \$f 2>/dev/null", 15_000).out
         val found = (fromDumpsys(dump, uid) + fromXml(xml, pkg)).distinct()
         Log.d(TAG, "$pkg folders: $found")

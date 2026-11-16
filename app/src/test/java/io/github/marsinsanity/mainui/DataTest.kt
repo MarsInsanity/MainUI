@@ -1775,3 +1775,50 @@ class MainUIBuildsTest {
         for (command in listOf("pause", "resume")) assertTrue(command, java.contains("\"$command\""))
     }
 }
+
+/** Round 5: big libraries (a DAT parsed as it is read, only what the lists use kept). */
+class BigLibraryTest {
+    @org.junit.Before fun parser() { GameListXml.newParser = { org.kxml2.io.KXmlParser() } }
+
+    private fun streamed(s: String): String = GameListXml.Companion.SanitizingReader(java.io.StringReader(s)).use { it.readText() }
+
+    @Test fun streamingSanitizerMatchesTheWholeText() {
+        val cases = listOf(
+            "", "plain", "a & b", "a &amp; b &lt;&gt;&quot;&apos;", "&#123; &#x1F; &#xZZ; &#; &# &x;", "tail &",
+            "Tom & Jerry <![CDATA[ a & b \u0001 ]]> & more", "<![CDATA[ unterminated & ", "bad\u0000\u0008\u000B\u000C\u000E\u001F chars\t\n\r ok",
+            "&\u0001amp; x", "]]> outside & <![CDATA[x]]><![CDATA[y & z]]>&amp",
+        )
+        for (c in cases.filter { !it.contains("unterminated") }) assertEquals(c, GameListXml.sanitize(c), streamed(c))
+        // Across the reader's 64 KB buffer: entities and CDATA marks split at every point.
+        val unit = "x&amp;y & <![CDATA[ & ]]>&#x41; "
+        val big = buildString { while (length < 200_000) { append(unit); append("z".repeat(length % 7)) } }
+        assertEquals(GameListXml.sanitize(big), streamed(big))
+    }
+
+    @Test fun bigDatIsReadStreamedLikeTheWholeFile() {
+        val dir = java.nio.file.Files.createTempDirectory("dat").toFile()
+        try {
+            val f = File(dir, "arcade.dat").apply {
+                writeText("﻿<?xml version=\"1.0\"?>\n<!DOCTYPE datafile>\n<datafile><header><name>Arcade</name></header>" +
+                    "<machine name=\"sf2\"><description>Street Fighter II & co</description><year>1991</year><manufacturer>Capcom</manufacturer>" +
+                    "<rom name=\"sf2.bin\" size=\"1\" crc=\"abcd\"/><dipswitch name=\"x\"><dipvalue name=\"y\"/></dipswitch><input players=\"2\"/></machine>" +
+                    "<game name=\"Tetris (World)\"><description>Tetris</description><rom name=\"Tetris (World).gb\" size=\"2\"/></game></datafile>")
+            }
+            val whole = io.github.marsinsanity.mainui.data.LogiqxDat(f).load()
+            val stream = io.github.marsinsanity.mainui.data.LogiqxDat(f).load(streamAbove = 0)
+            assertNull(stream.parseError)
+            for (d in listOf(whole, stream)) {
+                assertEquals("Street Fighter II & co", d.get(File(dir, "sf2.zip"))?.name)
+                assertEquals("Capcom", d.get(File(dir, "sf2.zip"))?.fields?.get("publisher"))
+                assertEquals("Tetris", d.get(File(dir, "Tetris (World).gb"))?.name)
+            }
+            // Not UTF-8 (Windows "ANSI"): read whole instead, as before.
+            File(dir, "ansi.dat").writeBytes("<datafile><game name=\"Café\"><description>Café</description><rom name=\"cafe.gb\"/></game></datafile>".toByteArray(Charsets.ISO_8859_1))
+            val ansi = io.github.marsinsanity.mainui.data.LogiqxDat(File(dir, "ansi.dat")).load(streamAbove = 0)
+            assertEquals("Café", ansi.get(File(dir, "cafe.gb"))?.name)
+            // Cut short: a parse error, not a crash.
+            File(dir, "cut.dat").writeText("<datafile><game name=\"A\"><description>A</descr")
+            assertTrue(io.github.marsinsanity.mainui.data.LogiqxDat(File(dir, "cut.dat")).load(streamAbove = 0).parseError != null)
+        } finally { dir.deleteRecursively() }
+    }
+}

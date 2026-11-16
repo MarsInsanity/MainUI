@@ -38,8 +38,18 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         // boot, or swapped) or when asked with the other "unknown folders" setting.
         val roots = runCatching { storage.romRoots().map { it.absolutePath } }.getOrDefault(emptyList())
         val c = systemsCache
-        val found = c?.takeIf { !refresh && it.includeUnknown == includeUnknown && it.roots == roots }?.systems
-            ?: registry.discover(includeUnknown).also { systemsCache = SystemsCache(includeUnknown, roots, it) }
+        val again = rediscover.also { if (it) rediscover = false }
+        val found = c?.takeIf { !refresh && !again && it.includeUnknown == includeUnknown && it.roots == roots }?.systems
+            ?: registry.discover(includeUnknown).also { fresh ->
+                // Found again (the scraper asks for fresh folders): a system with the same folders keeps
+                // its count, not counted again (after a full rescan [invalidate] there is nothing to keep).
+                c?.systems?.let { old ->
+                    for (s in fresh) old.firstOrNull { it.id == s.id && it.dirs == s.dirs && it.gameCount >= 0 }?.let { o ->
+                        s.gameCount = o.gameCount; s.otherFiles = o.otherFiles
+                    }
+                }
+                systemsCache = SystemsCache(includeUnknown, roots, fresh)
+            }
         return withMenuSystems(found)
     }
 
@@ -85,32 +95,83 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
 
     /** Puts the app [pkg] into the Ports system (see [AndroidPorts.add]); the lists are read again. */
     fun addPort(label: String, pkg: String, write: (File, String) -> Unit = { f, t -> f.writeText(t) }): File =
-        AndroidPorts.add(storage.romRoots(), label, pkg, write, skipPortDir).also { invalidate() }
+        AndroidPorts.add(storage.romRoots(), label, pkg, write, skipPortDir).also { portsChanged() }
 
     /** Takes the app [pkg] out of the Ports system (see [AndroidPorts.remove]). */
     fun removePort(pkg: String, delete: (File) -> Boolean = { it.delete() }): AndroidPorts.Removed =
-        AndroidPorts.remove(storage.romRoots(), pkg, delete, skipPortDir).also { invalidate() }
+        AndroidPorts.remove(storage.romRoots(), pkg, delete, skipPortDir).also { portsChanged() }
 
+    /** Bumped by [invalidate]: a count of the systems as they were is out of date (see HomeScenes.loadSystems). */
+    @Volatile var generation = 0
+        private set
+
+    /** The systems found again on the next look, their counts kept ([systems]): a ports folder made or removed. */
+    @Volatile private var rediscover = false
+
+    /** Everything found again (Rescan, settings that change what is listed, rom folders added). */
     fun invalidate() {
+        generation++
         systemsCache = null
         menuSystems.clear()
         dirCache.clear()
         gamelists.clear()
         listings.clear()
+        hideCache.clear()
+        hiddenMarks.clear()
     }
+
+    /**
+     * Files changed in [systemId]'s folders (a rom deleted, unzipped, unpacked) or art was added
+     * (null): only that system is counted again. The lists notice changes by themselves (folder and
+     * gamelist.xml times); a full [invalidate] made every system count again, minutes on a big
+     * library on an SD card, for one deleted file.
+     */
+    fun changed(systemId: String?) {
+        listings.clear()
+        if (systemId == null) return
+        val dirs = ArrayList<String>()
+        systemsCache?.systems?.forEach { if (it.id == systemId) { it.gameCount = -1; it.dirs.mapTo(dirs) { d -> d.absolutePath } } }
+        menuSystems[systemId]?.let { it.gameCount = -1; it.dirs.mapTo(dirs) { d -> d.absolutePath } }
+        // Its folders listed again when opened, not trusted to folder times: an .m3u edited in place,
+        // or the last rom of a sub folder deleted (the parent's time doesn't change), stayed listed.
+        dirCache.keys.removeIf { k -> dirs.any { k == it || k.startsWith("$it/") } }
+        hideCache.keys.removeIf { it.startsWith("$systemId|") }
+    }
+
+    /** A port added or removed, or its folder rescanned: only Ports counted again (its folder may be new). */
+    fun portsChanged() {
+        rediscover = true
+        changed(AndroidPorts.SYSTEM)
+    }
+
+    /**
+     * Parsed gamelists and DATs given back (MainUI hidden behind a game: tens of MB on a big scraped
+     * library, which a 2 GB device's emulator needs more). The lists keep their games; a list or
+     * picture that needs a file again reads it again.
+     */
+    fun trim() {
+        gamelists.clear(); cachedMtime.clear()
+        dats.clear(); cachedDatMtime.clear()
+    }
+
+    /** One load at a time per file: overlapping counts, lists and pictures parsed the same big file at once. */
+    private val loadLocks = ConcurrentHashMap<String, Any>()
 
     fun gamelist(dir: File): GameListXml {
         val key = dir.absolutePath
-        val cached = gamelists[key]
         val f = File(dir, "gamelist.xml")
         // Any change counts (deleted, or replaced by an older copy); its time is read before the
         // load, so a save during the load is seen next time.
-        val m = if (f.isFile) f.lastModified() else 0L
-        if (cached != null && cached.loaded && cachedMtime[key] == m) return cached
-        val gl = GameListXml(dir).load()
-        gamelists[key] = gl
-        cachedMtime[key] = m
-        return gl
+        fun fresh(m: Long): GameListXml? = gamelists[key]?.takeIf { it.loaded && cachedMtime[key] == m }
+        fresh(if (f.isFile) f.lastModified() else 0L)?.let { return it }
+        synchronized(loadLocks.getOrPut("gl:$key") { Any() }) {
+            val m = if (f.isFile) f.lastModified() else 0L
+            fresh(m)?.let { return it }
+            val gl = GameListXml(dir).load()
+            gamelists[key] = gl
+            cachedMtime[key] = m
+            return gl
+        }
     }
 
     private val cachedMtime = ConcurrentHashMap<String, Long>()
@@ -118,13 +179,88 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
 
     /** The Logiqx DAT of a system folder, reloaded when it changes. */
     fun dat(dir: File): LogiqxDat? {
-        val f = LogiqxDat.locate(dir) ?: run { dats.remove(dir.absolutePath); return null }
-        val cached = dats[dir.absolutePath]
-        if (cached != null && cached.file == f && cached.stamp() == f.lastModified() && cachedDatMtime[dir.absolutePath] == f.lastModified()) return cached
-        val d = LogiqxDat(f).load()
-        dats[dir.absolutePath] = d
-        cachedDatMtime[dir.absolutePath] = f.lastModified()
-        return d
+        val key = dir.absolutePath
+        val f = LogiqxDat.locate(dir) ?: run { dats.remove(key); return null }
+        fun fresh(): LogiqxDat? = dats[key]?.takeIf { it.file == f && it.stamp() == f.lastModified() && cachedDatMtime[key] == f.lastModified() }
+        fresh()?.let { return it }
+        synchronized(loadLocks.getOrPut("dat:$key") { Any() }) {
+            fresh()?.let { return it }
+            val m = f.lastModified()
+            val d = LogiqxDat(f).load()
+            dats[key] = d
+            cachedDatMtime[key] = m
+            return d
+        }
+    }
+
+    /**
+     * What [meta] (dir).stamp() would be, without reading the files: a list still valid needs no
+     * gamelist parsed (after [trim], or on a return from a game).
+     */
+    private fun metaStamp(dir: File): Long {
+        val glf = File(dir, "gamelist.xml")
+        val gm = if (glf.isFile) glf.lastModified() else 0L
+        val src = MainUIRef.metadataSource()
+        if (src == "gamelist") return gm
+        val df = LogiqxDat.locate(dir)
+        val dm = if (df != null && df.isFile) df.lastModified() else 0L
+        return when {
+            src == "logiqx" -> dm
+            df == null -> gm
+            !glf.isFile -> dm
+            else -> gm * 31 + dm
+        }
+    }
+
+    /**
+     * The metadata the count needs: only for gamelist.xml / DAT hidden flags, so none (no parsing:
+     * 15-25 MB of XML on a big scraped library, at every start) unless a file marks games hidden.
+     */
+    private fun countLookup(dir: File): MetaLookup {
+        if (MainUIRef.showHidden()) return EmptyLookup
+        val src = MainUIRef.metadataSource()
+        val gl = File(dir, "gamelist.xml").takeIf { src != "logiqx" && it.isFile }
+        // (A big DAT, a No-Intro / MAME set's, never hides games; only small tool-written ones might.)
+        val dat = if (src != "gamelist") LogiqxDat.locate(dir)?.takeIf { it.length() <= LogiqxDat.STREAM_ABOVE } else null
+        val datHides = dat != null && hasHiddenMarks(dat)
+        return when {
+            datHides -> meta(dir)
+            // (Only gamelist.xml hides games: a big DAT beside it isn't read for that.)
+            gl != null && hasHiddenMarks(gl) -> gamelist(dir)
+            else -> EmptyLookup
+        }
+    }
+
+    private val hiddenMarks = ConcurrentHashMap<String, Pair<Long, Boolean>>()
+
+    /** [f] has a `<hidden>true` (read as bytes, nothing parsed), remembered until it changes. */
+    private fun hasHiddenMarks(f: File): Boolean {
+        val m = f.lastModified()
+        hiddenMarks[f.absolutePath]?.let { if (it.first == m) return it.second }
+        val r = runCatching { scanHidden(f) }.getOrDefault(true)
+        hiddenMarks[f.absolutePath] = m to r
+        return r
+    }
+
+    private fun scanHidden(f: File): Boolean {
+        f.inputStream().use { ins ->
+            val buf = ByteArray(1 shl 16)
+            var carry = ""
+            while (true) {
+                val n = ins.read(buf)
+                if (n < 0) return false
+                val s = carry + String(buf, 0, n, Charsets.ISO_8859_1)
+                var i = s.indexOf("hidden>", ignoreCase = true)
+                while (i >= 0) {
+                    var j = i + 7
+                    while (j < s.length && s[j].isWhitespace()) j++
+                    if (s.regionMatches(j, "true", 0, 4, ignoreCase = true)) return true
+                    i = s.indexOf("hidden>", i + 1, ignoreCase = true)
+                }
+                // (A mark cut by the chunk's end is found again in the next one.)
+                carry = s.takeLast(32)
+            }
+        }
     }
     private val cachedDatMtime = ConcurrentHashMap<String, Long>()
 
@@ -189,34 +325,34 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
     private fun sortKey(name: String): String = name.lowercase().removePrefix("the ")
 
     private fun listDir(system: GameSystem, dir: File): List<Game> {
-        val gl = meta(systemRootFor(system, dir))
-        val stamp = gl.stamp() * 7 + MainUIRef.metadataSource().hashCode()
+        val root = systemRootFor(system, dir)
+        val stamp = metaStamp(root) * 7 + MainUIRef.metadataSource().hashCode()
         val cached = dirCache[dir.absolutePath]
         // Read before listing: a file added while the list is made changes it again, so it's listed next time.
         val mtime = dir.lastModified()
         if (cached != null && cached.mtime == mtime && cached.metaStamp == stamp) return cached.games
+        val gl = meta(root)
         val files = dir.listFiles() ?: return emptyList()
-        val hiddenByCue = discFilesToHide(system, files) + unpackedZips(system, files)
+        val hiddenByCue = hideList(system, dir, files, mtime)
         val out = ArrayList<Game>(files.size)
         for (f in files) {
             val n = f.name
             if (n.startsWith(".") || n == "gamelist.xml" || n.endsWith(".bak") || n.endsWith(".tmp") ||
                 isMetaDat(system, f)) continue
-            if (f.isDirectory) {
+            val accepted = system.def.accepts(f)
+            // Folders named like a rom (e.g. "Game.m3u/") are games, like ES-DE: listed below as one.
+            if (!byName(f, accepted) && f.isDirectory) {
                 if (n.lowercase() in SystemRegistry.IGNORED_FOLDERS || n.lowercase() in MEDIA_FOLDERS) continue
                 val entry = gl.get(f)
                 if (entry?.hidden == true && !MainUIRef.showHidden()) continue // (shown with Show hidden games)
-                // Folders named like a rom (e.g. "Game.m3u/") count as a game, like ES-DE.
-                if (f.extension.isNotEmpty() && system.def.accepts(f)) {
-                    out += Game(system.id, f, entry?.name ?: f.nameWithoutExtension, imagePath = entry?.image, desc = entry?.desc)
-                } else if (entry != null || hasRoms(system, f, 0)) {
+                if (entry != null || hasRoms(system, f, 0)) {
                     // Folders without any playable file (e.g. RetroArch's per-core save
                     // folders like "Gambatte/" next to the roms) are not shown.
                     out += Game(system.id, f, entry?.name ?: n, isFolder = true, imagePath = entry?.image)
                 }
                 continue
             }
-            if (!system.def.accepts(f)) continue
+            if (!accepted) continue
             if (n.lowercase() in hiddenByCue) continue
             val entry = gl.get(f)
             if (entry?.hidden == true && !MainUIRef.showHidden()) continue // (gamelist.xml <hidden>: shown with Show hidden games)
@@ -227,13 +363,21 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         return out
     }
 
+    /**
+     * [f] is taken for a file by its name alone (a rom, picture, save or text file name), not looked
+     * at on disk: a stat each, thousands per system on an SD card. (A folder named like a rom is a
+     * game anyway, and nobody names a folder "x.png".)
+     */
+    private fun byName(f: File, accepted: Boolean): Boolean {
+        val ext = f.extension
+        return ext.isNotEmpty() && (accepted || ext.lowercase() in NOT_GAMES)
+    }
+
     private fun hasRoms(system: GameSystem, dir: File, depth: Int): Boolean {
         val files = dir.listFiles() ?: return false
         for (f in files) {
             if (f.name.startsWith(".")) continue
-            if (f.isDirectory) {
-                if (f.extension.isNotEmpty() && system.def.accepts(f)) return true
-            } else if (system.def.accepts(f) && !isMetaDat(system, f) && f.name != "gamelist.xml") return true
+            if (system.def.accepts(f) && (f.extension.isNotEmpty() || !f.isDirectory) && !isMetaDat(system, f) && f.name != "gamelist.xml") return true
         }
         if (depth >= 2) return false
         return files.any { it.isDirectory && !it.name.startsWith(".") && it.name.lowercase() !in MEDIA_FOLDERS &&
@@ -255,6 +399,22 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
     /** gamelist.xml lives in the system's top folder even for games in sub folders. */
     fun systemRootFor(system: GameSystem, dir: File): File =
         system.dirs.firstOrNull { dir.absolutePath == it.absolutePath || dir.absolutePath.startsWith(it.absolutePath + "/") } ?: dir
+
+    private class Hide(val mtime: Long, val names: Set<String>)
+    private val hideCache = ConcurrentHashMap<String, Hide>()
+
+    /**
+     * The files of [dir] that aren't games of their own (disc tracks, discs of an .m3u, unpacked
+     * zips), shared by the count and the lists and remembered until the folder changes: each .cue
+     * and .m3u is read to know, thousands on a big disc library.
+     */
+    private fun hideList(system: GameSystem, dir: File, files: Array<File>, mtime: Long): Set<String> {
+        val key = system.id + "|" + dir.absolutePath
+        hideCache[key]?.let { if (it.mtime == mtime) return it.names }
+        val names = discFilesToHide(system, files) + unpackedZips(system, files)
+        hideCache[key] = Hide(mtime, names)
+        return names
+    }
 
     /** Zips whose image was unpacked beside them for launching (Xbox, see ZipImages): only the image is listed. */
     private fun unpackedZips(system: GameSystem, files: Array<File>): Set<String> {
@@ -312,28 +472,34 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val seen = HashSet<String>()
         fun count(rel: String) { if (seen.add(rel.lowercase())) n++ }
         fun walk(d: File, rel: String, depth: Int, gl: MetaLookup) {
+            val mtime = d.lastModified()
             val files = d.listFiles() ?: return
-            val hidden = discFilesToHide(system, files) + unpackedZips(system, files)
+            val hidden = hideList(system, d, files, mtime)
             for (f in files) {
                 if (f.name.startsWith(".")) continue
-                if (f.isDirectory) {
+                val accepted = system.def.accepts(f)
+                // (Deepest level: a folder named like a rom isn't a game there, so it is looked at.)
+                if ((depth >= 3 || !byName(f, accepted)) && f.isDirectory) {
                     if (depth < 3 && f.name.lowercase() !in MEDIA_FOLDERS && f.name.lowercase() !in SystemRegistry.IGNORED_FOLDERS) {
-                        if (f.extension.isNotEmpty() && system.def.accepts(f)) count("$rel/${f.name}") else walk(f, "$rel/${f.name}", depth + 1, gl)
+                        if (f.extension.isNotEmpty() && accepted) count("$rel/${f.name}") else walk(f, "$rel/${f.name}", depth + 1, gl)
                     }
-                } else if (system.def.accepts(f) && f.name != "gamelist.xml" && !isMetaDat(system, f) && f.name.lowercase() !in hidden &&
+                } else if (accepted && f.name != "gamelist.xml" && !isMetaDat(system, f) && f.name.lowercase() !in hidden &&
                     (gl.get(f)?.hidden != true || MainUIRef.showHidden()) && !isHiddenFile(system, f)) count("$rel/${f.name}")
                 // Files it could play but that are hidden (BIOS sets, disc tracks) aren't "unplayable" ones.
-                else if (!system.def.accepts(f) && f.extension.isNotEmpty() && f.name != "gamelist.xml" && f.extension.lowercase() !in NOT_GAMES)
+                else if (!accepted && f.extension.isNotEmpty() && f.name != "gamelist.xml" && f.extension.lowercase() !in NOT_GAMES)
                     others.merge(f.extension.lowercase(), 1, Int::plus)
             }
         }
-        system.dirs.forEach { walk(it, "", 0, meta(it)) }
+        system.dirs.forEach { walk(it, "", 0, countLookup(it)) }
         system.otherFiles = others
         system.gameCount = n
         return n
     }
 
-    /** Recursive search over every system for names/filenames containing [query]. */
+    /**
+     * Recursive search over every system for names/filenames containing [query]. Stops one past
+     * [limit] (the caller says there are more).
+     */
     fun search(query: String, systems: List<GameSystem>, limit: Int = 500): List<Game> {
         val q = query.trim().lowercase()
         if (q.isEmpty()) return emptyList()
@@ -341,7 +507,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         for (s in systems) {
             fun walk(dir: File?, depth: Int) {
                 for (g in list(s, dir)) {
-                    if (out.size >= limit) return
+                    if (out.size > limit) return
                     if (g.isFolder) {
                         if (depth < 3) walk(g.file, depth + 1)
                     } else if (g.name.lowercase().contains(q) || g.file?.name?.lowercase()?.contains(q) == true) {
@@ -350,7 +516,7 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
                 }
             }
             walk(null, 0)
-            if (out.size >= limit) break
+            if (out.size > limit) break
         }
         return out.sortedBy { it.name.lowercase() }
     }
@@ -363,8 +529,8 @@ class GameRepository(private val registry: SystemRegistry, private val storage: 
         val file = game.file ?: return null
         val sysRoot = if (system != null) systemRootFor(system, file.parentFile ?: file) else file.parentFile ?: return null
         game.imagePath?.let { p ->
-            val gl = meta(sysRoot)
-            val f = gl.resolve(p)
+            // (As the metadata resolves it, gamelist.xml's way first: a path needs no file parsed.)
+            val f = GameListXml(sysRoot).resolve(p)
             if (f != null) storage.mirrors(f).firstOrNull { it.isFile }?.let { return it }
         }
         val base = file.nameWithoutExtension

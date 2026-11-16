@@ -71,7 +71,8 @@ class UiSettingsScene(host: SceneHost) : ListScene(host, "User interface") {
             toggle("Show Expert (RetroArch)", { s.showExpert }) { s.showExpert = it },
             toggle("Show Search tile", { s.showSearchTile }) { s.showSearchTile = it },
             toggle("Show Android system", { s.showAndroidSystem }) { s.showAndroidSystem = it },
-            toggle("Show Ports system", { s.showPortsSystem }) { s.showPortsSystem = it; MainUI.games.invalidate() },
+            // (Nothing to count again: the Ports system is added on every look, see GameRepository.withMenuSystems.)
+            toggle("Show Ports system", { s.showPortsSystem }) { s.showPortsSystem = it },
             toggle("Show empty systems", { s.showEmptySystems }) { s.showEmptySystems = it },
             toggle("Show game art in lists", { s.showGameArt }) { s.showGameArt = it },
             toggle("OnionOS icons for missing systems", { s.onionIcons }) { s.onionIcons = it; io.github.marsinsanity.mainui.theme.Theme.onionIcons = it },
@@ -133,8 +134,32 @@ class ControlSettingsScene(host: SceneHost) : ListScene(host, "Controls") {
     companion object {
         val HOME_ACTIONS = listOf("menu" to "In-game menu", "gs" to "Game Switcher", "home" to "Go to MainUI", "none" to "Nothing")
 
+        /**
+         * Android 13+ greys out the service of an app installed from a file, not a store ("Restricted
+         * setting") until App info > ⋮ > Allow restricted settings (that entry appears after one try),
+         * and MainUI never said so: the in-game menu, hold-Home and hold-Back stayed off on the
+         * user's own handhelds.
+         */
         fun openAccessibility(host: SceneHost) {
+            if (Build.VERSION.SDK_INT >= 33 && !OverlayService.isEnabled(host.hostContext)) {
+                host.push(DialogScene(host, "In-game menu overlay",
+                    "Turn on \"MainUI in-game menu\" in Accessibility.\n" +
+                        "Greyed out, or \"Restricted setting\"? Then: Settings > Apps > MainUI, the three-dot menu (top right) > " +
+                        "Allow restricted settings, and turn it on again (Setup has a shortcut to App info).",
+                    "OPEN", "BACK") { openAccessibilityNow(host) })
+                return
+            }
+            openAccessibilityNow(host)
+        }
+
+        private fun openAccessibilityNow(host: SceneHost) {
             if (openSystem(host, Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))) host.toast("Enable \"MainUI in-game menu\"", 3000)
+        }
+
+        /** App info, for Android 13+'s "Allow restricted settings" (in its ⋮ menu). */
+        fun openAppInfo(host: SceneHost) {
+            if (openSystem(host, Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${host.hostContext.packageName}"))))
+                host.toast("Three-dot menu (top right) > Allow restricted settings", 4000)
         }
     }
 }
@@ -546,6 +571,11 @@ class SetupScene(host: SceneHost) : ListScene(host, "Setup") {
                 openSystem(host, Intent(AndroidSettings.ACTION_HOME_SETTINGS))
             }),
             UiItem("In-game menu overlay", sub = if (overlayOk) "OK" else "recommended", onSelect = { ControlSettingsScene.openAccessibility(host) }),
+        ) + listOfNotNull(
+            // Android 13+: what to do when the service is greyed out (an APK installed from a file).
+            if (Build.VERSION.SDK_INT >= 33 && !overlayOk) UiItem("Allow restricted settings", sub = "if it is greyed out",
+                onSelect = { ControlSettingsScene.openAppInfo(host) }) else null,
+        ) + listOf(
             UiItem("Root (Magisk)", sub = if (rootKnown) "OK" else "tap to request", onSelect = {
                 host.io({ Root.available(recheck = true) }) { ok ->
                     host.toast(if (ok) "Root granted" else "Root not available"); build()

@@ -225,7 +225,9 @@ object Scraper {
             gamelists.values.forEach { gl -> synchronized(gl) { runCatching { gl.save() }.onFailure { unsaved++; fileLog("not saved: ${it.message}") } } }
             dats.values.forEach { d -> synchronized(d) { runCatching { d.save() }.onFailure { unsaved++; fileLog("not saved: ${it.message}") } } }
             if (unsaved > 0) st.addLog("$unsaved metadata file(s) could not be read, so they were left as they were (see logs/scraper.txt)")
-            MainUI.games.invalidate()
+            // New names and art: the lists see the gamelist.xml changes themselves; no game was
+            // added or removed, so nothing is counted again (that took minutes on a big library).
+            MainUI.games.changed(null)
             // Games looked at before (no art then) would otherwise stay without it until a restart.
             io.github.marsinsanity.mainui.ui.Images.clear()
             if (!fatal.get()) st.message = when {
@@ -432,7 +434,7 @@ object Scraper {
             // doesn't stop the others, and the art already downloaded still counts.
             val unsaved = (gamelists.values.map { gl -> runCatching { gl.save() } } + dats.values.map { d -> runCatching { d.save() } })
                 .mapNotNull { it.exceptionOrNull() }
-            MainUI.games.invalidate()
+            MainUI.games.changed(null)
             io.github.marsinsanity.mainui.ui.Images.clear()
             // LaunchBox / TheGamesDB only come with a full run (big downloads): said when they could have helped.
             val notYet = listOfNotNull(

@@ -558,6 +558,42 @@ Store and updates:
   `MainUI` folder would have become Auto's data), the library is copied before the setting changes
   and a failed copy undoes everything, and "Auto" shows where it resolves ("Auto (Internal)",
   "Auto (SD card)"). Verified on the device: Internal > SD card > Internal > Auto, and backing out.
+- **A big library (thousands of roms on an SD card) sat on "Loading..." and counted itself again
+  and again**: the Games screen counted every system before showing any, statted every file,
+  parsed every gamelist.xml and DAT and read every .cue / .m3u, twice at once on a cold start, and
+  again after deleting one rom, unzipping or scraping. Now names decide without a stat, a gamelist
+  is parsed for the count only when it hides games, disc lists are kept per folder, one count runs
+  at a time, systems show as they are counted, and those actions count only their own system.
+- **A full arcade set's Logiqx DAT (20-60 MB) never loaded** (read whole it took several times its
+  size; the error was swallowed, so arcade games kept their zip names): big read-only DATs are now
+  parsed as they are read, keeping only what the lists use. Unit tests compare the streamed
+  sanitizer with the old one.
+- **Parsed gamelists and DATs stayed in memory behind every game** (tens of MB on a big scraped
+  library, on a 2 GB device): given back when MainUI is hidden, read again only when a list needs
+  them; one parse per file at a time; a gamelist too big to read is remembered, not retried.
+- **Game lists froze with many favorites** (each row searched the whole favorites list, on the UI
+  thread, on every return from a game): favorites are a set and the rows are made in the
+  background. Search says when it stopped at 500 results.
+- **An emulator never pointed at a folder got an SD/ROMs link anyway** (found on the device:
+  Dolphin's "the file does not exist", Azahar's empty game list on their first start): with root,
+  "no folder at all" is known for sure and gets the same "has no access to ..., add that folder"
+  dialog. Verified on the device (ARMSX2, which has no folder).
+- **The in-game menu stayed up over an emulator that died** (crashed, or killed by Android) and its
+  Continue / Save / Game Switcher started the emulator again, empty, logging a save that never
+  happened (found on the device): the menu now checks every few seconds, closes with "SeedlessDS
+  closed (it crashed or Android stopped it)...", and the session ends; a dead emulator is never
+  asked anything. Verified on the device. Save / Load with no game running fail at once (not after 20 s).
+- **HOME over a heavy game under memory pressure opened MainUI's last screen instead of the menu**
+  (found on the device, once in four): Android took the press first; MainUI now opens its own
+  in-game menu then.
+- **Android 13+ greys out the in-game menu service of an APK installed from a file** ("Restricted
+  setting") and nothing said what to do (the user's own Pocket Mini V2 runs Android 13): Setup and
+  Settings > Controls explain "Allow restricted settings", Setup has an App info shortcut, and the
+  README says it.
+- **AYN Thor (Android 13+): an app on the second screen stopped HOME from opening the menu** over
+  the game: window events from other displays are ignored.
+- **The App Store offered apps Android 14 refuses** (made for Android 5 or older, or with a max SDK
+  below the device's): marked incompatible.
 
 ### Emulators only on Google Play
 
@@ -596,6 +632,10 @@ Most severe first, each with the fix the review suggested:
   store the folder Auto resolved to and ask when another one appears.
 - **A game on both volumes (same folder and name) starts the SD card copy**, so saves and states
   beside the internal copy go unused. Fix: show both, or prefer the copy last played.
+- **The search walks systems in name order and stops at 500 matches**, so a common word never
+  reaches later systems (it now says the list is cut). Fix: rank across systems, or stream results.
+- **Root.foregroundPackage takes the first resumed activity** of `dumpsys`: on a two-screen device
+  (AYN Thor) after waking it can be the other screen's. Fix: the default display's.
 - Smaller ones: network previews load first-in-first-out (the selected one waits behind skipped
   rows); package-manager label/icon lookups on the UI thread in the process lists; SD card mount
   reloads run on the main thread; a ScreenScraper screenshot is saved as box art when SS has no box;
@@ -640,6 +680,12 @@ Most severe first, each with the fix the review suggested:
 - SD card roms, folder grants, scraper art, data folder: games on the SD card in RetroArch and the
   standalone builds, emulators without an SD card grant, moving MainUI's data between Internal,
   the SD card and Auto and back. Found the folder-grant and data-folder bugs above.
+- Several games on 2 GB, Dolphin / Azahar, Expert, Device, cores: five emulators at once (MainUI
+  never killed), parked games killed by `am kill` and by Android's low-memory killer came back from
+  the Game Switcher, Recents and the lists with their resume states; Dolphin and Azahar with free
+  homebrew (Snes9xGX .dol, ftpd .3dsx); Expert, Settings > Device, Emulators & cores. Found the
+  no-folder, dead-emulator, HOME-under-pressure and slow failed-save bugs above. Mupen64Plus AE
+  crashes on N64NICCC by itself (glide64mk2); MainUI handles it.
 ---
 
 ## 11. Quick start (copy in order)

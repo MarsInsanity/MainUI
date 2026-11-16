@@ -182,6 +182,11 @@ class OverlayService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
+        // Only the main screen, where games, MainUI and the menu are: an app opened on a second
+        // screen (AYN Thor's lower one) became "the app in front" and HOME no longer opened the
+        // in-game menu over the game above. (Android 13+ says which display; before, there's one.)
+        if (Build.VERSION.SDK_INT >= 33 && event.displayId != android.view.Display.DEFAULT_DISPLAY &&
+            event.displayId != android.view.Display.INVALID_DISPLAY) return
         if (pkg == packageName) {
             // MainUI's own activity counts as "in front"; its overlay windows don't.
             if (event.className?.toString() == MainActivity::class.java.name) { foregroundPackage = pkg; leavingUntil = 0L }
@@ -537,9 +542,18 @@ class OverlayService : AccessibilityService() {
                         // The game was left meanwhile (Game Switcher, exit): no menu over what is in front now.
                         Log.w(TAG, "menu open dropped, ${s.pkg} is no longer in front (${foregroundPackage})")
                         opening = false
+                        val held = pendingHold != null
                         pendingHold = null
                         val stale = takeStaleUnpauses()
                         worker.execute { runCatching { controller.unpause() }; stale.forEach { runCatching { it.unpause() } } }
+                        // Android took the same HOME first (a 2 GB device under memory pressure: this
+                        // service answered late) and MainUI came in front, the game still the session:
+                        // the menu asked for, as MainUI's own, not MainUI's last screen with no menu.
+                        if (!held && MainUI.sessions.active === s && foregroundPackage == packageName) runCatching {
+                            Log.w(TAG, "HOME reached Android first: the in-game menu in MainUI")
+                            startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                .putExtra(MainActivity.EXTRA_INGAME_MENU, true))
+                        }
                         return@post
                     }
                     opening = false

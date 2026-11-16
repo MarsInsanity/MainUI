@@ -113,7 +113,7 @@ object UnzipFlow {
                 Root.knownAvailable() && Root.exec("timeout -s KILL $limit unzip -n -q -d ${Root.q(dir.path)} ${Root.q(zip.path)}",
                     timeoutSec = limit + 15).ok
             })
-            MainUI.games.invalidate()
+            MainUI.games.changed(sys.id)
             runCatching { MainUI.games.countGames(sys) }
             r
         }) { r ->

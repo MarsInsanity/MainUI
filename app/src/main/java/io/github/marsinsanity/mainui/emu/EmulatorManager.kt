@@ -572,17 +572,24 @@ class EmulatorManager(
         // Through a folder the emulator was given access to, or Android refuses it the file.
         val romSaf by lazy {
             val uid = runCatching { ctx.packageManager.getApplicationInfo(pkg, 0).uid }.getOrNull()
-            var grants = if (uid != null) SafGrants.trees(pkg, uid) else emptyList()
+            var known = if (uid != null) SafGrants.known(pkg, uid) else null
+            var grants = known.orEmpty()
             // Its folders are known (root) and none holds this game (an SD card game for an emulator
             // given only the internal roms): Android would refuse it, and each emulator fails its
             // own way (its menus, "the ROM may be corrupt") while MainUI thought the game ran. Said
             // here instead, with the folder to give it. (Unknown, without root: tried as before.)
-            if (grants.isNotEmpty()) {
+            // (No folder at all counts too, known for sure: an emulator before its first-run setup
+            // showed "the file does not exist" or its own empty game list, seen on the device.)
+            // (A game started by name only, its file needn't exist: PICO-8's Splore.)
+            if (known != null && rom.exists()) {
                 val doc = storage.documentId(rom)
                 // Read again before refusing: the folder may have been added in the emulator just
                 // now, as the message asks (the list is cached for a minute).
-                if (uid != null && grants.none { SafGrants.contains(it, doc) }) grants = SafGrants.trees(pkg, uid, fresh = true)
-                if (grants.isNotEmpty() && grants.none { SafGrants.contains(it, doc) }) {
+                if (uid != null && grants.none { SafGrants.contains(it, doc) }) {
+                    known = SafGrants.known(pkg, uid, fresh = true) ?: known
+                    grants = known.orEmpty()
+                }
+                if (grants.none { SafGrants.contains(it, doc) }) {
                     val where = (if (doc.startsWith("primary:")) "Internal storage" else "SD card") + "/" +
                         doc.substringAfter(':').substringBeforeLast('/')
                     throw IllegalStateException("${def.name} has no access to $where. Add that folder (or its roms folder) " +
