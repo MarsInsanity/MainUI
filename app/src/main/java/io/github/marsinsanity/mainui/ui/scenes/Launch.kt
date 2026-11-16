@@ -140,9 +140,17 @@ object Launch {
         val f = game.file
         if (def.unzip.isNotEmpty() && f != null && f.isFile && f.extension.equals("zip", true)) { startZipped(host, def, game, f); return }
         host.io({ MainUI.sessions.launch(def, game, null) }) { err ->
-            if (err != null) launchDone()
-            if (err != null) host.push(io.github.marsinsanity.mainui.ui.DialogScene(host, "Can't start game",
-                "$err\n\nInstall it, or press SELECT on the game > Core to pick another emulator.", "OK", null))
+            if (err == null) return@io
+            launchDone()
+            // "Install it" only when the emulator is missing (Sessions.launch's own messages); a
+            // missing folder grant already says what to do.
+            val hint = when {
+                err.endsWith(" is not installed") || err.startsWith("No emulator available") ->
+                    "\n\nInstall it, or press SELECT on the game > Core to pick another emulator."
+                " has no access to " in err -> ""
+                else -> "\n\nOr press SELECT on the game > Core to pick another emulator."
+            }
+            host.push(io.github.marsinsanity.mainui.ui.DialogScene(host, "Can't start game", err + hint, "OK", null))
         }
     }
 

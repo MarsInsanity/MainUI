@@ -145,6 +145,11 @@ class EmulatorManager(
     /** loadDefs / refresh run one at a time (several threads start them). */
     private val defsLock = Any()
 
+    /** Names of MainUI's recipes the user's MainUI/emulators.json replaces (whole). */
+    // (Declared before the init block below: initialized after it, it would reset what loadDefs set.)
+    @Volatile var overriddenRecipes: List<String> = emptyList()
+        private set
+
     init { loadDefs() }
 
     fun loadDefs() = synchronized(defsLock) {
@@ -152,9 +157,20 @@ class EmulatorManager(
         val base = JSONObject(ctx.assets.open("emulators.json").bufferedReader().use { it.readText() })
         apply(base, defs, trusted = true)
         val override = File(storage.dataRoot(), "emulators.json")
-        if (override.isFile) runCatching { apply(JSONObject(override.readText()), defs, trusted = false) }
+        val replaced = ArrayList<String>()
+        if (override.isFile) runCatching {
+            val o = JSONObject(override.readText())
+            // (The recipes it replaces, by name, for Settings: MainUI's later fixes to them don't apply.)
+            if (o.has("retroarch")) replaced += "RetroArch"
+            o.optJSONArray("standalone")?.let { arr ->
+                for (i in 0 until arr.length()) arr.optJSONObject(i)?.optString("id")?.let { id -> defs[id]?.let { replaced += it.name } }
+            }
+            apply(o, defs, trusted = false)
+        }
+        overriddenRecipes = replaced
         standalone = defs
     }
+
 
     /**
      * [trusted]: MainUI's own recipes. The user's emulators.json is in shared storage, which
@@ -556,7 +572,24 @@ class EmulatorManager(
         // Through a folder the emulator was given access to, or Android refuses it the file.
         val romSaf by lazy {
             val uid = runCatching { ctx.packageManager.getApplicationInfo(pkg, 0).uid }.getOrNull()
-            storage.safUri(rom, if (uid != null) SafGrants.trees(pkg, uid) else emptyList()).toString()
+            var grants = if (uid != null) SafGrants.trees(pkg, uid) else emptyList()
+            // Its folders are known (root) and none holds this game (an SD card game for an emulator
+            // given only the internal roms): Android would refuse it, and each emulator fails its
+            // own way (its menus, "the ROM may be corrupt") while MainUI thought the game ran. Said
+            // here instead, with the folder to give it. (Unknown, without root: tried as before.)
+            if (grants.isNotEmpty()) {
+                val doc = storage.documentId(rom)
+                // Read again before refusing: the folder may have been added in the emulator just
+                // now, as the message asks (the list is cached for a minute).
+                if (uid != null && grants.none { SafGrants.contains(it, doc) }) grants = SafGrants.trees(pkg, uid, fresh = true)
+                if (grants.isNotEmpty() && grants.none { SafGrants.contains(it, doc) }) {
+                    val where = (if (doc.startsWith("primary:")) "Internal storage" else "SD card") + "/" +
+                        doc.substringAfter(':').substringBeforeLast('/')
+                    throw IllegalStateException("${def.name} has no access to $where. Add that folder (or its roms folder) " +
+                        "in ${def.name}'s own settings, then start the game again.")
+                }
+            }
+            storage.safUri(rom, grants).toString()
         }
         fun sub(t: String): String = t
             .replace("%FILECONTENT%", if (t.contains("%FILECONTENT%")) fileContent else "")

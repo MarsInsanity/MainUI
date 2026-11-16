@@ -143,6 +143,16 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
     override val showPreview = false
     private val dataLocations = listOf("auto" to "Auto", "sd" to "SD card", "internal" to "Internal")
 
+    /** The setting, and where "Auto" resolves to (it keeps a MainUI folder found on the SD card). */
+    private fun dataLocationLabel(): String {
+        val s = MainUI.settings
+        val label = dataLocations.firstOrNull { it.first == s.dataLocation }?.second ?: "Auto"
+        if (s.dataLocation != "auto") return label
+        val sd = MainUI.storage.volumes().firstOrNull { it.removable }?.dir?.absolutePath
+        val onSd = sd != null && MainUI.storage.dataRoot().absolutePath.startsWith(sd)
+        return "$label (${if (onSd) "SD card" else "Internal"})"
+    }
+
     override fun onEnter() = build()
     override fun onResume() = build()
 
@@ -151,7 +161,59 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
      * pictures; not its cache) comes along to a folder that has no data yet; otherwise it would look
      * emptied and stay behind in the old one. Files already there are kept.
      */
+    private data class MoveTarget(val problem: String?, val label: String = "", val hasData: Boolean = false, val theirTime: Long = 0L, val same: Boolean = false)
+
     private fun moveData(choice: String) {
+        // The target first: refused, or already holding MainUI data (an older copy left there by an
+        // earlier move: switching back must not silently bring back its old favorites, recents and
+        // play time), which the user decides about.
+        host.io({
+            runCatching {
+                val st = MainUI.storage
+                val oldRoot = st.dataRoot()
+                val newRoot = st.dataRootFor(choice, create = false)
+                val sd = st.volumes().firstOrNull { it.removable }?.dir?.canonicalPath
+                if (choice == "sd" && (sd == null || !newRoot.canonicalPath.startsWith(sd)))
+                    return@runCatching MoveTarget("Can't write to the SD card: MainUI's data stays where it is")
+                val same = newRoot.canonicalPath == oldRoot.canonicalPath
+                val theirs = java.io.File(newRoot, "config").listFiles().orEmpty()
+                // "Auto" named with where it resolves (the first volume holding a MainUI folder).
+                val name = dataLocations.firstOrNull { it.first == choice }?.second ?: choice
+                val label = if (choice != "auto") name
+                    else "$name (${if (sd != null && newRoot.canonicalPath.startsWith(sd)) "SD card" else "Internal"})"
+                MoveTarget(null, label, !same && theirs.isNotEmpty(), theirs.maxOfOrNull { it.lastModified() } ?: 0L, same)
+            }.getOrElse { MoveTarget("Couldn't move MainUI's data: ${it.message}") }
+        }) { (problem, label, hasData, theirTime, same) ->
+            if (problem != null) { host.toast(problem, 3500); return@io }
+            // The folder in use already ("Auto" while it resolves there): only the setting changes.
+            if (same) { performMove(choice, replace = false); return@io }
+            if (!hasData) {
+                host.push(DialogScene(host, "MainUI data folder",
+                    "Keep MainUI's data (favorites, recents, play time, recipes, cores) in: $label?\n" +
+                        "It is copied there.") { performMove(choice, replace = false) })
+                return@io
+            }
+            val date = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(theirTime))
+            host.push(DialogScene(host, "MainUI data folder",
+                "$label already has older MainUI data (from $date).\n" +
+                    "Next, pick which to keep: the data in use (the older copy is kept as MainUI.old) or the data there.") {
+                // A menu, not a two-button dialog: B (or a stray tap beside it) backs out of the
+                // move instead of picking one of the two copies. Short labels: the menu is narrow.
+                host.push(io.github.marsinsanity.mainui.ui.PopMenuScene(host, "Keep which data?", listOf(
+                    UiItem("The data in use", onSelect = { performMove(choice, replace = true) }),
+                    UiItem("The older data", onSelect = { performMove(choice, replace = false) }),
+                )))
+            })
+        }
+    }
+
+    /**
+     * Uses [choice] for MainUI's data. The whole MainUI folder (library, recipes, cores, fonts, state
+     * pictures; not its cache) is copied there when it has no library yet, or with [replace] (the
+     * target's older MainUI folder is first set aside whole as MainUI.old, MainUI.old2...: nothing
+     * of it is deleted or merged). The setting changes only once the library is copied.
+     */
+    private fun performMove(choice: String, replace: Boolean) {
         val busy = io.github.marsinsanity.mainui.ui.BusyScene(host, "Moving MainUI's data...")
         host.push(busy)
         host.io({
@@ -162,25 +224,59 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
                 // folder (a library read from an empty new one would look emptied, and what was
                 // written there meanwhile would keep the copy from coming along).
                 val newRoot = st.dataRootFor(choice)
+                // Checked again: the card can be gone, or read-only, since the question.
                 val sd = st.volumes().firstOrNull { it.removable }?.dir?.canonicalPath
                 if (choice == "sd" && (sd == null || !newRoot.canonicalPath.startsWith(sd)))
                     return@runCatching "Can't write to the SD card: MainUI's data stays where it is"
-                if (newRoot.canonicalPath != oldRoot.canonicalPath && java.io.File(newRoot, "config").list().isNullOrEmpty()) {
-                    // The library (config) first, then the rest; files already there are kept.
-                    oldRoot.listFiles()?.filter { !it.name.equals("cache", ignoreCase = true) }
-                        ?.sortedBy { !it.name.equals("config", ignoreCase = true) }?.forEach { f ->
-                            runCatching { f.copyRecursively(java.io.File(newRoot, f.name), overwrite = false) { _, _ -> OnErrorAction.SKIP } }
+                var note: String? = null
+                if (newRoot.canonicalPath != oldRoot.canonicalPath) {
+                    var keptAs: java.io.File? = null
+                    if (replace && !java.io.File(newRoot, "config").list().isNullOrEmpty()) {
+                        val parent = newRoot.parentFile
+                        val aside = generateSequence(1) { it + 1 }
+                            .map { java.io.File(parent, if (it == 1) "MainUI.old" else "MainUI.old$it") }.first { !it.exists() }
+                        if (!newRoot.renameTo(aside))
+                            return@runCatching "Couldn't set the older data aside as ${aside.name}: MainUI's data stays where it is"
+                        keptAs = aside
+                        newRoot.mkdirs()
+                    }
+                    val target = java.io.File(newRoot, "config")
+                    if (target.list().isNullOrEmpty()) {
+                        // Files already there are kept (FileAlreadyExists is no failure).
+                        val failed = ArrayList<String>()
+                        fun copy(f: java.io.File) {
+                            val done = runCatching {
+                                f.copyRecursively(java.io.File(newRoot, f.name), overwrite = false) { file, e ->
+                                    if (e !is FileAlreadyExistsException) failed += file.path
+                                    OnErrorAction.SKIP
+                                }
+                            }
+                            if (done.isFailure) failed += f.path
                         }
+                        val items = oldRoot.listFiles().orEmpty().filter { !it.name.equals("cache", ignoreCase = true) }
+                        // The library first: if it doesn't copy whole, nothing changes (the
+                        // older folder back in place, the partial copy removed: all of it ours).
+                        items.filter { it.name.equals("config", ignoreCase = true) }.forEach(::copy)
+                        if (failed.isNotEmpty()) {
+                            val undone = if (keptAs != null) newRoot.deleteRecursively() && keptAs.renameTo(newRoot)
+                                else target.deleteRecursively()
+                            return@runCatching "Couldn't copy MainUI's library (${failed.size} files): MainUI's data stays where it is" +
+                                if (!undone && keptAs != null) ". The older data is in ${keptAs.name}" else ""
+                        }
+                        items.filter { !it.name.equals("config", ignoreCase = true) }.forEach(::copy)
+                        if (failed.isNotEmpty()) note = "MainUI's data moved, but ${failed.size} files (pictures, logs...) couldn't be copied"
+                    }
+                    if (keptAs != null) note = listOfNotNull(note, "The older data is kept as ${keptAs.name}").joinToString(". ")
                 }
                 MainUI.settings.dataLocation = choice
                 st.invalidate()
-                null
+                note
             }.getOrElse { "Couldn't move MainUI's data: ${it.message}" }
         }) { problem ->
             host.pop(busy)
             MainUI.reloadStorage()
             build()
-            problem?.let { host.toast(it, 3500) }
+            problem?.let { host.toast(it, 4000) }
         }
     }
 
@@ -201,12 +297,10 @@ class LibrarySettingsScene(host: SceneHost) : ListScene(host, "Library") {
             toggle("Show hidden games", { s.showHiddenGames }) { s.showHiddenGames = it; MainUI.games.invalidate() },
             // A choice and a confirmation, not a value stepped through with LEFT / RIGHT: every
             // change moves MainUI's data, so looking at the options mustn't.
-            action("MainUI data folder", dataLocations.firstOrNull { it.first == s.dataLocation }?.second ?: "Auto") {
+            action("MainUI data folder", dataLocationLabel()) {
                 host.push(io.github.marsinsanity.mainui.ui.PopMenuScene(host, "MainUI data folder", dataLocations.map { (id, label) ->
                     UiItem(label, sub = if (id == s.dataLocation) "in use" else null, onSelect = {
-                        if (id != s.dataLocation) host.push(DialogScene(host, "MainUI data folder",
-                            "Keep MainUI's data (favorites, recents, play time, recipes, cores) in: $label?\n" +
-                                "It is copied there when that folder has none yet.") { moveData(id) })
+                        if (id != s.dataLocation) moveData(id)
                     })
                 }))
             },
@@ -271,6 +365,15 @@ class EmulatorsScene(host: SceneHost) : ListScene(host, "Emulators") {
         val ra = em.raPackage
         val cores = em.raCores
         items += UiItem("Get emulators...", sub = "F-Droid, GitHub, retroarch.com", onSelect = { host.push(EmulatorStoreScene(host)) })
+        // The user's MainUI/emulators.json replaces whole recipes: said, since MainUI's own later
+        // fixes to them (launch flags, save keys, download sources) don't apply while it does.
+        val overridden = em.overriddenRecipes
+        if (overridden.isNotEmpty()) items += UiItem("${overridden.size} recipe${if (overridden.size > 1) "s" else ""} from MainUI/emulators.json",
+            sub = overridden.joinToString(", ").take(40), onSelect = {
+                host.push(DialogScene(host, "Your emulators.json",
+                    "Replaces MainUI's own recipes for: ${overridden.joinToString(", ")}. MainUI's later fixes to them don't apply. " +
+                        "Remove those entries (or the file) to use MainUI's.", "OK", null))
+            })
         val ups = io.github.marsinsanity.mainui.store.EmulatorUpdates.known().size
         items += UiItem("Emulator updates", sub = when {
             ups > 0 -> "$ups available"

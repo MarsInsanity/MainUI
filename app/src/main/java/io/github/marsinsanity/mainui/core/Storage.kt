@@ -99,10 +99,14 @@ class Storage(private val ctx: Context, private val settings: Settings) {
         return f
     }
 
-    /** The data root [location] ("auto" / "sd" / "internal") would use, without switching to it. */
-    fun dataRootFor(location: String): File = findDataRoot(location)
+    /**
+     * The data root [location] ("auto" / "sd" / "internal") would use, without switching to it.
+     * Without [create] nothing is made: a question about moving there must leave no empty MainUI
+     * folder behind (on the SD card it would become "Auto"'s data folder, the first one found).
+     */
+    fun dataRootFor(location: String, create: Boolean = true): File = findDataRoot(location, create)
 
-    private fun findDataRoot(location: String): File {
+    private fun findDataRoot(location: String, create: Boolean = true): File {
         val vols = volumes()
         val choice = when (location) {
             "sd" -> vols.firstOrNull { it.removable }
@@ -110,10 +114,10 @@ class Storage(private val ctx: Context, private val settings: Settings) {
             else -> vols.firstOrNull { File(it.dir, "MainUI").isDirectory } ?: vols.firstOrNull { !it.removable }
         } ?: vols.first()
         val root = File(choice.dir, "MainUI")
-        if (!root.exists()) root.mkdirs()
-        if (!root.canWrite()) {
+        if (create && !root.exists()) root.mkdirs()
+        if (!(if (root.exists()) root.canWrite() else choice.dir.canWrite())) {
             // No "All files access" yet: fall back to app specific storage so we never crash.
-            return File(ctx.getExternalFilesDir(null), "MainUI").apply { mkdirs() }
+            return File(ctx.getExternalFilesDir(null), "MainUI").apply { if (create) mkdirs() }
         }
         return root
     }
