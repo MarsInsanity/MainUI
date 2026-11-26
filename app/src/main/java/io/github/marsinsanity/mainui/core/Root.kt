@@ -447,7 +447,9 @@ object Root {
                 append("err=''\n")
                 append("for t in ${lowerPaths(path).joinToString(" ") { q(it) }}; do\n")
                 // First change only: keep the original next to it (same owner and mode).
-                if (backup) append("  [ -f \"\$t\" ] && [ ! -e \"\$t.mainui.bak\" ] && cp -p \"\$t\" \"\$t.mainui.bak\" 2>/dev/null\n")
+                // (cp -p keeps owner and mode, not the SELinux label: an app's own label has its categories.)
+                if (backup) append("  [ -f \"\$t\" ] && [ ! -e \"\$t.mainui.bak\" ] && cp -p \"\$t\" \"\$t.mainui.bak\" 2>/dev/null && " +
+                    "chcon \$(stat -c %C \"\$t\") \"\$t.mainui.bak\" 2>/dev/null\n")
                 append("  if out=\$(cat \"\$src\" 2>&1 > \"\$t\") && [ \"\$(wc -c < \"\$t\" | tr -d ' ')\" = '$size' ]; then echo \"OK \$t\"; exit 0; fi\n")
                 append("  err=\"\$out\"\n")
                 append("done\n")
