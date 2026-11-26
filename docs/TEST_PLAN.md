@@ -172,3 +172,41 @@ Regression checks. These worked before, so a quick pass is enough:
 - delete ROM;
 - the scraper (it needs credentials);
 - Settings > Device (brightness, volume), haptics, the header clock and battery.
+
+## 12. Emulator controls (Dolphin)
+
+*Settings > Controls > Emulator controls > Set up emulators* writes the handheld's buttons into
+Dolphin. The cloud emulator checked that Dolphin reads them and lists the profiles. It did that
+with a virtual controller, and without a game, so this part needs a real device. Use a light
+GameCube game on the Pocket 2+, and Wii games on the Pocket Mini.
+- **Setup**:
+  - Start Dolphin once, then Set up.
+  - Dolphin > Settings > GameCube Input and Wii Input should show the handheld's name as Device,
+    and its buttons.
+  - Check `MainUI/logs/session.txt`: Dolphin names the controller "Android/<number>/<name>"; the
+    number must match Dolphin's Device line.
+- **GameCube**:
+  - every button, both sticks, L/R analog (half pressed) and fully pressed, the D-pad, rumble.
+- **Wii, default (Nunchuk)**:
+  - A, B (R2 or the right face button), 1, 2, −, +;
+  - Home (Select + Start);
+  - Nunchuk stick, C (L1), Z (L2);
+  - shake (R1; Nunchuk shake: L3);
+  - pointer on the right stick.
+- **Motion**:
+  - shaking and tilting the handheld should shake and tilt the Wii Remote (Wii Sports, Mario Kart
+    Wii sideways);
+  - *Wii: pointer > Tilt*: the pointer should follow the handheld, and Select + R3 recenters it;
+  - say which way an axis is wrong, if one is.
+- **Per game**:
+  - a game's **Wii controller...** (SELECT) should load that profile when the game starts. Dolphin
+    shows "Loading game specific input profile".
+  - Sideways: the D-pad is turned for the sideways Wii Remote, and 1 and 2 are the bottom and
+    right buttons.
+- **Hotkeys**:
+  - Select + R1 toggles the speed limit, Select + L1 takes a screenshot;
+  - in-game menu Save / Load with official Dolphin (MainUI presses F1 / F2 on its keyboard; needs
+    root).
+- **Handheld buttons**:
+  - bind a button by pressing it; the row should show the new key and the next Set up should use it;
+  - check that A still works right after binding.
