@@ -258,6 +258,38 @@ Differences from a Miyoo Mini, due to the screen:
 | Anywhere | hold Back | Process manager popup (Settings > Controls > Hold Back) |
 | Touch | tap / drag / swipe / long press | Select, tap a hint to use it / scroll / next page / SELECT |
 
+### Emulator controls
+
+*Settings > Controls > Emulator controls* holds one set of buttons for every emulator, and
+**Set up emulators** writes it into each installed emulator MainUI knows (root: their settings are
+in their private folders). Each emulator is closed first, so it can't write its old settings back;
+a file's first change keeps the original next to it as `<file>.mainui.bak`. So far: **Dolphin**
+(official and MainUI builds; MMJR is left alone).
+
+- **Handheld buttons**: which key each button sends (*Face buttons*: A at the bottom or on the
+  right), or any button bound by pressing it (handhelds that report odd keys).
+- **Hotkeys**: a hotkey button (Select) held with another button: fast forward (R1), screenshot
+  (L1), and for Wii games the Home button (Start), turning the Wii Remote sideways (Y) and
+  recentering the motion pointer (R3). Holding the hotkey button also presses its own button in
+  the game (the Wii Remote's −).
+- **Wii**: the default controller (Wii Remote + Nunchuk, sideways Wii Remote, Classic Controller,
+  or a GameCube controller), the pointer (right stick, tilting the handheld, or the touchscreen),
+  and motion controls (the handheld's accelerometer and gyroscope are the Wii Remote's, so shaking
+  and tilting the handheld shake and tilt it).
+
+Dolphin gets GameCube controller 1 (`GCPadNew.ini [GCPad1]`, laid out like Dolphin's own gamepad
+profile), Wii Remote 1 as the default controller (`WiimoteNew.ini [Wiimote1]`), a Wii Remote
+profile for each way to play (`Config/Profiles/Wiimote/MainUI ….ini`), and hotkeys
+(`Hotkeys.ini`, read by Dolphin builds from September 2026 on: fast forward, screenshot, and slot 1
+save / load on MainUI's keyboard keys, which MainUI presses for Save / Load when Dolphin has no
+State API). Each Wii game can be played its own way: **Wii controller...** in its options
+(SELECT) writes `GameSettings/<disc id>.ini [Controls] WiimoteProfile1`, which Dolphin loads when
+the game starts. Some games are set already (sideways: New Super Mario Bros. Wii, Kirby's Return to
+Dream Land, Donkey Kong Country Returns...; Classic Controller: Xenoblade, Monster Hunter Tri...;
+GameCube controller: Smash Bros. Brawl, Mario Kart Wii); *Automatic* goes back to that.
+Dolphin names the handheld's controller by its Android name and number, so a controller plugged in
+before it at boot can take its number: set up again then.
+
 ## Emulators
 
 RetroArch cores come from the dArkOS list (default core first), followed by any other

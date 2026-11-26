@@ -328,6 +328,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (inputBlocked) return true
+        if (stack.lastOrNull()?.onRawKey(event) == true) { invalidate(); return true }
         // Back held opens the process popup (OverlayService.watchBack): here Back is B on release,
         // and only when it was a short press; acting on the press would also leave the screen
         // (or cancel the dialog) behind the popup.
@@ -378,6 +379,7 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (inputBlocked) return true
+        if (stack.lastOrNull()?.onRawMotion(event) == true) { invalidate(); return true }
         if (event.isFromSource(InputDevice.SOURCE_JOYSTICK) || event.isFromSource(InputDevice.SOURCE_GAMEPAD)) {
             if (event.actionMasked == MotionEvent.ACTION_MOVE && event.deviceId >= 0) movedControllers += event.deviceId
             // The stick / hat stream was cut off (focus moved to a game): nothing stays held.

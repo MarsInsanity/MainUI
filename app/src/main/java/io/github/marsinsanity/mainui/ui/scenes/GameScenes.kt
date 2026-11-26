@@ -81,6 +81,7 @@ internal object GameItems {
             items += UiItem("Core: ${if (own) cur?.name ?: "none" else "Default (${cur?.shortName ?: "none"})"}",
                 onSelect = { host.push(CoreSelectScene(host, def, g)) })
             items += UiItem("System core...", onSelect = { host.push(CoreSelectScene(host, def, null)) })
+            WiiControllerOption.item(host, g)?.let { items += it }
             items += UiItem("Scrape artwork", onSelect = {
                 host.toast("Scraping ${g.name}...")
                 host.io({ Scraper.scrapeOne(g) }) { msg -> Images.invalidate("art:${g.key}"); host.toast(msg, 2500); onChanged() }

@@ -470,6 +470,55 @@ object Root {
         }
     }
 
+    /** [path] exists as a folder (at any of its [lowerPaths]). */
+    fun dirExists(path: String): Boolean = test("-d", path) == true
+
+    /**
+     * [path] exists as a file (at any of its [lowerPaths]); null when root couldn't tell (a file
+     * taken for missing would be written over with only what MainUI adds).
+     */
+    fun fileExists(path: String): Boolean? = test("-f", path)
+
+    private fun test(op: String, path: String): Boolean? {
+        val out = quick("if " + lowerPaths(path).joinToString(" || ") { "[ $op ${q(it)} ]" } + "; then echo yes; else echo no; fi").out
+        return when {
+            out.contains("yes") -> true
+            out.contains("no") -> false
+            else -> null
+        }
+    }
+
+    /**
+     * [writeFile], but a file that doesn't exist yet is made first, with the owner, mode and SELinux
+     * label of its folder, and missing folders like their nearest existing parent: the owning app
+     * (an emulator's own Android/data folder) can then read and rewrite it, as with a file it made.
+     * The underlying /data/media path comes first here: there the owner set is the owner the app sees.
+     */
+    fun writeOwnedFile(path: String, content: String, backup: Boolean = false): WriteResult {
+        val exists = fileExists(path) ?: return WriteResult(false, "root couldn't check the file")
+        if (!exists) {
+            val targets = lowerPaths(path).sortedBy { if (it.startsWith("/data/media/") || it.startsWith("/mnt/media_rw/")) 0 else 1 }
+            val script = buildString {
+                append("for t in ${targets.joinToString(" ") { q(it) }}; do\n")
+                append("  dir=\$(dirname \"\$t\"); anc=\"\$dir\"\n")
+                append("  while [ ! -d \"\$anc\" ] && [ \"\$anc\" != / ]; do anc=\$(dirname \"\$anc\"); done\n")
+                append("  [ \"\$anc\" = / ] && continue\n")
+                append("  mkdir -p \"\$dir\" 2>/dev/null || continue\n")
+                append("  d=\"\$dir\"; while [ \"\$d\" != \"\$anc\" ]; do chown \$(stat -c %u:%g \"\$anc\") \"\$d\"; chmod \$(stat -c %a \"\$anc\") \"\$d\"; " +
+                    "chcon \$(stat -c %C \"\$anc\") \"\$d\" 2>/dev/null; d=\$(dirname \"\$d\"); done\n")
+                append("  touch \"\$t\" 2>/dev/null || continue\n")
+                append("  chown \$(stat -c %u:%g \"\$dir\") \"\$t\"; chmod 0660 \"\$t\"; chcon \$(stat -c %C \"\$dir\") \"\$t\" 2>/dev/null; echo OK; exit 0\n")
+                append("done\nexit 4\n")
+            }
+            val r = exec(script, timeoutSec = 30)
+            if (!r.ok || !r.out.contains("OK")) {
+                Log.w(TAG, "create $path failed: ${r.err.ifBlank { r.out }.trim()}")
+                return WriteResult(false, "could not create the file")
+            }
+        }
+        return writeFile(path, content, backup)
+    }
+
     /** Returns the package name of the app that currently owns the focused window. */
     fun foregroundPackage(): String? {
         val r = exec("dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity' | head -n 1")

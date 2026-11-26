@@ -108,6 +108,7 @@ class ControlSettingsScene(host: SceneHost) : ListScene(host, "Controls") {
         val s = MainUI.settings
         val overlayOn = OverlayService.isEnabled(host.hostContext)
         list.set(listOf(
+            action("Emulator controls...", "buttons, hotkeys, Wii") { host.push(EmulatorControlsScene(host)) },
             toggle("Swap A/B and X/Y", { s.swapAB }) { s.swapAB = it },
             multi("Press Home in game", HOME_ACTIONS, { s.homePress }) { s.homePress = it },
             multi("Hold Home in game", HOME_ACTIONS, { s.homeHold }) { s.homeHold = it },

@@ -45,6 +45,10 @@ abstract class Scene(val host: SceneHost) {
     /** Return true if handled. [repeat] is true for auto-repeat while held. */
     open fun onKey(b: Btn, repeat: Boolean): Boolean = false
     open fun onKeyUp(b: Btn) {}
+    /** Every key event before it becomes a [Btn] (binding a button); true takes it. */
+    open fun onRawKey(e: android.view.KeyEvent): Boolean = false
+    /** Every stick / trigger event before it becomes a [Btn]; true takes it. */
+    open fun onRawMotion(e: android.view.MotionEvent): Boolean = false
     /** Tap in logical coordinates. */
     open fun onTap(x: Float, y: Float): Boolean = false
     /** A touch held at [x], [y]; false: it is SELECT (options). */
