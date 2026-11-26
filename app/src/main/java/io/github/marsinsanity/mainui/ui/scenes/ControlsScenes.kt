@@ -207,7 +207,7 @@ class KeyCaptureScene(host: SceneHost, private val what: String, private val onK
     override fun onTap(x: Float, y: Float): Boolean { close(); return true }
 
     companion object {
-        private const val TIMEOUT_MS = 6000L
+        private const val TIMEOUT_MS = 10_000L
     }
 }
 

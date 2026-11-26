@@ -328,7 +328,12 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (inputBlocked) return true
-        if (stack.lastOrNull()?.onRawKey(event) == true) { invalidate(); return true }
+        if (stack.lastOrNull()?.onRawKey(event) == true) {
+            // A button held when that scene opened (A on "bind this button") still lets go here,
+            // or it would stay held and its next press be ignored.
+            if (event.action == KeyEvent.ACTION_UP) downBtn.remove(event.keyCode)?.let { release(it) }
+            invalidate(); return true
+        }
         // Back held opens the process popup (OverlayService.watchBack): here Back is B on release,
         // and only when it was a short press; acting on the press would also leave the screen
         // (or cancel the dialog) behind the popup.
@@ -379,27 +384,40 @@ class MainUIView(context: Context, private val onEmpty: () -> Unit = {}) : View(
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (inputBlocked) return true
-        if (stack.lastOrNull()?.onRawMotion(event) == true) { invalidate(); return true }
+        if (stack.lastOrNull()?.onRawMotion(event) == true) {
+            if (event.action == MotionEvent.ACTION_MOVE) letGoOfAxes(event)
+            invalidate(); return true
+        }
         if (event.isFromSource(InputDevice.SOURCE_JOYSTICK) || event.isFromSource(InputDevice.SOURCE_GAMEPAD)) {
             if (event.actionMasked == MotionEvent.ACTION_MOVE && event.deviceId >= 0) movedControllers += event.deviceId
             // The stick / hat stream was cut off (focus moved to a game): nothing stays held.
             if (event.actionMasked == MotionEvent.ACTION_CANCEL) { releaseAll(); return true }
             if (event.action == MotionEvent.ACTION_MOVE) {
-                val hx = event.getAxisValue(MotionEvent.AXIS_HAT_X)
-                val hy = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
-                val sx = event.getAxisValue(MotionEvent.AXIS_X)
-                val sy = event.getAxisValue(MotionEvent.AXIS_Y)
-                val x = if (abs(hx) > 0.5f) hx else if (abs(sx) > 0.6f) sx else 0f
-                val y = if (abs(hy) > 0.5f) hy else if (abs(sy) > 0.6f) sy else 0f
-                axis(Btn.LEFT, x < -0.5f); axis(Btn.RIGHT, x > 0.5f)
-                axis(Btn.UP, y < -0.5f); axis(Btn.DOWN, y > 0.5f)
-                val lt = maxOf(event.getAxisValue(MotionEvent.AXIS_LTRIGGER), event.getAxisValue(MotionEvent.AXIS_BRAKE))
-                val rt = maxOf(event.getAxisValue(MotionEvent.AXIS_RTRIGGER), event.getAxisValue(MotionEvent.AXIS_GAS))
-                axis(Btn.L2, lt > 0.5f); axis(Btn.R2, rt > 0.5f)
+                axisStates(event).forEach { (b, down) -> axis(b, down) }
                 return true
             }
         }
         return super.onGenericMotionEvent(event)
+    }
+
+    /** Which stick / hat / trigger directions [event] holds. */
+    private fun axisStates(event: MotionEvent): List<Pair<Btn, Boolean>> {
+        val hx = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+        val hy = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+        val sx = event.getAxisValue(MotionEvent.AXIS_X)
+        val sy = event.getAxisValue(MotionEvent.AXIS_Y)
+        val x = if (abs(hx) > 0.5f) hx else if (abs(sx) > 0.6f) sx else 0f
+        val y = if (abs(hy) > 0.5f) hy else if (abs(sy) > 0.6f) sy else 0f
+        val lt = maxOf(event.getAxisValue(MotionEvent.AXIS_LTRIGGER), event.getAxisValue(MotionEvent.AXIS_BRAKE))
+        val rt = maxOf(event.getAxisValue(MotionEvent.AXIS_RTRIGGER), event.getAxisValue(MotionEvent.AXIS_GAS))
+        return listOf(Btn.LEFT to (x < -0.5f), Btn.RIGHT to (x > 0.5f), Btn.UP to (y < -0.5f), Btn.DOWN to (y > 0.5f),
+            Btn.L2 to (lt > 0.5f), Btn.R2 to (rt > 0.5f))
+    }
+
+    /** A scene took [event]: directions it lets go of are still released, none pressed. */
+    private fun letGoOfAxes(event: MotionEvent) {
+        if (!event.isFromSource(InputDevice.SOURCE_JOYSTICK) && !event.isFromSource(InputDevice.SOURCE_GAMEPAD)) return
+        axisStates(event).forEach { (b, down) -> if (!down) axis(b, false) }
     }
 
     private fun axis(b: Btn, down: Boolean) {
