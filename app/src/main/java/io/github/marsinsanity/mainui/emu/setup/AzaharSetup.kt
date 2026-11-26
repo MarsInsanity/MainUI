@@ -1,6 +1,7 @@
 package io.github.marsinsanity.mainui.emu.setup
 
 import android.view.MotionEvent
+import io.github.marsinsanity.mainui.core.FolderGrants
 import io.github.marsinsanity.mainui.core.Root
 import java.net.URLDecoder
 
@@ -182,7 +183,15 @@ object AzaharSetup : EmulatorSetup {
                 }
             }
         }
-        if (p.hideTouchControls) SetupFiles.editPrefs(prefsPath) { TouchControls.azahar(it) }
-        return "controller, fast forward on R3, swap screens on L3, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "")
+        // One games folder; its own files it reaches by path (All files access).
+        val wanted = RomFolders.dirs(listOf("azahar", "lime3ds"))
+        val folders = RomFolders.grant(pkg, wanted).take(1)
+        if (folders.isNotEmpty()) RomFolders.allowFilePaths(pkg)
+        SetupFiles.editPrefs(prefsPath) {
+            if (p.hideTouchControls) TouchControls.azahar(it)
+            folders.firstOrNull()?.let { f -> it.putString("game_path", FolderGrants.treeUri(f)) }
+        }
+        return "controller, fast forward on R3, swap screens on L3, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "") +
+            RomFolders.message(folders, wanted)
     }
 }

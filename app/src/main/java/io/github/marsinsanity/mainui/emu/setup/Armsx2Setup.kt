@@ -1,5 +1,6 @@
 package io.github.marsinsanity.mainui.emu.setup
 
+import io.github.marsinsanity.mainui.core.FolderGrants
 import io.github.marsinsanity.mainui.core.Root
 
 /**
@@ -54,13 +55,17 @@ object Armsx2Setup : EmulatorSetup {
         if (Root.fileExists(path) != true && Root.fileExists("$path.bak") != true)
             throw SetupProblem("Start $label once (it makes its settings), then set up again. Older ARMSX2 builds keep their controls elsewhere and can't be set up.")
         val (save, load) = SetupFiles.saveLoadKeys("armsx2")
+        // (Granted first: it goes back to its setup wizard when none of its folders opens.)
+        val wanted = RomFolders.dirs(listOf("armsx2"))
+        val folders = RomFolders.grant(pkg, wanted)
         SetupFiles.editPrefs(path) { prefs ->
+            if (folders.isNotEmpty()) RomFolders.armsx2(prefs, folders.map(FolderGrants::treeUri))
             for ((k, v) in Armsx2Mapping.entries(p, save, load)) when (v) {
                 is Int -> prefs.putInt(k, v)
                 is Boolean -> prefs.putBoolean(k, v)
             }
             if (p.hideTouchControls) TouchControls.armsx2(prefs)
         }
-        return "controller, hotkeys, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "")
+        return "controller, hotkeys, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "") + RomFolders.message(folders, wanted)
     }
 }

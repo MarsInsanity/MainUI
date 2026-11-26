@@ -1,6 +1,7 @@
 package io.github.marsinsanity.mainui.emu.setup
 
 import android.view.MotionEvent
+import io.github.marsinsanity.mainui.core.FolderGrants
 import io.github.marsinsanity.mainui.core.Root
 import java.net.URLDecoder
 
@@ -119,7 +120,12 @@ object PpssppSetup : EmulatorSetup {
         val (save, load) = SetupFiles.saveLoadKeys("ppsspp")
         val entries = PpssppMapping.entries(p, pad, save, load)
         SetupFiles.editIni("$system/controls.ini") { it.replaceSection("ControlMapping", entries) }
-        if (p.hideTouchControls) SetupFiles.editIni("$system/ppsspp.ini") { TouchControls.ppsspp(it) }
+        val wanted = RomFolders.dirs(listOf("ppsspp"))
+        val folders = RomFolders.grant(pkg, wanted)
+        SetupFiles.editIni("$system/ppsspp.ini") {
+            if (p.hideTouchControls) TouchControls.ppsspp(it)
+            if (folders.isNotEmpty()) RomFolders.ppsspp(it, folders.map(FolderGrants::folderDocUri))
+        }
         var games = 0
         for (f in Root.listDir(system).filter { it.endsWith("_ppsspp.ini", ignoreCase = true) }) {
             SetupFiles.editIni("$system/$f") {
@@ -128,7 +134,7 @@ object PpssppSetup : EmulatorSetup {
             }
             games++
         }
-        return "controller, menu on L2, fast forward on R2 and the hotkey, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "") +
+        return "controller, menu on L2, fast forward on R2 and the hotkey, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "") + RomFolders.message(folders, wanted) +
             if (games > 0) " (also in $games game setting${if (games > 1) "s" else ""})" else ""
     }
 }

@@ -1,5 +1,6 @@
 package io.github.marsinsanity.mainui.emu.setup
 
+import io.github.marsinsanity.mainui.core.FolderGrants
 import io.github.marsinsanity.mainui.core.Root
 
 /**
@@ -45,6 +46,10 @@ object SeedlessSetup : EmulatorSetup {
             for ((k, v) in SeedlessMapping.entries(p, profile, save, load)) prefs.putInt(k, v)
         }
         if (p.hideTouchControls) SetupFiles.editPrefs("$prefsDir/ctrl_layout.xml") { TouchControls.seedless(it) }
-        return "controller, fast forward on R3, swap screens on L3" + (if (p.hideTouchControls) ", touch controls off" else "")
+        val wanted = RomFolders.dirs(listOf("seedlessds"))
+        val folders = RomFolders.grant(pkg, wanted)
+        if (folders.isNotEmpty()) SetupFiles.editPrefs("$prefsDir/rom_library.xml") { RomFolders.seedless(it, folders.map(FolderGrants::treeUri)) }
+        return "controller, fast forward on R3, swap screens on L3" + (if (p.hideTouchControls) ", touch controls off" else "") +
+            RomFolders.message(folders, wanted)
     }
 }

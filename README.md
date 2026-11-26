@@ -316,6 +316,17 @@ The others get player 1's controller by position, each system laid out like its 
 
 Emulators without button combos put their hotkeys on buttons their system doesn't have.
 
+Set up also gives each emulator MainUI's game folders for its systems (`Roms/gc` and `Roms/wii`
+for Dolphin, on every storage that has them), so it lists those games itself and can open the
+ones MainUI starts. Most emulators open games through Android's folder access, which normally
+takes the folder picker in each one: MainUI gives it with root instead (it plays the picker's
+part, keeps each folder, passes it on and makes the emulator's access lasting), then adds the
+folders to the emulator's own list (Dolphin's game paths, PPSSPP's start folder and pinned
+folders, ARMSX2's, melonDS's, SeedlessDS's and Flycast's folders, Azahar's games folder,
+MAME4droid's ROMs folder: the arcade one). Mupen64Plus has no folder setting: it lists a game
+once it has opened it. RetroArch opens games by path: it gets All files access and starts Load
+Content in the ROMs folder.
+
 ## Emulators
 
 RetroArch cores come from the dArkOS list (default core first), followed by any other

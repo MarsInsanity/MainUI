@@ -238,6 +238,11 @@ real emulator yet. For each one that is installed:
   for each emulator. RetroArch was checked on the cloud emulator only as far as its config
   (`input_overlay_enable = "false"`, overrides too). Turning the option off and setting up again
   leaves them as they are (it doesn't turn them back on).
+- **Game folders**: after Set up, each emulator's own game list should show MainUI's games of
+  its systems without picking a folder in it, and MainUI should start its games without "has no
+  access to ..." (a fresh install of the emulator, started once, is the real test). Check in
+  Android's settings that nothing else changed. The cloud emulator checked PPSSPP: it got a
+  lasting folder grant for roms/psp and its game browser starts there.
 - **Save / Load** with the official builds (MainUI presses the emulator's keys on its keyboard;
   needs root): PPSSPP, ARMSX2, Azahar, melonDS, Flycast, Mupen64Plus.
 - **Per emulator**:

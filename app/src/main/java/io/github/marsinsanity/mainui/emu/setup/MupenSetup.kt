@@ -92,8 +92,14 @@ object MupenSetup : EmulatorSetup {
             mapped = prefs.value("inputShareController") != "true" &&
                 (prefs.value("autoPlayerMapping") == "true" || !prefs.string("playerMap").isNullOrEmpty())
         }
+        // No folder setting: it lists a game once it has opened it (the folder grant lets it).
+        val wanted = RomFolders.dirs(listOf("m64plusfz"))
+        val folders = RomFolders.grant(pkg, wanted)
+        // (Android 13+: it won't start a game without notifications.)
+        if (android.os.Build.VERSION.SDK_INT >= 33) Root.exec("pm grant ${Root.q(pkg)} android.permission.POST_NOTIFICATIONS 2>/dev/null; true")
         val c = if (pad.rightStick != null) "C buttons on the right stick" else if (pad.hasLeftStick) "C buttons on the d-pad" else "stick on the d-pad"
         return "controller ($c), fast forward on R2, " +
-            (if (mapped) "no save / load keys while its player map is set" else "save / load keys") + (if (p.hideTouchControls) ", touch controls off" else "")
+            (if (mapped) "no save / load keys while its player map is set" else "save / load keys") + (if (p.hideTouchControls) ", touch controls off" else "") +
+            RomFolders.message(folders, wanted)
     }
 }

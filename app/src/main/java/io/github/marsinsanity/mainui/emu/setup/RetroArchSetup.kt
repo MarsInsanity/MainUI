@@ -71,7 +71,10 @@ object RetroArchSetup : EmulatorSetup {
     override fun apply(pkg: String, label: String, p: ControlsProfile, pad: PadInfo, wiiGames: () -> List<String>): String {
         // (It writes its config when it quits.)
         Root.forceStop(pkg)
-        val binds = RetroArchMapping.binds(p, pad)
+        // It opens the games MainUI starts by path; its Load Content starts in the ROMs folder.
+        RomFolders.allowFilePaths(pkg)
+        val roms = MainUI.storage.romRoots().firstOrNull()
+        val binds = RetroArchMapping.binds(p, pad) + listOfNotNull(roms?.let { "rgui_browser_directory" to "\"${it.absolutePath}\"" })
         val path = MainUI.emulators.raConfigPath(pkg)
         var cfg = ""
         SetupFiles.editText(path) { old ->
@@ -88,6 +91,7 @@ object RetroArchSetup : EmulatorSetup {
                 "find \"\$d\" -name '*.cfg' -exec grep -l '^[[:space:]]*${TouchControls.RETROARCH_KEY}' {} + 2>/dev/null; break; done").lines
             for (f in found.map { it.trim() }.filter { it.endsWith(".cfg") }) SetupFiles.editText(f) { TouchControls.retroarchOverride(it) }
         }
-        return "player 1 controller, fast forward and screenshot on the hotkey button" + (if (p.hideTouchControls) ", touch controls off" else "")
+        return "player 1 controller, fast forward and screenshot on the hotkey button" + (if (p.hideTouchControls) ", touch controls off" else "") +
+            (if (roms != null) ", games from ${roms.name}" else "")
     }
 }

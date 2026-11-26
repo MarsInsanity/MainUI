@@ -18,11 +18,13 @@ import io.github.marsinsanity.mainui.emu.setup.PpssppMapping
 import io.github.marsinsanity.mainui.emu.setup.PrefsXml
 import io.github.marsinsanity.mainui.emu.setup.RetroArchMapping
 import io.github.marsinsanity.mainui.emu.setup.Role
+import io.github.marsinsanity.mainui.emu.setup.RomFolders
 import io.github.marsinsanity.mainui.emu.setup.Stick
 import io.github.marsinsanity.mainui.emu.setup.TouchControls
 import io.github.marsinsanity.mainui.emu.setup.WiiController
 import io.github.marsinsanity.mainui.emu.setup.WiiPointer
 import io.github.marsinsanity.mainui.emu.RetroArchCores
+import io.github.marsinsanity.mainui.core.FolderGrants
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -544,6 +546,59 @@ class EmulatorSetupTest {
         assertTrue(p.hideTouchControls); assertFalse(p.toJson().has("hideTouchControls"))
         val off = p.copy(hideTouchControls = false)
         assertEquals(off, ControlsProfile.fromJson(org.json.JSONObject(off.toJson().toString())))
+    }
+
+    @Test fun gameFoldersGoIntoEachEmulatorsSettings() {
+        val gc = FolderGrants.treeUri("primary:Roms/gc")
+        val wii = FolderGrants.treeUri("1A2B-3C4D:Roms/wii")
+        assertEquals("content://com.android.externalstorage.documents/tree/primary%3ARoms%2Fgc", gc)
+        assertEquals("content://com.android.externalstorage.documents/tree/1A2B-3C4D%3ARoms%2Fwii", wii)
+        assertEquals("content://com.android.externalstorage.documents/tree/primary%3ARoms%2Fpsp/document/primary%3ARoms%2Fpsp",
+            FolderGrants.folderDocUri("primary:Roms/psp"))
+
+        // Dolphin: added to its own folders, once, searched in subfolders.
+        val dolphin = IniText("[General]\nISOPaths = 1\nISOPath0 = content://x/tree/old\n")
+        RomFolders.dolphin(dolphin, listOf(gc, wii)); RomFolders.dolphin(dolphin, listOf(gc))
+        assertEquals("3", dolphin.get("General", "ISOPaths"))
+        assertEquals(listOf("content://x/tree/old", gc, wii), (0..2).map { dolphin.get("General", "ISOPath$it") })
+        assertEquals("True", dolphin.get("General", "RecursiveISOPaths"))
+
+        val psp = FolderGrants.folderDocUri("primary:Roms/psp")
+        val minis = FolderGrants.folderDocUri("primary:Roms/pspminis")
+        val ppsspp = IniText("[General]\nCurrentDirectory = /old\n[PinnedPaths]\nPath0 = /mine\n")
+        RomFolders.ppsspp(ppsspp, listOf(psp, minis))
+        assertEquals(psp, ppsspp.get("General", "CurrentDirectory"))
+        assertEquals(listOf("/mine", psp, minis), (0..2).map { ppsspp.get("PinnedPaths", "Path$it") })
+
+        fun prefs(text: String = "", f: (PrefsXml) -> Unit) = PrefsXml(PrefsXml(text).also(f).toString())
+        val ps2 = FolderGrants.treeUri("primary:Roms/ps2")
+        val armsx2 = prefs("<map><string name=\"roms\">content://x/tree/legacy</string></map>") { RomFolders.armsx2(it, listOf(ps2)) }
+        fun dirs(p: PrefsXml) = org.json.JSONArray(p.string("romsDirs")).let { a -> (0 until a.length()).map { a.getString(it) } }
+        assertEquals(listOf("content://x/tree/legacy", ps2), dirs(armsx2))
+        assertNull(armsx2.string("roms"))
+        val again = prefs(armsx2.toString()) { RomFolders.armsx2(it, listOf(ps2)) }
+        assertEquals(listOf("content://x/tree/legacy", ps2), dirs(again))
+
+        val nds = FolderGrants.treeUri("primary:Roms/nds")
+        assertEquals(listOf("content://x/tree/mine", nds),
+            prefs("<map><set name=\"rom_search_dirs\"><string>content://x/tree/mine</string></set></map>") { RomFolders.melon(it, listOf(nds)) }.stringSet("rom_search_dirs"))
+        assertEquals(listOf(nds), prefs { RomFolders.seedless(it, listOf(nds, nds)) }.stringSet("folders"))
+
+        val dc = FolderGrants.treeUri("primary:Roms/dreamcast")
+        val fly = IniText("[config]\nDreamcast.ContentPath = content://x/tree/mine\n")
+        RomFolders.flycast(fly, listOf(dc)); RomFolders.flycast(fly, listOf(dc))
+        assertEquals("content://x/tree/mine;$dc", fly.get("config", "Dreamcast.ContentPath"))
+
+        val arcade = FolderGrants.treeUri("primary:Roms/arcade")
+        val mame = prefs { RomFolders.mame(it, arcade, "/storage/emulated/0/Roms/arcade/", "/storage/emulated/0/Android/data/p/files/") }
+        assertEquals(arcade, mame.string("PREF_SAF_URI")); assertEquals("/storage/emulated/0/Roms/arcade", mame.string("PREF_ROMsDIR_2"))
+        assertEquals("/storage/emulated/0/Android/data/p/files/", mame.string("PREF_INSTALLATION_DIR")); assertEquals("true", mame.value("PREF_SAF_FORCE_RESCAN"))
+        assertEquals("/kept/", prefs("<map><string name=\"PREF_INSTALLATION_DIR\">/kept/</string></map>") {
+            RomFolders.mame(it, arcade, "/a", "/new/") }.string("PREF_INSTALLATION_DIR"))
+
+        assertEquals(", games from gc, wii", RomFolders.message(listOf("primary:Roms/gc", "1A2B-3C4D:Roms/wii"), emptyList()))
+        assertEquals("", RomFolders.message(emptyList(), emptyList()))
+        assertEquals(", but MainUI couldn't give it the game folders", RomFolders.message(emptyList(), listOf(java.io.File("/x"))))
     }
 
     @Test fun profileSurvivesJsonAndKnowsSuggestions() {

@@ -1,6 +1,7 @@
 package io.github.marsinsanity.mainui.emu.setup
 
 import android.view.MotionEvent
+import io.github.marsinsanity.mainui.core.FolderGrants
 import io.github.marsinsanity.mainui.core.Root
 
 /**
@@ -98,7 +99,13 @@ object MelonSetup : EmulatorSetup {
             throw SetupProblem("Start $label once, then set up again.")
         val (save, load) = SetupFiles.saveLoadKeys("melonds")
         SetupFiles.editText("$data/files/controller_config.json") { MelonMapping.json(p, pad, save, load) }
-        if (p.hideTouchControls) SetupFiles.editPrefs("$data/shared_prefs/${pkg}_preferences.xml") { TouchControls.melon(it) }
-        return "controller, fast forward on R2, swap screens on L2, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "")
+        val wanted = RomFolders.dirs(listOf("melonds", "melonds_nightly"))
+        val folders = RomFolders.grant(pkg, wanted)
+        SetupFiles.editPrefs("$data/shared_prefs/${pkg}_preferences.xml") {
+            if (p.hideTouchControls) TouchControls.melon(it)
+            if (folders.isNotEmpty()) RomFolders.melon(it, folders.map(FolderGrants::treeUri))
+        }
+        return "controller, fast forward on R2, swap screens on L2, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "") +
+            RomFolders.message(folders, wanted)
     }
 }

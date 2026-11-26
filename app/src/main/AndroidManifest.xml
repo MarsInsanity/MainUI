@@ -67,6 +67,25 @@
                 android:resource="@xml/overlay_service" />
         </service>
 
+        <!-- Only so the folder picker's app sees MainUI (it can see apps that open some file type):
+             its offers reach FolderGrantService. No app sends this type. See core/FolderGrants.kt. -->
+        <activity
+            android:name=".core.PickerVisibilityActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-io.github.marsinsanity.mainui.none" />
+            </intent-filter>
+        </activity>
+
+        <!-- Started only by the folder picker's app (root plays it): see core/FolderGrants.kt. -->
+        <service
+            android:name=".core.FolderGrantService"
+            android:exported="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS" />
+
         <service
             android:name=".service.ScraperService"
             android:exported="false"

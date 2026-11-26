@@ -79,7 +79,8 @@ class EmulatorControlsScene(host: SceneHost) : ListScene(host, "Emulator control
                     "Writes these buttons into each installed emulator MainUI knows (${AutoSetup.names}), closing it first: " +
                         "player 1's controller, the hotkeys (as combos with the hotkey button where the emulator has them, " +
                         "else on buttons its system lacks) and MainUI's save / load keys, and with Hide touch controls their " +
-                        "on-screen controls go off. Dolphin also gets a Wii Remote " +
+                        "on-screen controls go off. Each also gets MainUI's game folders for its systems (folder access " +
+                        "given with root), so it lists those games and opens the ones MainUI starts. Dolphin also gets a Wii Remote " +
                         "profile for each way to play (pick one per Wii game in its options, SELECT); motion controls use " +
                         "the handheld's accelerometer and gyroscope. Other settings stay; the first change keeps each " +
                         "original file as .mainui.bak.", "OK", null))

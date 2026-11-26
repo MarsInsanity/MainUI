@@ -1,5 +1,6 @@
 package io.github.marsinsanity.mainui.emu.setup
 
+import io.github.marsinsanity.mainui.core.FolderGrants
 import io.github.marsinsanity.mainui.core.Root
 
 /**
@@ -101,9 +102,15 @@ object FlycastSetup : EmulatorSetup {
         } ?: "$home/mappings"
         for (arcade in listOf(false, true))
             SetupFiles.editText("$dir/${FlycastMapping.fileName(pad.name, arcade)}") { FlycastMapping.padFile(it, p, pad, arcade) }
-        if (p.hideTouchControls) SetupFiles.editIni("$home/emu.cfg") { TouchControls.flycast(it) }
+        val wanted = RomFolders.dirs(listOf("flycast"))
+        val folders = RomFolders.grant(pkg, wanted)
+        SetupFiles.editIni("$home/emu.cfg") {
+            if (p.hideTouchControls) TouchControls.flycast(it)
+            if (folders.isNotEmpty()) RomFolders.flycast(it, folders.map(FolderGrants::treeUri))
+        }
         val (save, load) = SetupFiles.saveLoadKeys("flycast")
         SetupFiles.editText("$dir/${FlycastMapping.fileName(PadInfo.MAINUI_KEYBOARD)}") { old -> FlycastMapping.keyboardFile(old, save, load) ?: old }
-        return "controller (Dreamcast and arcade), fast forward and screenshot on the hotkey button, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "")
+        return "controller (Dreamcast and arcade), fast forward and screenshot on the hotkey button, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "") +
+            RomFolders.message(folders, wanted)
     }
 }

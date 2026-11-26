@@ -1,5 +1,6 @@
 package io.github.marsinsanity.mainui.emu.setup
 
+import io.github.marsinsanity.mainui.core.FolderGrants
 import io.github.marsinsanity.mainui.core.Root
 
 /**
@@ -59,7 +60,13 @@ object DolphinSetup : EmulatorSetup {
         }
         val (save, load) = SetupFiles.saveLoadKeys("dolphin")
         edit(dir, "Config/Hotkeys.ini") { it.replaceSection("Hotkeys", DolphinMapping.hotkeys(p, pad, save, load)) }
-        if (p.hideTouchControls) edit(dir, "Config/Dolphin.ini") { TouchControls.dolphin(it) }
+        // (Granted first: Dolphin drops a game folder it can't open.)
+        val wanted = RomFolders.dirs(listOf("dolphin"))
+        val folders = RomFolders.grant(pkg, wanted)
+        edit(dir, "Config/Dolphin.ini") {
+            if (p.hideTouchControls) TouchControls.dolphin(it)
+            if (folders.isNotEmpty()) RomFolders.dolphin(it, folders.map(FolderGrants::treeUri))
+        }
         var games = 0
         for (id in wiiGames()) {
             val c = Controls.wiiFor(id, p)
@@ -73,7 +80,7 @@ object DolphinSetup : EmulatorSetup {
         }
         return "GameCube controller, Wii Remote (${p.wiiDefault.label}, $motion)" +
             (if (games > 0) ", ${if (games > 1) "$games Wii games" else "1 Wii game"} with a controller of ${if (games > 1) "their" else "its"} own" else "") + ", hotkeys" +
-            (if (p.hideTouchControls) ", touch controls off" else "")
+            (if (p.hideTouchControls) ", touch controls off" else "") + RomFolders.message(folders, wanted)
     }
 
     /** One Wii game's controller (its options in MainUI). */

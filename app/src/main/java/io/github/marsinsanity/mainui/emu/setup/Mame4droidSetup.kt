@@ -1,5 +1,6 @@
 package io.github.marsinsanity.mainui.emu.setup
 
+import io.github.marsinsanity.mainui.core.FolderGrants
 import io.github.marsinsanity.mainui.core.Root
 import org.json.JSONObject
 
@@ -67,12 +68,19 @@ object Mame4droidSetup : EmulatorSetup {
         val main = "$prefsDir/${pkg}_preferences.xml"
         Root.forceStop(pkg)
         if (Root.fileExists(main) != true && Root.fileExists("$main.bak") != true) throw SetupProblem("Start $label once, then set up again.")
+        // One ROMs folder: the arcade one. (MainUI's games in other folders still start, by file.)
+        val wanted = RomFolders.dirs(listOf("mame4droid"))
+        val dir = wanted.firstOrNull { it.name.equals("arcade", ignoreCase = true) } ?: wanted.firstOrNull()
+        val folders = if (dir != null) RomFolders.grant(pkg, listOf(dir)) else emptyList()
         SetupFiles.editPrefs(main) { prefs ->
+            if (dir != null && folders.isNotEmpty())
+                RomFolders.mame(prefs, FolderGrants.treeUri(folders[0]), dir.absolutePath, "${SetupFiles.androidData(pkg)}/")
             val device = if (prefs.value("PREF_INPUT_FAKE_ID") == "true") Mame4droidMapping.FAKE_ID else handheldId(prefsDir, pad)
             prefs.putString("PREF_DEFINED_KEYS_2", Mame4droidMapping.definedKeys(prefs.string("PREF_DEFINED_KEYS_2"), device, p))
             if (p.hideTouchControls) TouchControls.mame(prefs)
         }
-        return "controller (button 1 on the right button, coin on Select)" + (if (p.hideTouchControls) ", touch controls off" else "")
+        return "controller (button 1 on the right button, coin on Select)" + (if (p.hideTouchControls) ", touch controls off" else "") +
+            RomFolders.message(folders, wanted)
     }
 
     /** The handheld's MAME4droid id: the one it keeps for its descriptor, given one when new. */
