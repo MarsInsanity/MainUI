@@ -1,8 +1,6 @@
 package io.github.marsinsanity.mainui.emu.setup
 
-import io.github.marsinsanity.mainui.MainUI
 import io.github.marsinsanity.mainui.core.Root
-import io.github.marsinsanity.mainui.emu.Hotkeys
 
 /**
  * Dolphin (official and MainUI builds; MMJR's old input settings differ and are left alone).
@@ -17,14 +15,12 @@ import io.github.marsinsanity.mainui.emu.Hotkeys
  * change keeps the original as <file>.mainui.bak.
  */
 object DolphinSetup : EmulatorSetup {
+    override val name = "Dolphin"
     private const val OFFICIAL = "org.dolphinemu.dolphinemu"
     private val PACKAGES = listOf("$OFFICIAL.mainui" to "Dolphin (MainUI build)", OFFICIAL to "Dolphin")
     private const val PROFILE_KEY = "WiimoteProfile1"
 
-    override fun installed(): List<Pair<String, String>> {
-        val pm = MainUI.app.packageManager
-        return PACKAGES.filter { (pkg, _) -> runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess }
-    }
+    override fun installed(): List<Pair<String, String>> = SetupFiles.installed(PACKAGES)
 
     /**
      * Dolphin's user folder: its Android/data files folder, or the old shared dolphin-emu folder an
@@ -37,18 +33,7 @@ object DolphinSetup : EmulatorSetup {
     }
 
     /** Edits [rel] under [dir] (made when missing); written only when [change] changed it. */
-    private fun edit(dir: String, rel: String, change: (IniText) -> Unit): Boolean {
-        val path = "$dir/$rel"
-        val exists = Root.fileExists(path) ?: throw SetupProblem("root couldn't check $rel")
-        val old = if (exists) Root.readFile(path) ?: throw SetupProblem("couldn't read $rel") else ""
-        val ini = IniText(old)
-        change(ini)
-        val text = ini.toString()
-        if (text == old) return false
-        val w = Root.writeOwnedFile(path, text, backup = old.isNotEmpty())
-        if (!w.ok) throw SetupProblem("couldn't write $rel: ${w.error}")
-        return true
-    }
+    private fun edit(dir: String, rel: String, change: (IniText) -> Unit): Boolean = SetupFiles.editIni("$dir/$rel", change)
 
     private fun gameRel(discId: String) = "GameSettings/$discId.ini"
 
@@ -72,11 +57,8 @@ object DolphinSetup : EmulatorSetup {
         for (t in WiiController.entries) {
             edit(dir, "Config/Profiles/Wiimote/${t.profile}.ini") { it.replaceSection("Profile", DolphinMapping.wiimote(t, p, pad)) }
         }
-        val def = MainUI.emulators.standaloneDefs().firstOrNull { it.id == "dolphin" }
-        val (ownSave, ownLoad) = Hotkeys.get("dolphin")
-        edit(dir, "Config/Hotkeys.ini") {
-            it.replaceSection("Hotkeys", DolphinMapping.hotkeys(p, pad, ownSave ?: def?.save, ownLoad ?: def?.load))
-        }
+        val (save, load) = SetupFiles.saveLoadKeys("dolphin")
+        edit(dir, "Config/Hotkeys.ini") { it.replaceSection("Hotkeys", DolphinMapping.hotkeys(p, pad, save, load)) }
         var games = 0
         for (id in wiiGames()) {
             val c = Controls.wiiFor(id, p)

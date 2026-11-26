@@ -70,7 +70,7 @@ class EmulatorControlsScene(host: SceneHost) : ListScene(host, "Emulator control
             toggle("Wii: motion controls (shake, tilt)", { p.wiiMotion }) { v -> update { it.copy(wiiMotion = v) } },
             action("What Set up changes") {
                 host.push(DialogScene(host, "Set up emulators",
-                    "Writes these buttons into each installed emulator MainUI knows (so far Dolphin), closing it first. " +
+                    "Writes these buttons into each installed emulator MainUI knows (${AutoSetup.names}), closing it first. " +
                         "Dolphin: GameCube controller 1, Wii Remote 1, a Wii Remote profile for each way to play " +
                         "(pick one per Wii game in its options, SELECT), and hotkeys. Its other settings stay; " +
                         "the first change keeps each original file as .mainui.bak. Motion controls use the handheld's " +
@@ -82,7 +82,7 @@ class EmulatorControlsScene(host: SceneHost) : ListScene(host, "Emulator control
     private fun setUp() {
         val apps = AutoSetup.installed()
         if (apps.isEmpty()) {
-            host.push(DialogScene(host, "Set up emulators", "None of the emulators MainUI can set up is installed (so far: Dolphin).", "OK", null))
+            host.push(DialogScene(host, "Set up emulators", "None of the emulators MainUI can set up is installed (${AutoSetup.names}).", "OK", null))
             return
         }
         host.push(DialogScene(host, "Set up emulators",

@@ -14,6 +14,9 @@ class SetupProblem(message: String) : Exception(message)
 
 /** Writes the [ControlsProfile] into one emulator's own settings (root: they're in its private folders). */
 interface EmulatorSetup {
+    /** The emulator's name ("Dolphin"). */
+    val name: String
+
     /** The installed apps this sets up: package to the name shown. */
     fun installed(): List<Pair<String, String>>
 
@@ -29,6 +32,9 @@ object AutoSetup {
 
     data class Result(val label: String, val ok: Boolean, val message: String)
 
+    /** The names of the emulators MainUI can set up ("Dolphin, PPSSPP"). */
+    val names: String get() = all.joinToString(", ") { it.name }
+
     /** The installed apps that would be set up (and stopped). */
     fun installed(): List<Pair<String, String>> = all.flatMap { it.installed() }
 
@@ -37,7 +43,7 @@ object AutoSetup {
         val pad = PadInfo.detect(ctx) ?: return listOf(Result("Controller", false, "No built-in controller found."))
         val p = Controls.profile
         val apps = installed()
-        if (apps.isEmpty()) return listOf(Result("Emulators", false, "None of the emulators MainUI can set up is installed (so far: Dolphin)."))
+        if (apps.isEmpty()) return listOf(Result("Emulators", false, "None of the emulators MainUI can set up is installed ($names)."))
         val wii by lazy { wiiDiscIds() }
         val results = all.flatMap { s ->
             s.installed().map { (pkg, label) ->

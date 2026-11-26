@@ -45,16 +45,7 @@ internal object DolphinMapping {
 
     /** A key spec of MainUI's ("keys:KEYCODE_F1", "keys:KEYCODE_SHIFT_LEFT+KEYCODE_F4") on its virtual keyboard. */
     fun keyboard(spec: String?): String? {
-        val names = spec?.removePrefix("keys:")?.split('+')?.map { it.trim() } ?: return null
-        val codes = names.map { n ->
-            Regex("KEYCODE_F(\\d+)").matchEntire(n)?.groupValues?.get(1)?.toInt()?.let { 130 + it } ?: when (n) {
-                "KEYCODE_SHIFT_LEFT" -> 59
-                "KEYCODE_ALT_LEFT" -> 57
-                "KEYCODE_CTRL_LEFT" -> 113
-                else -> return null
-            }
-        }
-        val keyNames = codes.map { DolphinKeyNames.of(it) ?: return null }
+        val keyNames = KeySpec.codes(spec)?.map { DolphinKeyNames.of(it) ?: return null } ?: return null
         return keyNames.joinToString(" & ") { "`$KEYBOARD:$it`" }
     }
 

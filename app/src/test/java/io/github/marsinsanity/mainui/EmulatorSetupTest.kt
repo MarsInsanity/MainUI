@@ -5,7 +5,9 @@ import io.github.marsinsanity.mainui.emu.setup.DolphinKeyNames
 import io.github.marsinsanity.mainui.emu.setup.DolphinMapping
 import io.github.marsinsanity.mainui.emu.setup.Hotkey
 import io.github.marsinsanity.mainui.emu.setup.IniText
+import io.github.marsinsanity.mainui.emu.setup.KeySpec
 import io.github.marsinsanity.mainui.emu.setup.PadInfo
+import io.github.marsinsanity.mainui.emu.setup.PrefsXml
 import io.github.marsinsanity.mainui.emu.setup.Role
 import io.github.marsinsanity.mainui.emu.setup.WiiController
 import io.github.marsinsanity.mainui.emu.setup.WiiPointer
@@ -65,6 +67,46 @@ class EmulatorSetupTest {
         val none = IniText("")
         none.set("Controls", "WiimoteProfile1", null)
         assertEquals("", none.toString())
+    }
+
+    // ---- SharedPreferences -------------------------------------------------------------------
+
+    @org.junit.Before fun parser() { io.github.marsinsanity.mainui.data.GameListXml.newParser = { org.kxml2.io.KXmlParser() } }
+
+    @Test fun prefsKeepWhatTheyDontChangeAndEscapeWhatTheyWrite() {
+        val p = PrefsXml("""<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+            |<map>
+            |    <boolean name="first_run" value="false" />
+            |    <string name="layout">{&quot;a&quot;:1}</string>
+            |    <int name="version" value="7" />
+            |    <set name="roots">
+            |        <string>/sdcard/roms</string>
+            |    </set>
+            |    <set name="empty" />
+            |</map>
+            |""".trimMargin())
+        assertEquals("{\"a\":1}", p.string("layout"))
+        assertEquals("7", p.value("version"))
+        p.putString("input", "{\"A\":96} & <ok>")
+        p.putInt("version", 8)
+        val out = p.toString()
+        assertTrue(out.contains("<boolean name=\"first_run\" value=\"false\" />"))
+        assertTrue(out.contains("<string>/sdcard/roms</string>"))
+        assertTrue(out.contains("<set name=\"empty\">\n    </set>"))
+        assertTrue(out.contains("<string name=\"input\">{&quot;A&quot;:96} &amp; &lt;ok&gt;</string>"))
+        assertEquals("{\"A\":96} & <ok>", PrefsXml(out).string("input"))
+        assertEquals("8", PrefsXml(out).value("version"))
+        assertEquals(listOf("first_run", "layout", "version", "roots", "empty", "input"), PrefsXml(out).names.toList())
+        assertTrue(PrefsXml("").names.isEmpty())
+    }
+
+    @Test fun keySpecsBecomeKeyCodes() {
+        assertEquals(listOf(131), KeySpec.codes("keys:KEYCODE_F1"))
+        assertEquals(listOf(59, 134), KeySpec.codes("keys:KEYCODE_SHIFT_LEFT+KEYCODE_F4"))
+        assertEquals(listOf(113, 142), KeySpec.codes("keys:KEYCODE_CTRL_LEFT+KEYCODE_F12"))
+        assertNull(KeySpec.codes("keys:KEYCODE_F13"))
+        assertNull(KeySpec.codes(null))
+        assertNull(KeySpec.codes("keys:"))
     }
 
     // ---- Dolphin ------------------------------------------------------------------------------
