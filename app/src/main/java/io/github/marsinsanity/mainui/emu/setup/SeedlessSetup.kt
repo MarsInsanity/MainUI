@@ -44,6 +44,7 @@ object SeedlessSetup : EmulatorSetup {
             val profile = prefs.value("_KeyMapId")?.toIntOrNull()?.takeIf { it in 0..2 } ?: 0
             for ((k, v) in SeedlessMapping.entries(p, profile, save, load)) prefs.putInt(k, v)
         }
-        return "controller, fast forward on R3, swap screens on L3"
+        if (p.hideTouchControls) SetupFiles.editPrefs("$prefsDir/ctrl_layout.xml") { TouchControls.seedless(it) }
+        return "controller, fast forward on R3, swap screens on L3" + (if (p.hideTouchControls) ", touch controls off" else "")
     }
 }

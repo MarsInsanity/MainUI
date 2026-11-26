@@ -59,7 +59,8 @@ object Armsx2Setup : EmulatorSetup {
                 is Int -> prefs.putInt(k, v)
                 is Boolean -> prefs.putBoolean(k, v)
             }
+            if (p.hideTouchControls) TouchControls.armsx2(prefs)
         }
-        return "controller, hotkeys, save / load keys"
+        return "controller, hotkeys, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "")
     }
 }

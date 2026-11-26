@@ -44,6 +44,7 @@ internal class PrefsXml(text: String) {
     fun has(name: String) = name in entries
     fun string(name: String): String? = entries[name]?.takeIf { it.tag == "string" }?.value
     fun value(name: String): String? = entries[name]?.value
+    fun stringSet(name: String): List<String>? = entries[name]?.set
     val names: Set<String> get() = entries.keys
 
     fun putString(name: String, v: String) { entries[name] = Entry("string", v) }

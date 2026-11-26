@@ -234,6 +234,10 @@ real emulator yet. For each one that is installed:
     screens.
   - PPSSPP: L2 opens its menu, R2 fast forwards while held.
   - Mupen64Plus: R2 fast forwards while held.
+- **Touch controls** (Hide touch controls on, the default): no on-screen controls in any game,
+  for each emulator. RetroArch was checked on the cloud emulator only as far as its config
+  (`input_overlay_enable = "false"`, overrides too). Turning the option off and setting up again
+  leaves them as they are (it doesn't turn them back on).
 - **Save / Load** with the official builds (MainUI presses the emulator's keys on its keyboard;
   needs root): PPSSPP, ARMSX2, Azahar, melonDS, Flycast, Mupen64Plus.
 - **Per emulator**:

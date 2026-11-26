@@ -88,11 +88,12 @@ object MupenSetup : EmulatorSetup {
             prefs.putString("controllerProfile1", MupenMapping.PROFILE)
             // Otherwise a load key only works held for a second, and repeats.
             prefs.putBoolean("holdButtonForMenu", false)
+            if (p.hideTouchControls) TouchControls.mupen(prefs)
             mapped = prefs.value("inputShareController") != "true" &&
                 (prefs.value("autoPlayerMapping") == "true" || !prefs.string("playerMap").isNullOrEmpty())
         }
         val c = if (pad.rightStick != null) "C buttons on the right stick" else if (pad.hasLeftStick) "C buttons on the d-pad" else "stick on the d-pad"
         return "controller ($c), fast forward on R2, " +
-            if (mapped) "no save / load keys while its player map is set" else "save / load keys"
+            (if (mapped) "no save / load keys while its player map is set" else "save / load keys") + (if (p.hideTouchControls) ", touch controls off" else "")
     }
 }

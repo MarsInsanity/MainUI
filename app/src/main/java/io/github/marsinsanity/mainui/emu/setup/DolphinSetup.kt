@@ -59,6 +59,7 @@ object DolphinSetup : EmulatorSetup {
         }
         val (save, load) = SetupFiles.saveLoadKeys("dolphin")
         edit(dir, "Config/Hotkeys.ini") { it.replaceSection("Hotkeys", DolphinMapping.hotkeys(p, pad, save, load)) }
+        if (p.hideTouchControls) edit(dir, "Config/Dolphin.ini") { TouchControls.dolphin(it) }
         var games = 0
         for (id in wiiGames()) {
             val c = Controls.wiiFor(id, p)
@@ -71,7 +72,8 @@ object DolphinSetup : EmulatorSetup {
             else -> "no motion controls"
         }
         return "GameCube controller, Wii Remote (${p.wiiDefault.label}, $motion)" +
-            (if (games > 0) ", ${if (games > 1) "$games Wii games" else "1 Wii game"} with a controller of ${if (games > 1) "their" else "its"} own" else "") + ", hotkeys"
+            (if (games > 0) ", ${if (games > 1) "$games Wii games" else "1 Wii game"} with a controller of ${if (games > 1) "their" else "its"} own" else "") + ", hotkeys" +
+            (if (p.hideTouchControls) ", touch controls off" else "")
     }
 
     /** One Wii game's controller (its options in MainUI). */

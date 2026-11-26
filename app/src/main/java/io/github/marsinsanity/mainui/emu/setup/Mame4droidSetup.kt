@@ -70,8 +70,9 @@ object Mame4droidSetup : EmulatorSetup {
         SetupFiles.editPrefs(main) { prefs ->
             val device = if (prefs.value("PREF_INPUT_FAKE_ID") == "true") Mame4droidMapping.FAKE_ID else handheldId(prefsDir, pad)
             prefs.putString("PREF_DEFINED_KEYS_2", Mame4droidMapping.definedKeys(prefs.string("PREF_DEFINED_KEYS_2"), device, p))
+            if (p.hideTouchControls) TouchControls.mame(prefs)
         }
-        return "controller (button 1 on the right button, coin on Select)"
+        return "controller (button 1 on the right button, coin on Select)" + (if (p.hideTouchControls) ", touch controls off" else "")
     }
 
     /** The handheld's MAME4droid id: the one it keeps for its descriptor, given one when new. */

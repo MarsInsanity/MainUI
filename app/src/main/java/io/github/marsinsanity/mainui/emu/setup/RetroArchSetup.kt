@@ -29,6 +29,12 @@ internal object RetroArchMapping {
         else -> null
     }
 
+    /** Where its overrides are: rgui_config_directory (":" for RetroArch's own folder), else <cfg folder>/config. */
+    fun configDir(setting: String?, cfgDir: String): String {
+        val s = setting?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: return "$cfgDir/config"
+        return if (s.startsWith(":")) cfgDir + "/" + s.removePrefix(":").trimStart('/') else s
+    }
+
     fun binds(p: ControlsProfile, pad: PadInfo): Map<String, String> {
         val m = linkedMapOf<String, String>()
         fun btn(name: String, r: Role) { m["input_player1_${name}_btn"] = q(p.key(r)) }
@@ -49,6 +55,7 @@ internal object RetroArchMapping {
         m["input_enable_hotkey_btn"] = q(p.hotkeyButton)
         m["input_toggle_fast_forward_btn"] = q(p.hotkey(Hotkey.FAST_FORWARD))
         m["input_screenshot_btn"] = q(p.hotkey(Hotkey.SCREENSHOT))
+        if (p.hideTouchControls) m[TouchControls.RETROARCH_KEY] = q("false")
         // As Configure RetroArch sets them: MainUI's keyboard hotkeys must not wait for an enable key.
         m["input_enable_hotkey"] = q("nul")
         m["input_hotkey_device_merge"] = q("false")
@@ -65,10 +72,22 @@ object RetroArchSetup : EmulatorSetup {
         // (It writes its config when it quits.)
         Root.forceStop(pkg)
         val binds = RetroArchMapping.binds(p, pad)
-        SetupFiles.editText(MainUI.emulators.raConfigPath(pkg)) { old ->
+        val path = MainUI.emulators.raConfigPath(pkg)
+        var cfg = ""
+        SetupFiles.editText(path) { old ->
+            cfg = old
             RetroArchCores.mergeConfig(old, binds)
                 ?: throw SetupProblem("Open $label from its icon, quit it from its menu (Quit RetroArch), then set up again.")
         }
-        return "player 1 controller, fast forward and screenshot on the hotkey button"
+        if (p.hideTouchControls) {
+            // A core's, folder's or game's override can turn the overlay back on.
+            val dir = RetroArchMapping.configDir(RetroArchCores.cfgValue(cfg, "rgui_config_directory"), path.substringBeforeLast('/'))
+            // (The /data/media path first: root doesn't always see into Android/data through /storage.)
+            val dirs = Root.lowerPaths(dir).reversed().joinToString(" ") { Root.q(it) }
+            val found = Root.exec("for d in $dirs; do [ -d \"\$d\" ] || continue; " +
+                "find \"\$d\" -name '*.cfg' -exec grep -l '^[[:space:]]*${TouchControls.RETROARCH_KEY}' {} + 2>/dev/null; break; done").lines
+            for (f in found.map { it.trim() }.filter { it.endsWith(".cfg") }) SetupFiles.editText(f) { TouchControls.retroarchOverride(it) }
+        }
+        return "player 1 controller, fast forward and screenshot on the hotkey button" + (if (p.hideTouchControls) ", touch controls off" else "")
     }
 }

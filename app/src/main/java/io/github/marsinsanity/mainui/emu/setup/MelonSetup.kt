@@ -98,6 +98,7 @@ object MelonSetup : EmulatorSetup {
             throw SetupProblem("Start $label once, then set up again.")
         val (save, load) = SetupFiles.saveLoadKeys("melonds")
         SetupFiles.editText("$data/files/controller_config.json") { MelonMapping.json(p, pad, save, load) }
-        return "controller, fast forward on R2, swap screens on L2, save / load keys"
+        if (p.hideTouchControls) SetupFiles.editPrefs("$data/shared_prefs/${pkg}_preferences.xml") { TouchControls.melon(it) }
+        return "controller, fast forward on R2, swap screens on L2, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "")
     }
 }

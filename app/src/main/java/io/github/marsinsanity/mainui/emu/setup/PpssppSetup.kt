@@ -119,12 +119,16 @@ object PpssppSetup : EmulatorSetup {
         val (save, load) = SetupFiles.saveLoadKeys("ppsspp")
         val entries = PpssppMapping.entries(p, pad, save, load)
         SetupFiles.editIni("$system/controls.ini") { it.replaceSection("ControlMapping", entries) }
+        if (p.hideTouchControls) SetupFiles.editIni("$system/ppsspp.ini") { TouchControls.ppsspp(it) }
         var games = 0
         for (f in Root.listDir(system).filter { it.endsWith("_ppsspp.ini", ignoreCase = true) }) {
-            SetupFiles.editIni("$system/$f") { it.replaceSection("ControlMapping", entries) }
+            SetupFiles.editIni("$system/$f") {
+                it.replaceSection("ControlMapping", entries)
+                if (p.hideTouchControls) TouchControls.ppsspp(it)
+            }
             games++
         }
-        return "controller, menu on L2, fast forward on R2 and the hotkey, save / load keys" +
+        return "controller, menu on L2, fast forward on R2 and the hotkey, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "") +
             if (games > 0) " (also in $games game setting${if (games > 1) "s" else ""})" else ""
     }
 }

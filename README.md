@@ -277,6 +277,10 @@ settings yet says so: start it once, then set up again.
   (L1), and for Wii games the Home button (Start), turning the Wii Remote sideways (Y) and
   recentering the motion pointer (R3). Holding the hotkey button also presses its own button in
   the game (the Wii Remote's −).
+- **Hide touch controls** (on by default): Set up also turns each emulator's on-screen controls
+  off. Flycast and Mupen64Plus have no off switch, so theirs are made fully transparent instead
+  (Flycast's virtual pad is also taken off the Dreamcast ports, so a touch can't press it).
+  MAME4droid then opens its menu when the screen is touched.
 - **Wii**: the default controller (Wii Remote + Nunchuk, sideways Wii Remote, Classic Controller,
   or a GameCube controller), the pointer (right stick, tilting the handheld, or the touchscreen),
   and motion controls (the handheld's accelerometer and gyroscope are the Wii Remote's, so shaking

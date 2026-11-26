@@ -78,6 +78,8 @@ data class ControlsProfile(
     val wiiMotion: Boolean = true,
     val leftStick: Stick = Stick.AUTO,
     val rightStick: Stick = Stick.AUTO,
+    /** Set up turns the emulators' on-screen touch controls off. */
+    val hideTouchControls: Boolean = true,
 ) {
     fun key(r: Role): Int = keys[r] ?: r.defaultKey
     fun hotkey(h: Hotkey): Int = hotkeys[h] ?: h.defaultKey
@@ -100,6 +102,7 @@ data class ControlsProfile(
         // (Left out when automatic: a profile saved before these existed stays the same JSON.)
         if (leftStick != Stick.AUTO) put("leftStick", leftStick.name)
         if (rightStick != Stick.AUTO) put("rightStick", rightStick.name)
+        if (!hideTouchControls) put("hideTouchControls", false)
     }
 
     companion object {
@@ -119,6 +122,7 @@ data class ControlsProfile(
                 wiiMotion = o.optBoolean("wiiMotion", d.wiiMotion),
                 leftStick = runCatching { Stick.valueOf(o.optString("leftStick")) }.getOrDefault(d.leftStick),
                 rightStick = runCatching { Stick.valueOf(o.optString("rightStick")) }.getOrDefault(d.rightStick),
+                hideTouchControls = o.optBoolean("hideTouchControls", d.hideTouchControls),
             )
         }
 

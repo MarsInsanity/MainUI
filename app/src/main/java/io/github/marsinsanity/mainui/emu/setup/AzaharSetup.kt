@@ -182,6 +182,7 @@ object AzaharSetup : EmulatorSetup {
                 }
             }
         }
-        return "controller, fast forward on R3, swap screens on L3, save / load keys"
+        if (p.hideTouchControls) SetupFiles.editPrefs(prefsPath) { TouchControls.azahar(it) }
+        return "controller, fast forward on R3, swap screens on L3, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "")
     }
 }

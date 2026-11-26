@@ -101,8 +101,9 @@ object FlycastSetup : EmulatorSetup {
         } ?: "$home/mappings"
         for (arcade in listOf(false, true))
             SetupFiles.editText("$dir/${FlycastMapping.fileName(pad.name, arcade)}") { FlycastMapping.padFile(it, p, pad, arcade) }
+        if (p.hideTouchControls) SetupFiles.editIni("$home/emu.cfg") { TouchControls.flycast(it) }
         val (save, load) = SetupFiles.saveLoadKeys("flycast")
         SetupFiles.editText("$dir/${FlycastMapping.fileName(PadInfo.MAINUI_KEYBOARD)}") { old -> FlycastMapping.keyboardFile(old, save, load) ?: old }
-        return "controller (Dreamcast and arcade), fast forward and screenshot on the hotkey button, save / load keys"
+        return "controller (Dreamcast and arcade), fast forward and screenshot on the hotkey button, save / load keys" + (if (p.hideTouchControls) ", touch controls off" else "")
     }
 }

@@ -19,6 +19,7 @@ import io.github.marsinsanity.mainui.emu.setup.PrefsXml
 import io.github.marsinsanity.mainui.emu.setup.RetroArchMapping
 import io.github.marsinsanity.mainui.emu.setup.Role
 import io.github.marsinsanity.mainui.emu.setup.Stick
+import io.github.marsinsanity.mainui.emu.setup.TouchControls
 import io.github.marsinsanity.mainui.emu.setup.WiiController
 import io.github.marsinsanity.mainui.emu.setup.WiiPointer
 import io.github.marsinsanity.mainui.emu.RetroArchCores
@@ -507,6 +508,42 @@ class EmulatorSetupTest {
         assertFalse(p.toJson().has("leftStick"))
         val q = p.copy(leftStick = Stick.RX_RY)
         assertEquals(q, ControlsProfile.fromJson(org.json.JSONObject(q.toJson().toString())))
+    }
+
+    @Test fun touchControlsGoOffEverywhere() {
+        fun ini(text: String, f: (IniText) -> Unit) = IniText(text).also(f)
+        assertEquals("False", ini("[General]\nISOPath0 = /x\n") { TouchControls.dolphin(it) }.get("Android", "ShowInputOverlay"))
+        val ppsspp = ini("﻿[Control]\nShowTouchControls = True\nHapticFeedback = False\n") { TouchControls.ppsspp(it) }
+        assertEquals("False", ppsspp.get("Control", "ShowTouchControls")); assertEquals("False", ppsspp.get("Control", "HapticFeedback"))
+        assertTrue(ppsspp.toString().startsWith("﻿[Control]\nShowTouchControls = False\n"))
+        val fly = ini("[config]\nDreamcast.SavestateSlot = 1\n[input]\nmaple_virtual_gamepad_uid = 0\n[T-8101N]\ninput.VirtualGamepadTransparency = 37\n[HDR-0001]\nrend.Fog = no\n") { TouchControls.flycast(it) }
+        assertEquals("100", fly.get("input", "VirtualGamepadTransparency")); assertEquals("-1", fly.get("input", "maple_virtual_gamepad_uid"))
+        assertEquals("100", fly.get("T-8101N", "input.VirtualGamepadTransparency")); assertNull(fly.get("HDR-0001", "input.VirtualGamepadTransparency"))
+
+        assertEquals("\"false\"", RetroArchMapping.binds(p, retroid)["input_overlay_enable"])
+        assertNull(RetroArchMapping.binds(p.copy(hideTouchControls = false), retroid)["input_overlay_enable"])
+        assertEquals("video_scale = \"2\"\ninput_overlay_enable = \"false\"\n",
+            TouchControls.retroarchOverride("video_scale = \"2\"\ninput_overlay_enable = \"true\"\n"))
+        assertEquals("/a/files/config", RetroArchMapping.configDir(null, "/a/files"))
+        assertEquals("/a/files/config", RetroArchMapping.configDir(":/config", "/a/files"))
+        assertEquals("/sdcard/RetroArch/config", RetroArchMapping.configDir("/sdcard/RetroArch/config/", "/a/files"))
+
+        fun prefs(text: String = "", f: (PrefsXml) -> Unit) = PrefsXml(PrefsXml(text).also(f).toString())
+        prefs { TouchControls.armsx2(it) }.let { assertEquals("0", it.value("touch.visibilityMode")); assertEquals("true", it.value("touch.pauseTapToReveal")) }
+        assertEquals("false", prefs { TouchControls.azahar(it) }.value("EmulationMenuSettings_ShowOverlay"))
+        assertEquals("always_invisible", prefs { TouchControls.melon(it) }.string("soft_input_behaviour"))
+        assertEquals("0", prefs { TouchControls.mupen(it) }.value("touchscreenTransparencyV2"))
+        prefs { TouchControls.mame(it) }.let {
+            assertEquals("false", it.value("PREF_LANDSCAPE_TOUCH_CONTROLLER")); assertEquals("false", it.value("PREF_PORTRAIT_TOUCH_CONTROLLER"))
+        }
+        val seedless = prefs("<map><set name=\"hidden\"><string>dpad</string><string>bg</string></set></map>") { TouchControls.seedless(it) }
+        val hidden = seedless.stringSet("hidden")!!
+        assertTrue(hidden.containsAll(listOf("dpad", "face", "lbtn", "rbtn", "startselect", "extra", "menu", "bg")))
+        assertEquals(hidden.distinct(), hidden)
+        // On by default, and a profile from before the option keeps its JSON.
+        assertTrue(p.hideTouchControls); assertFalse(p.toJson().has("hideTouchControls"))
+        val off = p.copy(hideTouchControls = false)
+        assertEquals(off, ControlsProfile.fromJson(org.json.JSONObject(off.toJson().toString())))
     }
 
     @Test fun profileSurvivesJsonAndKnowsSuggestions() {
