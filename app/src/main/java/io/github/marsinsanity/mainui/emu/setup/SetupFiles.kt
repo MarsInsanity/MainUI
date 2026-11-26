@@ -30,12 +30,27 @@ internal object SetupFiles {
         ini.toString().takeIf { it != before } ?: old
     }
 
-    /** An app's SharedPreferences file; the app must be stopped first. */
-    fun editPrefs(path: String, change: (PrefsXml) -> Unit): Boolean = editText(path) { old ->
-        val prefs = PrefsXml(old)
-        val before = prefs.toString()
-        change(prefs)
-        prefs.toString().takeIf { it != before } ?: old
+    /**
+     * An app's SharedPreferences file; the app must be stopped first. A leftover <file>.bak (a
+     * write the app didn't finish) is what Android loads instead, over the file: it is edited
+     * then, written as the file, and removed.
+     */
+    fun editPrefs(path: String, change: (PrefsXml) -> Unit): Boolean {
+        val bak = "$path.bak"
+        if (Root.fileExists(bak) == true) {
+            val prefs = PrefsXml(Root.readFile(bak) ?: throw SetupProblem("couldn't read ${bak.substringAfterLast('/')}"))
+            change(prefs)
+            val w = Root.writeOwnedFile(path, prefs.toString(), backup = Root.fileExists(path) == true)
+            if (!w.ok) throw SetupProblem("couldn't write ${path.substringAfterLast('/')}: ${w.error}")
+            Root.exec("rm -f ${Root.q(bak)}")
+            return true
+        }
+        return editText(path) { old ->
+            val prefs = PrefsXml(old)
+            val before = prefs.toString()
+            change(prefs)
+            prefs.toString().takeIf { it != before } ?: old
+        }
     }
 
     /** The [packages] (package to name shown) that are installed. */

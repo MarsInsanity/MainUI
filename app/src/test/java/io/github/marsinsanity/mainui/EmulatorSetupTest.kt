@@ -1,11 +1,14 @@
 package io.github.marsinsanity.mainui
 
+import io.github.marsinsanity.mainui.emu.setup.Armsx2Mapping
 import io.github.marsinsanity.mainui.emu.setup.ControlsProfile
 import io.github.marsinsanity.mainui.emu.setup.DolphinKeyNames
 import io.github.marsinsanity.mainui.emu.setup.DolphinMapping
 import io.github.marsinsanity.mainui.emu.setup.Hotkey
 import io.github.marsinsanity.mainui.emu.setup.IniText
 import io.github.marsinsanity.mainui.emu.setup.KeySpec
+import io.github.marsinsanity.mainui.emu.setup.MelonMapping
+import io.github.marsinsanity.mainui.emu.setup.SeedlessMapping
 import io.github.marsinsanity.mainui.emu.setup.PadInfo
 import io.github.marsinsanity.mainui.emu.setup.PrefsXml
 import io.github.marsinsanity.mainui.emu.setup.Role
@@ -241,6 +244,57 @@ class EmulatorSetupTest {
             }
             assertTrue("$k = $v: unknown input '$name'", ok)
         }
+    }
+
+    // ---- ARMSX2, melonDS, SeedlessDS ------------------------------------------------------------
+
+    @Test fun armsx2GetsKeyCodesHotkeyCombosAndNoHoldBackExit() {
+        val e = Armsx2Mapping.entries(p, "keys:KEYCODE_F1", "keys:KEYCODE_SHIFT_LEFT+KEYCODE_F3").toMap()
+        assertEquals(96, e["pad.map.cross"]); assertEquals(97, e["pad.map.circle"])
+        assertEquals(99, e["pad.map.square"]); assertEquals(100, e["pad.map.triangle"])
+        assertEquals(19, e["pad.map.dpad_up"]); assertEquals(104, e["pad.map.l2"]); assertEquals(109, e["pad.map.select"])
+        assertEquals(103, e["pad.fastforwardtoggle.keycode"]); assertEquals(109, e["pad.fastforwardtoggle.keycode.mod"])
+        assertEquals(102, e["pad.screenshot.keycode"])
+        assertEquals(131, e["pad.saveslot0.keycode"]); assertEquals(0, e["pad.saveslot0.keycode.mod"])
+        assertEquals(133, e["pad.loadslot0.keycode"]); assertEquals(59, e["pad.loadslot0.keycode.mod"])
+        assertEquals(false, e["ui.holdBackToExit"])
+        // Every value is an Int or a Boolean: ARMSX2 reads them with getInt / getBoolean.
+        assertTrue(e.values.all { it is Int || it is Boolean })
+        assertEquals(99, Armsx2Mapping.entries(p.withNintendoFace(true), null, null).toMap()["pad.map.triangle"])
+    }
+
+    @Test fun melonDsGetsEveryInputWithHatAndStickOnTheDpad() {
+        val o = org.json.JSONObject(MelonMapping.json(p, retroid, "keys:KEYCODE_F1", "keys:KEYCODE_F2"))
+        val inputs = o.getJSONArray("inputMapper")
+        val byName = (0 until inputs.length()).associate { inputs.getJSONObject(it).let { j -> j.getString("input") to j } }
+        assertEquals(listOf("A", "B", "X", "Y", "LEFT", "RIGHT", "UP", "DOWN", "L", "R", "START", "SELECT", "HINGE", "PAUSE",
+            "FAST_FORWARD", "MICROPHONE", "RESET", "SWAP_SCREENS", "QUICK_SAVE", "QUICK_LOAD", "REWIND"),
+            (0 until inputs.length()).map { inputs.getJSONObject(it).getString("input") })
+        assertEquals(97, byName["A"]!!.getJSONObject("assignment").getInt("keyCode"))
+        assertEquals(96, byName["B"]!!.getJSONObject("assignment").getInt("keyCode"))
+        val up = byName["UP"]!!
+        assertEquals("axis", up.getJSONObject("assignment").getString("type"))
+        assertEquals(16, up.getJSONObject("assignment").getInt("axisCode"))
+        assertEquals("NEGATIVE", up.getJSONObject("assignment").getString("direction"))
+        assertEquals(1, up.getJSONObject("altAssignment").getInt("axisCode"))
+        assertEquals(18, byName["FAST_FORWARD"]!!.getJSONObject("altAssignment").getInt("axisCode"))
+        assertEquals(131, byName["QUICK_SAVE"]!!.getJSONObject("assignment").getInt("keyCode"))
+        assertEquals("none", byName["HINGE"]!!.getJSONObject("assignment").getString("type"))
+        assertFalse(byName["HINGE"]!!.has("altAssignment"))
+        // Without a hat the d-pad keys are used.
+        val keysOnly = org.json.JSONObject(MelonMapping.json(p, bare, null, null)).getJSONArray("inputMapper").getJSONObject(6)
+        assertEquals(19, keysOnly.getJSONObject("assignment").getInt("keyCode"))
+        assertEquals("none", org.json.JSONObject(MelonMapping.json(p, bare, null, null)).getJSONArray("inputMapper")
+            .getJSONObject(18).getJSONObject("assignment").getString("type"))
+    }
+
+    @Test fun seedlessDsWritesTheActiveProfileAndItsVersion() {
+        val e0 = SeedlessMapping.entries(p, 0, "keys:KEYCODE_F1", "keys:KEYCODE_F2").toMap()
+        assertEquals(2, e0["_KeyMapVer"])
+        assertEquals(19, e0["k_0"]); assertEquals(97, e0["k_4"]); assertEquals(96, e0["k_5"]); assertEquals(109, e0["k_11"])
+        assertEquals(107, e0["s_1"]); assertEquals(106, e0["s_4"]); assertEquals(131, e0["s_2"]); assertEquals(132, e0["s_3"])
+        val e2 = SeedlessMapping.entries(p, 2, null, null).toMap()
+        assertEquals(97, e2["p2_k_4"]); assertNull(e2["k_4"]); assertNull(e2["p2_s_2"])
     }
 
     @Test fun profileSurvivesJsonAndKnowsSuggestions() {
