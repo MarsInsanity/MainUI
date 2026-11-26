@@ -1,6 +1,7 @@
 package io.github.marsinsanity.mainui
 
 import io.github.marsinsanity.mainui.emu.setup.Armsx2Mapping
+import io.github.marsinsanity.mainui.emu.setup.AzaharMapping
 import io.github.marsinsanity.mainui.emu.setup.ControlsProfile
 import io.github.marsinsanity.mainui.emu.setup.DolphinKeyNames
 import io.github.marsinsanity.mainui.emu.setup.DolphinMapping
@@ -338,6 +339,51 @@ class EmulatorSetupTest {
         ini.replaceSection("controlmapping", listOf("Cross" to "10-97"))
         assertEquals("\uFEFF[ControlMapping]\nCross = 10-97\n[Other]\nA = 1\n", ini.toString())
         assertEquals(listOf("ControlMapping", "Other"), ini.sectionNames)
+    }
+
+    // ---- Azahar --------------------------------------------------------------------------------
+
+    @Test fun azaharNewerFormGetsGamepadValues() {
+        val e = AzaharMapping.ini(p, retroid, "keys:KEYCODE_F1", "keys:KEYCODE_F2").toMap()
+        assertEquals("engine:gamepad,code:97", e["button_a"]); assertEquals("engine:gamepad,code:96", e["button_b"])
+        assertEquals("engine:gamepad,axis:17,threshold:0.5,direction:1", e["button_zl"])
+        assertEquals("engine:gamepad,axis:16,threshold:0.5,direction:-1", e["dpad_up"])
+        assertEquals("engine:gamepad,axis:1,direction:-1", e["circlepad_up"])
+        assertEquals("engine:gamepad,axis:11,direction:1", e["cstick_right"])
+        assertEquals("", e["hotkey_enable"])
+        assertEquals("engine:gamepad,code:107", e["hotkey_turbo_toggle"])
+        assertEquals("engine:gamepad,code:131", e["hotkey_quicksave"]); assertEquals("engine:gamepad,code:132", e["hotkey_quickload"])
+        assertEquals("engine:gamepad,code:19", AzaharMapping.ini(p, bare, null, null).toMap()["dpad_up"])
+    }
+
+    @Test fun azaharOlderFormIsKeyedByTheHandheldsInput() {
+        val prefs = AzaharMapping.prefs(p, retroid, "keys:KEYCODE_F1", "keys:KEYCODE_F2")
+        fun int(k: String) = prefs.filterIsInstance<AzaharMapping.Pref.IntP>().lastOrNull { it.key == k }?.v
+        fun str(k: String) = prefs.filterIsInstance<AzaharMapping.Pref.Str>().lastOrNull { it.key == k }?.v
+        assertEquals(700, int("InputMapping_HostAxis_97")); assertEquals(701, int("InputMapping_HostAxis_96"))
+        assertEquals("InputMapping_HostAxis_97", str("InputMapping_ReverseMapping_button_a"))
+        // Triggers and the hat as axes; no d-pad keys (later versions would migrate key 19-22 as axes 19-22).
+        assertEquals(707, int("InputMapping_HostAxis_17_GuestButton")); assertEquals(1, int("InputMapping_HostAxis_17_GuestOrientation"))
+        assertEquals(780, int("InputMapping_HostAxis_15_GuestButton")); assertEquals(0, int("InputMapping_HostAxis_15_GuestOrientation"))
+        assertEquals(780, int("InputMapping_HostAxis_16_GuestButton")); assertEquals(1, int("InputMapping_HostAxis_16_GuestOrientation"))
+        assertNull(int("InputMapping_HostAxis_19"))
+        assertEquals(713, int("InputMapping_HostAxis_0_GuestButton")); assertEquals(718, int("InputMapping_HostAxis_14_GuestButton"))
+        assertEquals("InputMapping_HostAxis_1", str("InputMapping_ReverseMapping_circlepad_axis_vertical_1"))
+        // Quick save is "hotkey_quickload" (10005) in Azahar itself.
+        assertEquals(10005, int("InputMapping_HostAxis_131")); assertEquals(10006, int("InputMapping_HostAxis_132"))
+        assertEquals(10007, int("InputMapping_HostAxis_107")); assertEquals(10001, int("InputMapping_HostAxis_106"))
+        // Without a hat the d-pad keys are used, and each handheld key drives one 3DS input.
+        val keys = AzaharMapping.prefs(p, bare, null, null).filterIsInstance<AzaharMapping.Pref.IntP>()
+        assertEquals(709, keys.single { it.key == "InputMapping_HostAxis_19" }.v)
+        assertEquals(keys.map { it.key }.distinct(), keys.map { it.key })
+        assertTrue(AzaharMapping.isInputPref("InputMapping_HostAxis_96")); assertFalse(AzaharMapping.isInputPref("InputMapping_Migrated"))
+        assertTrue(AzaharMapping.isInputPref("hotkey_enable")); assertFalse(AzaharMapping.isInputPref("CITRA_DIRECTORY"))
+    }
+
+    @Test fun azaharFindsItsUserFolder() {
+        assertEquals("/storage/emulated/0/Azahar", AzaharMapping.userDir("content://com.android.externalstorage.documents/tree/primary%3AAzahar"))
+        assertEquals("/storage/ABCD-1234/emu/3ds", AzaharMapping.userDir("content://com.android.externalstorage.documents/tree/ABCD-1234%3Aemu%2F3ds"))
+        assertNull(AzaharMapping.userDir("content://x/tree/nocolon"))
     }
 
     @Test fun profileSurvivesJsonAndKnowsSuggestions() {
