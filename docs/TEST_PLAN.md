@@ -210,3 +210,37 @@ GameCube game on the Pocket 2+, and Wii games on the Pocket Mini.
 - **Handheld buttons**:
   - bind a button by pressing it; the row should show the new key and the next Set up should use it;
   - check that A still works right after binding.
+
+## 13. Emulator controls (the other emulators)
+
+Set up writes the same buttons into RetroArch, PPSSPP, ARMSX2, Azahar, melonDS, SeedlessDS,
+Flycast, Mupen64Plus and MAME4droid. Only unit tests cover these: nothing has been checked in a
+real emulator yet. For each one that is installed:
+- **Setup**:
+  - Before starting it once, Set up should say "Start <name> once, then set up again" (not
+    for RetroArch, which already has a config).
+  - After starting it once, Set up should report it as set up. The dialog lists each emulator's
+    result.
+- **Buttons**: every face button by position (the bottom one is the system's bottom one), the
+  D-pad, sticks and triggers it has. Check that a button the system lacks does nothing unexpected.
+- **Hotkeys**:
+  - RetroArch, PPSSPP, ARMSX2, Flycast: Select + R1 fast forward, Select + L1 screenshot.
+  - melonDS: R2 fast forward, L2 swap screens. Azahar and SeedlessDS: R3 fast forward, L3 swap
+    screens.
+  - PPSSPP: L2 opens its menu, R2 fast forwards while held.
+  - Mupen64Plus: R2 fast forwards while held.
+- **Save / Load** with the official builds (MainUI presses the emulator's keys on its keyboard;
+  needs root): PPSSPP, ARMSX2, Azahar, melonDS, Flycast, Mupen64Plus.
+- **Per emulator**:
+  - RetroArch: binds should win over the controller's autoconfig. The in-game menu's
+    Save / Load / Menu (F keys) should still work, and holding Select shouldn't block them.
+  - Flycast: a Naomi or Atomiswave game should use the arcade layout, with coin on Select.
+    `mappings/` should hold `Android_<controller>.cfg`, `..._arcade.cfg` and
+    `Android_MainUI Keyboard.cfg`.
+  - Mupen64Plus: Settings > Controller profiles should list "MainUI", picked for player 1.
+    Check the C buttons (right stick, or the D-pad without one) and Z on L2.
+  - MAME4droid: its key settings should show the handheld's buttons as a custom profile ("custom
+    profile" toast in green). Check that coin and start work, and that Back still opens the exit
+    menu.
+  - Azahar: check whichever settings form the installed version has (newer: Settings > Controls
+    should list the gamepad buttons).

@@ -5,17 +5,22 @@ import io.github.marsinsanity.mainui.emu.setup.AzaharMapping
 import io.github.marsinsanity.mainui.emu.setup.ControlsProfile
 import io.github.marsinsanity.mainui.emu.setup.DolphinKeyNames
 import io.github.marsinsanity.mainui.emu.setup.DolphinMapping
+import io.github.marsinsanity.mainui.emu.setup.FlycastMapping
 import io.github.marsinsanity.mainui.emu.setup.Hotkey
 import io.github.marsinsanity.mainui.emu.setup.IniText
 import io.github.marsinsanity.mainui.emu.setup.KeySpec
+import io.github.marsinsanity.mainui.emu.setup.Mame4droidMapping
 import io.github.marsinsanity.mainui.emu.setup.MelonMapping
+import io.github.marsinsanity.mainui.emu.setup.MupenMapping
 import io.github.marsinsanity.mainui.emu.setup.SeedlessMapping
 import io.github.marsinsanity.mainui.emu.setup.PadInfo
 import io.github.marsinsanity.mainui.emu.setup.PpssppMapping
 import io.github.marsinsanity.mainui.emu.setup.PrefsXml
+import io.github.marsinsanity.mainui.emu.setup.RetroArchMapping
 import io.github.marsinsanity.mainui.emu.setup.Role
 import io.github.marsinsanity.mainui.emu.setup.WiiController
 import io.github.marsinsanity.mainui.emu.setup.WiiPointer
+import io.github.marsinsanity.mainui.emu.RetroArchCores
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -384,6 +389,102 @@ class EmulatorSetupTest {
         assertEquals("/storage/emulated/0/Azahar", AzaharMapping.userDir("content://com.android.externalstorage.documents/tree/primary%3AAzahar"))
         assertEquals("/storage/ABCD-1234/emu/3ds", AzaharMapping.userDir("content://com.android.externalstorage.documents/tree/ABCD-1234%3Aemu%2F3ds"))
         assertNull(AzaharMapping.userDir("content://x/tree/nocolon"))
+    }
+
+    @Test fun retroArchBindsPlayerOneAndTheHotkeyButton() {
+        val b = RetroArchMapping.binds(p, retroid)
+        assertEquals("\"96\"", b["input_player1_b_btn"]); assertEquals("\"97\"", b["input_player1_a_btn"])
+        assertEquals("\"h0up\"", b["input_player1_up_btn"]); assertEquals("\"h0right\"", b["input_player1_right_btn"])
+        assertEquals("\"+6\"", b["input_player1_l2_axis"]); assertEquals("\"+7\"", b["input_player1_r2_axis"])
+        assertEquals("\"-0\"", b["input_player1_l_x_minus_axis"]); assertEquals("\"+1\"", b["input_player1_l_y_plus_axis"])
+        assertEquals("\"+2\"", b["input_player1_r_x_plus_axis"]); assertEquals("\"-3\"", b["input_player1_r_y_minus_axis"])
+        assertEquals("\"109\"", b["input_enable_hotkey_btn"])
+        assertEquals("\"103\"", b["input_toggle_fast_forward_btn"]); assertEquals("\"102\"", b["input_screenshot_btn"])
+        assertEquals("\"nul\"", b["input_enable_hotkey"])
+        val plain = RetroArchMapping.binds(p, bare)
+        assertEquals("\"19\"", plain["input_player1_up_btn"]); assertEquals("\"nul\"", plain["input_player1_l2_axis"])
+        assertNull(plain["input_player1_r_x_plus_axis"])
+        // BRAKE / GAS triggers are RetroArch's axes 8 / 9; RX / RY right sticks it doesn't read.
+        val other = RetroArchMapping.binds(p, retroid.copy(axes = setOf(0, 1, 12, 13, 22, 23)))
+        assertEquals("\"+8\"", other["input_player1_l2_axis"]); assertEquals("\"+9\"", other["input_player1_r2_axis"])
+        assertNull(other["input_player1_r_x_plus_axis"])
+        val cfg = (1..120).joinToString("\n") { "setting_$it = \"x\"" } + "\ninput_player1_b_btn = \"nul\"\n"
+        val merged = RetroArchCores.mergeConfig(cfg, b)!!
+        assertTrue(merged.contains("input_player1_b_btn = \"96\"\n")); assertFalse(merged.contains("input_player1_b_btn = \"nul\""))
+    }
+
+    @Test fun flycastWritesItsMappingFiles() {
+        assertEquals("Android_Retroid Pocket Controller.cfg", FlycastMapping.fileName("Retroid Pocket Controller"))
+        assertEquals("Android_A-B-C_arcade.cfg", FlycastMapping.fileName("A/B:C", arcade = true))
+        val pad = retroid.copy(halfAxes = setOf(18, 17))
+        val ini = IniText(FlycastMapping.padFile("[emulator]\ndead_zone = 25\nversion = 2\n[dreamcast]\nbtn_a = 96\n", p, pad, arcade = false))
+        fun binds(section: String): List<String> = generateSequence(0) { it + 1 }.map { ini.get(section, "bind$it") }.takeWhile { it != null }.filterNotNull().toList()
+        val digital = binds("digital")
+        assertEquals("19:btn_dpad1_up", digital[0])
+        assertTrue(digital.containsAll(listOf("96:btn_a", "97:btn_b", "99:btn_x", "100:btn_y", "103:btn_c", "102:btn_z", "108:btn_start", "104:btn_trigger_left")))
+        assertFalse(digital.any { it.startsWith("109:") }) // the hotkey button alone does nothing
+        assertTrue(binds("analog").containsAll(listOf("0-:btn_analog_left", "1+:btn_analog_down", "11-:axis2_left", "14+:axis2_down", "17+:btn_trigger_left", "18+:btn_trigger_right")))
+        assertEquals(listOf("109,103:btn_fforward:1", "109,102:btn_screenshot:1"), binds("combo"))
+        assertEquals("25", ini.get("emulator", "dead_zone")); assertEquals("17,18", ini.get("emulator", "triggers"))
+        assertEquals("4", ini.get("emulator", "version")); assertFalse(ini.has("dreamcast"))
+        val arcade = IniText(FlycastMapping.padFile("", p, pad, arcade = true))
+        assertEquals("99:btn_c", (0..20).mapNotNull { arcade.get("digital", "bind$it") }.single { it.endsWith(":btn_c") })
+        assertTrue((0..20).mapNotNull { arcade.get("digital", "bind$it") }.contains("109:btn_d"))
+
+        val kb = IniText(FlycastMapping.keyboardFile("", "keys:KEYCODE_F1", "keys:KEYCODE_SHIFT_LEFT+KEYCODE_F4")!!)
+        assertEquals("131:btn_quick_save", kb.get("digital", "bind0")); assertNull(kb.get("digital", "bind1"))
+        assertEquals("59,134:btn_jump_state:1", kb.get("combo", "bind0"))
+        assertEquals("MainUI Keyboard", kb.get("emulator", "mapping_name")); assertEquals("", kb.get("emulator", "triggers"))
+        assertNull(FlycastMapping.keyboardFile("", null, null))
+        assertEquals("/sdcard/maps", FlycastMapping.mappingsPath("[config]\nDreamcast.MappingsPath = \"/sdcard/maps/\";/x\n"))
+        assertNull(FlycastMapping.mappingsPath("[config]\nDreamcast.MappingsPath = \n"))
+    }
+
+    @Test fun mupenProfileUsesItsCodesAndFallsBackWithoutSticks() {
+        fun pairs(pad: PadInfo) = MupenMapping.map(p, pad, "keys:KEYCODE_F1", "keys:KEYCODE_F2").split(',').map { it.substringBefore(':').toInt() to it.substringAfter(':').toInt() }
+        val m = pairs(retroid)
+        assertTrue(m.containsAll(listOf(7 to 96, 6 to 99, 10 to 97, 9 to 100, 4 to 108, 13 to 102, 12 to 103)))
+        assertTrue(m.containsAll(listOf(16 to -1, 17 to -2, 18 to -3, 19 to -4))) // stick on X / Y
+        assertTrue(m.containsAll(listOf(8 to -23, 9 to -24, 10 to -29, 11 to -30))) // C buttons on Z / RZ
+        assertTrue(m.containsAll(listOf(0 to 22, 3 to 19, 0 to -31, 1 to -32, 2 to -33, 3 to -34))) // d-pad and hat
+        assertTrue(m.containsAll(listOf(5 to 104, 5 to -35, 26 to 105, 26 to -37, 21 to 131, 22 to 132)))
+        assertEquals(m.map { it.second }.distinct(), m.map { it.second }) // one command per input
+        val noRight = pairs(bare)
+        assertTrue(noRight.containsAll(listOf(8 to 22, 9 to 21, 10 to 20, 11 to 19))); assertFalse(noRight.any { it.first in 0..3 })
+        val noSticks = pairs(PadInfo("Pad", 1, emptySet(), hasAccelerometer = false, hasGyroscope = false, hasVibrator = false))
+        assertTrue(noSticks.containsAll(listOf(16 to 22, 17 to 21, 18 to 20, 19 to 19)))
+        assertEquals("MainUI", MupenMapping.PROFILE)
+        assertEquals("Set up by MainUI", MupenMapping.section(p, retroid, null, null).v("comment"))
+    }
+
+    @Test fun mame4droidKeysGoUnderTheHandheldsId() {
+        val id = 1000
+        fun code(k: Int, dev: Int = id) = (dev shl 16) or k
+        val fresh = Mame4droidMapping.definedKeys(null, id, p)
+        assertTrue(fresh.endsWith(":"))
+        val keys = fresh.removeSuffix(":").split(':').map { it.toInt() }
+        assertEquals(72, keys.size)
+        assertEquals(listOf(code(19), code(20), code(21), code(22), code(97), code(96), code(99), code(100)), keys.take(8))
+        assertEquals(code(109), keys[14]); assertEquals(code(108), keys[15])
+        assertEquals(-1, keys[12]); assertEquals(-1, keys[16]); assertTrue(keys.drop(18).all { it == -1 })
+        // Another pad's block stays; this one's goes where it was, and its strays elsewhere go.
+        val other = (0 until 18).map { code(96 + it, 1001) }
+        val mine = listOf(code(19)) + List(17) { -1 }
+        val stray = listOf(code(50)) + List(17) { -1 }
+        val after = Mame4droidMapping.definedKeys((other + mine + stray + List(18) { -1 }).joinToString(":", postfix = ":"), id, p)
+            .removeSuffix(":").split(':').map { it.toInt() }
+        assertEquals(other, after.take(18)); assertEquals(code(97), after[18 + 4]); assertTrue(after.drop(36).all { it == -1 })
+        // MAME4droid's defaults (device 0) don't hold a block.
+        val defaults = listOf(19, 20, 21, 22, 97, 96) + List(66) { -1 }
+        assertEquals(code(19), Mame4droidMapping.definedKeys(defaults.joinToString(":"), id, p).split(':')[0].toInt())
+
+        val known = "{\"abc\":1000,\"nextPersistentID\":1001}"
+        assertEquals(1000 to null, Mame4droidMapping.deviceId(known, "abc"))
+        val (newId, json) = Mame4droidMapping.deviceId(known, "xyz")
+        assertEquals(1001, newId)
+        assertEquals(1002, org.json.JSONObject(json!!).getInt("nextPersistentID")); assertEquals(1001, org.json.JSONObject(json).getInt("xyz"))
+        assertEquals(1000, Mame4droidMapping.deviceId(null, "xyz").first)
+        assertEquals(1000, Mame4droidMapping.deviceId("{", "xyz").first)
     }
 
     @Test fun profileSurvivesJsonAndKnowsSuggestions() {

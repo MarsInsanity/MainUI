@@ -263,8 +263,11 @@ Differences from a Miyoo Mini, due to the screen:
 *Settings > Controls > Emulator controls* holds one set of buttons for every emulator, and
 **Set up emulators** writes it into each installed emulator MainUI knows (root: their settings are
 in their private folders). Each emulator is closed first, so it can't write its old settings back;
-a file's first change keeps the original next to it as `<file>.mainui.bak`. So far: **Dolphin**
-(official and MainUI builds; MMJR is left alone).
+a file's first change keeps the original next to it as `<file>.mainui.bak`. It sets up Dolphin,
+RetroArch, PPSSPP, ARMSX2, Azahar (and Lime3DS), melonDS, SeedlessDS, Flycast, Mupen64Plus AE / FZ
+and MAME4droid (2024), official and MainUI builds. Dolphin MMJR, DuckStation, DraStic, NetherSX2 and
+the other closed or unresearched emulators are left alone. An emulator that hasn't made its
+settings yet says so: start it once, then set up again.
 
 - **Handheld buttons**: which key each button sends (*Face buttons*: A at the bottom or on the
   right), or any button bound by pressing it (handhelds that report odd keys).
@@ -289,6 +292,23 @@ Dream Land, Donkey Kong Country Returns...; Classic Controller: Xenoblade, Monst
 GameCube controller: Smash Bros. Brawl, Mario Kart Wii); *Automatic* goes back to that.
 Dolphin names the handheld's controller by its Android name and number, so a controller plugged in
 before it at boot can take its number: set up again then.
+
+The others get player 1's controller by position (the bottom face button is the system's bottom
+one), the analog sticks and triggers the handheld has, and hotkeys:
+
+| Emulator | What it gets |
+|---|---|
+| RetroArch | `retroarch.cfg` player 1 binds (they win over the controller's autoconfig profile); hotkey button with fast forward and screenshot |
+| PPSSPP | `controls.ini [ControlMapping]` (and each game's own `_ppsspp.ini`); menu on L2, fast forward on R2 and the hotkey combo, screenshot combo, save / load keys |
+| ARMSX2 | its settings' `pad.map.*`; fast forward and screenshot combos, save / load keys; holding Back no longer exits |
+| Azahar | `config.ini [Controls]`, or the older settings form; fast forward on R3, swap screens on L3, save / load keys |
+| melonDS | `controller_config.json`; fast forward on R2, swap screens on L2, save / load keys |
+| SeedlessDS | its active key profile; fast forward on R3, swap screens on L3 |
+| Flycast | `mappings/Android_<controller>.cfg` (and `_arcade` for Naomi / Atomiswave: coin on Select); fast forward and screenshot combos (Flycast 2.6+); save / load on MainUI's keyboard (its own mapping file) |
+| Mupen64Plus | a "MainUI" controller profile chosen for player 1; C buttons on the right stick (the d-pad without one; the stick on the d-pad without sticks), Z on L2, fast forward on R2 (held), save / load keys. Hold-to-trigger for menu buttons is turned off so the load key works on a tap |
+| MAME4droid | its key map, under the id it keeps for the handheld's controller: button 1 on the right face button, coin on Select |
+
+Emulators without button combos put their hotkeys on buttons their system doesn't have.
 
 ## Emulators
 

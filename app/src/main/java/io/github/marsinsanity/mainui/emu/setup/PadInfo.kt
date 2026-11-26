@@ -19,6 +19,10 @@ data class PadInfo(
     val hasAccelerometer: Boolean,
     val hasGyroscope: Boolean,
     val hasVibrator: Boolean,
+    /** Android's descriptor for it: the same across reboots and reconnects. */
+    val descriptor: String = "",
+    /** Its joystick axes that rest at 0 (triggers): MotionRange min 0. */
+    val halfAxes: Set<Int> = emptySet(),
 ) {
     fun has(axis: Int) = axis in axes
 
@@ -70,6 +74,10 @@ data class PadInfo(
                 hasAccelerometer = sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null,
                 hasGyroscope = sm?.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null,
                 hasVibrator = vib?.hasVibrator() == true,
+                descriptor = pad.descriptor.orEmpty(),
+                halfAxes = pad.motionRanges.filter {
+                    it.source and InputDevice.SOURCE_CLASS_MASK == InputDevice.SOURCE_CLASS_JOYSTICK && it.min == 0f
+                }.map { it.axis }.toSet(),
             )
         }
     }

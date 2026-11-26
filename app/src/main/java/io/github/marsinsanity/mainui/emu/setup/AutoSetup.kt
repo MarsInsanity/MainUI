@@ -28,7 +28,10 @@ interface EmulatorSetup {
 object AutoSetup {
     private const val TAG = "MainUI.Setup"
 
-    val all: List<EmulatorSetup> = listOf(DolphinSetup, PpssppSetup, Armsx2Setup, AzaharSetup, MelonSetup, SeedlessSetup)
+    val all: List<EmulatorSetup> = listOf(
+        DolphinSetup, RetroArchSetup, PpssppSetup, Armsx2Setup, AzaharSetup, MelonSetup, SeedlessSetup,
+        FlycastSetup, MupenSetup, Mame4droidSetup,
+    )
 
     data class Result(val label: String, val ok: Boolean, val message: String)
 
