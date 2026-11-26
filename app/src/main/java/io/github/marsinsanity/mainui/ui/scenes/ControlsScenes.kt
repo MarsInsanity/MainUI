@@ -223,7 +223,7 @@ internal object WiiControllerOption {
             if (id == null) { host.toast("Couldn't read the game's disc id", 2500); return@io }
             val own = Controls.wiiOwn(id)
             val auto = ControlsProfile.suggestion(id) ?: Controls.profile.wiiDefault
-            val items = mutableListOf(UiItem("Automatic (${auto.label})", mark = own == null, onSelect = { choose(host, id, null) }))
+            val items = mutableListOf(UiItem("Automatic (${auto.short})", mark = own == null, onSelect = { choose(host, id, null) }))
             for (c in WiiController.entries) items += UiItem(c.label, mark = own == c, onSelect = { choose(host, id, c) })
             host.push(PopMenuScene(host, name, items))
         }

@@ -89,7 +89,7 @@ object DolphinSetup : EmulatorSetup {
             else -> "no motion controls"
         }
         return "GameCube controller, Wii Remote (${p.wiiDefault.label}, $motion)" +
-            (if (games > 0) ", $games Wii game${if (games > 1) "s" else ""} set to their own controller" else "") + ", hotkeys"
+            (if (games > 0) ", ${if (games > 1) "$games Wii games" else "1 Wii game"} with a controller of ${if (games > 1) "their" else "its"} own" else "") + ", hotkeys"
     }
 
     /** One Wii game's controller (its options in MainUI). */
