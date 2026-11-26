@@ -10,6 +10,7 @@ import io.github.marsinsanity.mainui.emu.setup.KeySpec
 import io.github.marsinsanity.mainui.emu.setup.MelonMapping
 import io.github.marsinsanity.mainui.emu.setup.SeedlessMapping
 import io.github.marsinsanity.mainui.emu.setup.PadInfo
+import io.github.marsinsanity.mainui.emu.setup.PpssppMapping
 import io.github.marsinsanity.mainui.emu.setup.PrefsXml
 import io.github.marsinsanity.mainui.emu.setup.Role
 import io.github.marsinsanity.mainui.emu.setup.WiiController
@@ -295,6 +296,48 @@ class EmulatorSetupTest {
         assertEquals(107, e0["s_1"]); assertEquals(106, e0["s_4"]); assertEquals(131, e0["s_2"]); assertEquals(132, e0["s_3"])
         val e2 = SeedlessMapping.entries(p, 2, null, null).toMap()
         assertEquals(97, e2["p2_k_4"]); assertNull(e2["k_4"]); assertNull(e2["p2_s_2"])
+    }
+
+    // ---- PPSSPP --------------------------------------------------------------------------------
+
+    @Test fun ppssppBindsPadKeysAxesCombosAndKeyboardKeys() {
+        val e = PpssppMapping.entries(p, retroid, "keys:KEYCODE_F2", "keys:KEYCODE_SHIFT_LEFT+KEYCODE_F4").toMap()
+        assertEquals("10-96", e["Cross"]); assertEquals("10-97", e["Circle"])
+        assertEquals("10-99", e["Square"]); assertEquals("10-100", e["Triangle"])
+        assertEquals("10-19,10-4033", e["Up"]); assertEquals("10-22,10-4030", e["Right"])
+        assertEquals("10-102", e["L"]); assertEquals("10-108", e["Start"])
+        assertEquals("10-4003", e["An.Up"]); assertEquals("10-4000", e["An.Right"])
+        assertEquals("10-4029", e["RightAn.Up"]); assertEquals("10-4022", e["RightAn.Right"])
+        assertEquals("10-104,10-4034", e["Pause"])
+        assertEquals("10-105,10-4036,10-109:10-103", e["Fast-forward"])
+        assertEquals("10-109:10-102", e["Screenshot"])
+        assertEquals("0-132,1-132", e["Save State"])
+        assertEquals("0-59:0-134,1-59:1-134", e["Load State"])
+        // Only "device-code" tokens: a malformed one crashes PPSSPP 1.20 when it loads them.
+        for ((k, v) in e) for (t in v.split(',')) for (c in t.split(':'))
+            assertTrue("$k = $v", Regex("\\d+-\\d+").matches(c))
+        val bareE = PpssppMapping.entries(p, bare, null, null).toMap()
+        assertEquals("10-19", bareE["Up"]); assertNull(bareE["RightAn.Up"]); assertNull(bareE["Save State"])
+    }
+
+    @Test fun ppssppFindsItsFolderFromPathsAndStorageUris() {
+        assertEquals("/storage/emulated/0/Games/PSP", PpssppMapping.memstickPath(
+            "content://com.android.externalstorage.documents/tree/primary%3AGames%2FPSP"))
+        assertEquals("/storage/1234-ABCD/emu", PpssppMapping.memstickPath(
+            "content://com.android.externalstorage.documents/tree/1234-ABCD%3A/document/1234-ABCD%3Aemu"))
+        assertEquals("/storage/emulated/0", PpssppMapping.memstickPath("content://com.android.externalstorage.documents/tree/primary%3A"))
+        assertEquals("/storage/emulated/0/Android/data/org.ppsspp.ppsspp/files",
+            PpssppMapping.memstickPath("/storage/emulated/0/Android/data/org.ppsspp.ppsspp/files/"))
+        assertNull(PpssppMapping.memstickPath("content://com.google.android.apps.docs.storage/tree/x"))
+        assertEquals("/storage/emulated/0/PSP", PpssppMapping.pspFolder("/storage/emulated/0"))
+        assertEquals("/storage/emulated/0/Games/psp", PpssppMapping.pspFolder("/storage/emulated/0/Games/psp"))
+    }
+
+    @Test fun iniKeepsAByteOrderMarkAndFindsSectionsWhateverTheirCase() {
+        val ini = IniText("\uFEFF[ControlMapping]\nCross = 10-96\n[Other]\nA = 1\n")
+        ini.replaceSection("controlmapping", listOf("Cross" to "10-97"))
+        assertEquals("\uFEFF[ControlMapping]\nCross = 10-97\n[Other]\nA = 1\n", ini.toString())
+        assertEquals(listOf("ControlMapping", "Other"), ini.sectionNames)
     }
 
     @Test fun profileSurvivesJsonAndKnowsSuggestions() {
