@@ -269,8 +269,8 @@ and MAME4droid (2024), official and MainUI builds. Dolphin MMJR, DuckStation, Dr
 the other closed or unresearched emulators are left alone. An emulator that hasn't made its
 settings yet says so: start it once, then set up again.
 
-- **Handheld buttons**: which key each button sends (*Face buttons*: A at the bottom or on the
-  right), or any button bound by pressing it (handhelds that report odd keys; a d-pad reported as
+- **Handheld buttons**: which key each button sends (*Face buttons*: press the bottom face
+  button, and the four are set by whether it sends A or B), or any button bound by pressing it (handhelds that report odd keys; a d-pad reported as
   a hat counts as its keys), and which axes each analog stick reports, bound by moving it
   (*Automatic*: X / Y on the left, Z / RZ or RX / RY on the right).
 - **Hotkeys**: a hotkey button (Select) held with another button: fast forward (R1), screenshot
@@ -295,8 +295,8 @@ GameCube controller: Smash Bros. Brawl, Mario Kart Wii); *Automatic* goes back t
 Dolphin names the handheld's controller by its Android name and number, so a controller plugged in
 before it at boot can take its number: set up again then.
 
-The others get player 1's controller by position (the bottom face button is the system's bottom
-one), the analog sticks and triggers the handheld has, and hotkeys:
+The others get player 1's controller by position, each system laid out like its own controller
+(the bottom face button is A on a GameCube or Dreamcast pad, Cross on a PSP, B on a DS or 3DS), the analog sticks and triggers the handheld has, and hotkeys:
 
 | Emulator | What it gets |
 |---|---|

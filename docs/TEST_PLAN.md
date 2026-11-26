@@ -208,6 +208,8 @@ GameCube game on the Pocket 2+, and Wii games on the Pocket Mini.
   - in-game menu Save / Load with official Dolphin (MainUI presses F1 / F2 on its keyboard; needs
     root).
 - **Handheld buttons**:
+  - *Face buttons*: press the bottom face button; the row should say what it sends, and the four
+    face rows should follow (bottom B means right A, left Y, top X);
   - bind a button by pressing it; the row should show the new key and the next Set up should use it;
   - bind a D-pad direction by pressing the D-pad: the row should say Up / Down / Left / Right;
   - bind each stick by moving it: the row should say its axes (X / Y, Z / RZ), and *Automatic*

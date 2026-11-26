@@ -24,6 +24,9 @@ import io.github.marsinsanity.mainui.ui.Scene
 import io.github.marsinsanity.mainui.ui.SceneHost
 import io.github.marsinsanity.mainui.ui.UiItem
 
+/** What the handheld's bottom face button sends ("bottom button sends A"). */
+internal fun faceLabel(p: ControlsProfile) = "bottom button sends ${keyLabel(p.key(Role.SOUTH))}"
+
 /** A key code as the button it is on a gamepad ("A", "L3", "Select"). */
 internal fun keyLabel(code: Int): String = when (code) {
     KeyEvent.KEYCODE_BUTTON_THUMBL -> "L3"
@@ -61,7 +64,7 @@ class EmulatorControlsScene(host: SceneHost) : ListScene(host, "Emulator control
         }
         list.set(listOf(
             action("Set up emulators", setupSub) { setUp() },
-            action("Handheld buttons...", if (p.nintendoFace) "A on the right" else "A at the bottom") { host.push(HandheldButtonsScene(host)) },
+            action("Handheld buttons...", faceLabel(p)) { host.push(HandheldButtonsScene(host)) },
             action("Hotkeys...", "${keyLabel(p.hotkeyButton)} + button") { host.push(HotkeysScene(host)) },
             multi("Wii: default controller", WiiController.entries.map { it.name to it.short }, { p.wiiDefault.name }) { v ->
                 update { it.copy(wiiDefault = WiiController.valueOf(v)) }
@@ -108,10 +111,20 @@ class HandheldButtonsScene(host: SceneHost) : ListScene(host, "Handheld buttons"
 
     private fun build() {
         val p = Controls.profile
+        // Found by pressing: whether a handheld's bottom button sends A or B has nothing to do with
+        // its labels, and "A at the bottom" read as where the games' A goes.
         val items = mutableListOf(
-            multi("Face buttons", listOf("xbox" to "A at the bottom", "nintendo" to "A on the right"),
-                { if (p.nintendoFace) "nintendo" else "xbox" }) { v ->
-                Controls.profile = Controls.profile.withNintendoFace(v == "nintendo"); build()
+            action("Face buttons", faceLabel(p)) {
+                host.push(KeyCaptureScene(host, "the bottom face button") { code ->
+                    Controls.profile = Controls.profile.let {
+                        when (code) {
+                            KeyEvent.KEYCODE_BUTTON_A -> it.withNintendoFace(false)
+                            KeyEvent.KEYCODE_BUTTON_B -> it.withNintendoFace(true)
+                            else -> it.copy(keys = it.keys + (Role.SOUTH to code))
+                        }
+                    }
+                    build()
+                })
             },
         )
         for (r in Role.entries) items += action(r.label, keyLabel(p.key(r))) {
