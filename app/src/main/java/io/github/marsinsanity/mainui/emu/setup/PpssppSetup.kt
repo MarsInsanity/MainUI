@@ -57,11 +57,11 @@ internal object PpssppMapping {
         e += "Select" to btn(p, pad, Role.SELECT)
         e += "L" to btn(p, pad, Role.L1)
         e += "R" to btn(p, pad, Role.R1)
-        if (pad.hasLeftStick) {
-            e += "An.Up" to listOf(axis(MotionEvent.AXIS_Y, false))
-            e += "An.Down" to listOf(axis(MotionEvent.AXIS_Y, true))
-            e += "An.Left" to listOf(axis(MotionEvent.AXIS_X, false))
-            e += "An.Right" to listOf(axis(MotionEvent.AXIS_X, true))
+        pad.leftStick?.let { (x, y) ->
+            e += "An.Up" to listOf(axis(y, false))
+            e += "An.Down" to listOf(axis(y, true))
+            e += "An.Left" to listOf(axis(x, false))
+            e += "An.Right" to listOf(axis(x, true))
         }
         pad.rightStick?.let { (x, y) ->
             e += "RightAn.Up" to listOf(axis(y, false))

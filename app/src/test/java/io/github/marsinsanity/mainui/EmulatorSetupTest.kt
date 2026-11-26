@@ -18,6 +18,7 @@ import io.github.marsinsanity.mainui.emu.setup.PpssppMapping
 import io.github.marsinsanity.mainui.emu.setup.PrefsXml
 import io.github.marsinsanity.mainui.emu.setup.RetroArchMapping
 import io.github.marsinsanity.mainui.emu.setup.Role
+import io.github.marsinsanity.mainui.emu.setup.Stick
 import io.github.marsinsanity.mainui.emu.setup.WiiController
 import io.github.marsinsanity.mainui.emu.setup.WiiPointer
 import io.github.marsinsanity.mainui.emu.RetroArchCores
@@ -485,6 +486,27 @@ class EmulatorSetupTest {
         assertEquals(1002, org.json.JSONObject(json!!).getInt("nextPersistentID")); assertEquals(1001, org.json.JSONObject(json).getInt("xyz"))
         assertEquals(1000, Mame4droidMapping.deviceId(null, "xyz").first)
         assertEquals(1000, Mame4droidMapping.deviceId("{", "xyz").first)
+    }
+
+    @Test fun sticksFollowTheProfile() {
+        assertEquals(Stick.XY, Stick.of(1)); assertEquals(Stick.Z_RZ, Stick.of(14)); assertEquals(Stick.RX_RY, Stick.of(12)); assertNull(Stick.of(15))
+        // Automatic: X / Y on the left, Z / RZ (else RX / RY) on the right.
+        assertEquals(0 to 1, retroid.leftStick); assertEquals(11 to 14, retroid.rightStick)
+        // Swapped, each writer follows.
+        val swapped = retroid.withSticks(p.copy(leftStick = Stick.Z_RZ, rightStick = Stick.XY))
+        assertEquals(11 to 14, swapped.leftStick); assertEquals(0 to 1, swapped.rightStick)
+        assertEquals("10-4029", PpssppMapping.entries(p, swapped, null, null).v("An.Up"))
+        assertEquals("\"+2\"", RetroArchMapping.binds(p, swapped)["input_player1_l_x_plus_axis"])
+        assertEquals("\"-1\"", RetroArchMapping.binds(p, swapped)["input_player1_r_y_minus_axis"])
+        // A left stick on the right one's usual axes leaves the automatic right stick to RX / RY.
+        val both = retroid.copy(axes = retroid.axes + setOf(12, 13)).withSticks(p.copy(leftStick = Stick.Z_RZ))
+        assertEquals(12 to 13, both.rightStick)
+        assertNull(RetroArchMapping.binds(p, both)["input_player1_r_x_plus_axis"]) // RetroArch doesn't read RX / RY
+        assertNull(retroid.copy(axes = setOf(11, 14)).withSticks(p.copy(rightStick = Stick.Z_RZ)).leftStick)
+        // Automatic sticks keep the profile's JSON as it was before sticks existed.
+        assertFalse(p.toJson().has("leftStick"))
+        val q = p.copy(leftStick = Stick.RX_RY)
+        assertEquals(q, ControlsProfile.fromJson(org.json.JSONObject(q.toJson().toString())))
     }
 
     @Test fun profileSurvivesJsonAndKnowsSuggestions() {

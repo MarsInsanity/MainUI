@@ -21,6 +21,14 @@ internal object RetroArchMapping {
         else -> null
     }
 
+    private fun stickAxis(androidAxis: Int): Int? = when (androidAxis) {
+        MotionEvent.AXIS_X -> 0
+        MotionEvent.AXIS_Y -> 1
+        MotionEvent.AXIS_Z -> 2
+        MotionEvent.AXIS_RZ -> 3
+        else -> null
+    }
+
     fun binds(p: ControlsProfile, pad: PadInfo): Map<String, String> {
         val m = linkedMapOf<String, String>()
         fun btn(name: String, r: Role) { m["input_player1_${name}_btn"] = q(p.key(r)) }
@@ -32,13 +40,11 @@ internal object RetroArchMapping {
             m["input_player1_${name}_btn"] = q(if (pad.hasHat && p.key(r) == r.defaultKey) "h0$name" else p.key(r))
         for ((name, r, a) in listOf(Triple("l2", Role.L2, pad.leftTrigger), Triple("r2", Role.R2, pad.rightTrigger)))
             m["input_player1_${name}_axis"] = axis(a)?.takeIf { p.key(r) == r.defaultKey }?.let { q("+$it") } ?: q("nul")
-        if (pad.hasLeftStick) {
-            m["input_player1_l_x_plus_axis"] = q("+0"); m["input_player1_l_x_minus_axis"] = q("-0")
-            m["input_player1_l_y_plus_axis"] = q("+1"); m["input_player1_l_y_minus_axis"] = q("-1")
-        }
-        if (pad.rightStick == MotionEvent.AXIS_Z to MotionEvent.AXIS_RZ) {
-            m["input_player1_r_x_plus_axis"] = q("+2"); m["input_player1_r_x_minus_axis"] = q("-2")
-            m["input_player1_r_y_plus_axis"] = q("+3"); m["input_player1_r_y_minus_axis"] = q("-3")
+        for ((side, stick) in listOf("l" to pad.leftStick, "r" to pad.rightStick)) {
+            val x = stick?.first?.let(::stickAxis) ?: continue
+            val y = stickAxis(stick.second) ?: continue
+            m["input_player1_${side}_x_plus_axis"] = q("+$x"); m["input_player1_${side}_x_minus_axis"] = q("-$x")
+            m["input_player1_${side}_y_plus_axis"] = q("+$y"); m["input_player1_${side}_y_minus_axis"] = q("-$y")
         }
         m["input_enable_hotkey_btn"] = q(p.hotkeyButton)
         m["input_toggle_fast_forward_btn"] = q(p.hotkey(Hotkey.FAST_FORWARD))

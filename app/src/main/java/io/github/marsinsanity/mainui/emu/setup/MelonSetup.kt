@@ -37,9 +37,9 @@ internal object MelonMapping {
      * A d-pad direction: the hat when the handheld has one (melonDS then takes every stick and hat
      * event, so Android never turns the hat into d-pad keys), else the key; the left stick second.
      */
-    private fun direction(p: ControlsProfile, pad: PadInfo, r: Role, hatAxis: Int, stickAxis: Int, positive: Boolean): Pair<Assign, Assign> {
+    private fun direction(p: ControlsProfile, pad: PadInfo, r: Role, hatAxis: Int, vertical: Boolean, positive: Boolean): Pair<Assign, Assign> {
         val first = if (pad.hasHat && p.key(r) == r.defaultKey) Assign.Axis(hatAxis, positive) else Assign.Key(p.key(r))
-        val second = if (pad.hasLeftStick) Assign.Axis(stickAxis, positive) else Assign.None
+        val second = pad.leftStick?.let { (x, y) -> Assign.Axis(if (vertical) y else x, positive) } ?: Assign.None
         return first to second
     }
 
@@ -53,10 +53,10 @@ internal object MelonMapping {
             "B" to button(p, pad, Role.SOUTH),
             "X" to button(p, pad, Role.NORTH),
             "Y" to button(p, pad, Role.WEST),
-            "LEFT" to direction(p, pad, Role.LEFT, MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_X, false),
-            "RIGHT" to direction(p, pad, Role.RIGHT, MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_X, true),
-            "UP" to direction(p, pad, Role.UP, MotionEvent.AXIS_HAT_Y, MotionEvent.AXIS_Y, false),
-            "DOWN" to direction(p, pad, Role.DOWN, MotionEvent.AXIS_HAT_Y, MotionEvent.AXIS_Y, true),
+            "LEFT" to direction(p, pad, Role.LEFT, MotionEvent.AXIS_HAT_X, vertical = false, positive = false),
+            "RIGHT" to direction(p, pad, Role.RIGHT, MotionEvent.AXIS_HAT_X, vertical = false, positive = true),
+            "UP" to direction(p, pad, Role.UP, MotionEvent.AXIS_HAT_Y, vertical = true, positive = false),
+            "DOWN" to direction(p, pad, Role.DOWN, MotionEvent.AXIS_HAT_Y, vertical = true, positive = true),
             "L" to button(p, pad, Role.L1),
             "R" to button(p, pad, Role.R1),
             "START" to button(p, pad, Role.START),

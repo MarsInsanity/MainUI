@@ -54,7 +54,7 @@ internal object FlycastMapping {
         d += p.key(Role.L2) to "btn_trigger_left"
         d += p.key(Role.R2) to "btn_trigger_right"
         val a = mutableListOf<String>()
-        if (pad.hasLeftStick) a += listOf("0-:btn_analog_left", "0+:btn_analog_right", "1-:btn_analog_up", "1+:btn_analog_down")
+        pad.leftStick?.let { (x, y) -> a += listOf("$x-:btn_analog_left", "$x+:btn_analog_right", "$y-:btn_analog_up", "$y+:btn_analog_down") }
         pad.rightStick?.let { (x, y) -> a += listOf("$x-:axis2_left", "$x+:axis2_right", "$y-:axis2_up", "$y+:axis2_down") }
         if (p.key(Role.L2) == Role.L2.defaultKey) pad.leftTrigger?.let { a += "$it+:btn_trigger_left" }
         if (p.key(Role.R2) == Role.R2.defaultKey) pad.rightTrigger?.let { a += "$it+:btn_trigger_right" }

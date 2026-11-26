@@ -9,7 +9,9 @@ import io.github.marsinsanity.mainui.emu.setup.AutoSetup
 import io.github.marsinsanity.mainui.emu.setup.Controls
 import io.github.marsinsanity.mainui.emu.setup.ControlsProfile
 import io.github.marsinsanity.mainui.emu.setup.Hotkey
+import io.github.marsinsanity.mainui.emu.setup.PadInfo
 import io.github.marsinsanity.mainui.emu.setup.Role
+import io.github.marsinsanity.mainui.emu.setup.Stick
 import io.github.marsinsanity.mainui.emu.setup.WiiController
 import io.github.marsinsanity.mainui.emu.setup.WiiPointer
 import io.github.marsinsanity.mainui.scraper.RomIdent
@@ -115,8 +117,19 @@ class HandheldButtonsScene(host: SceneHost) : ListScene(host, "Handheld buttons"
         for (r in Role.entries) items += action(r.label, keyLabel(p.key(r))) {
             host.push(KeyCaptureScene(host, r.label) { code -> Controls.profile = Controls.profile.let { it.copy(keys = it.keys + (r to code)) }; build() })
         }
+        val pad = PadInfo.detect(host.hostContext)?.withSticks(p)
+        fun axes(a: Pair<Int, Int>?) = a?.let { Stick.entries.firstOrNull { s -> s.axes == it }?.label } ?: "none"
+        for ((name, choice, found) in listOf(
+            Triple("Left stick", p.leftStick, pad?.leftStick), Triple("Right stick", p.rightStick, pad?.rightStick),
+        )) items += action(name, if (choice == Stick.AUTO) "Automatic: ${axes(found)}" else choice.label) {
+            host.push(KeyCaptureScene(host, "the ${name.lowercase()}", stick = true) { axis ->
+                val s = Stick.of(axis) ?: return@KeyCaptureScene
+                Controls.profile = Controls.profile.let { if (name == "Left stick") it.copy(leftStick = s) else it.copy(rightStick = s) }
+                build()
+            })
+        }
         items += action("Reset to defaults") {
-            Controls.profile = Controls.profile.copy(keys = ControlsProfile().keys); build()
+            Controls.profile = Controls.profile.copy(keys = ControlsProfile().keys, leftStick = Stick.AUTO, rightStick = Stick.AUTO); build()
         }
         list.set(items, keepIndex = true)
     }
@@ -149,10 +162,13 @@ class HotkeysScene(host: SceneHost) : ListScene(host, "Hotkeys") {
 }
 
 /**
- * "Press the button for ...": the next key (or trigger) pressed is the answer, whichever it is,
- * so B can be bound too. Nothing pressed for a few seconds, or a tap, cancels.
+ * "Press the button for ...": the next key (or trigger, or d-pad reported as a hat) pressed is
+ * the answer, whichever it is, so B can be bound too. With [stick], the axis of the first stick
+ * moved, and a button cancels. Nothing pressed for a few seconds, or a tap, cancels.
  */
-class KeyCaptureScene(host: SceneHost, private val what: String, private val onKey: (Int) -> Unit) : Scene(host) {
+class KeyCaptureScene(
+    host: SceneHost, private val what: String, private val stick: Boolean = false, private val onKey: (Int) -> Unit,
+) : Scene(host) {
     override val isOverlay = true
     private val until = SystemClock.uptimeMillis() + TIMEOUT_MS
     /** The key taken, closed on its release so that doesn't reach the list below. */
@@ -160,7 +176,8 @@ class KeyCaptureScene(host: SceneHost, private val what: String, private val onK
 
     override fun draw(g: Gfx) {
         val left = ((until - SystemClock.uptimeMillis()) / 1000 + 1).coerceAtLeast(0)
-        g.dialog("Press a button", "Press the button for $what.\n\nCancels in $left s, or tap the screen.")
+        if (stick) g.dialog("Move the stick", "Move $what.\n\nCancels in $left s, or press a button or tap the screen.")
+        else g.dialog("Press a button", "Press the button for $what.\n\nCancels in $left s, or tap the screen.")
         g.footer(null, null, covering = true)
     }
 
@@ -186,21 +203,48 @@ class KeyCaptureScene(host: SceneHost, private val what: String, private val onK
         when (e.keyCode) {
             KeyEvent.KEYCODE_HOME, KeyEvent.KEYCODE_POWER, KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN -> return false
         }
+        if (stick) {
+            // (On the press: the release of the button that opened this would cancel it at once.)
+            if (e.action == KeyEvent.ACTION_DOWN && e.repeatCount == 0 && taken == null) cancelKey = e.keyCode
+            else if (e.action == KeyEvent.ACTION_UP && e.keyCode == cancelKey) close()
+            return true
+        }
         if (e.action == KeyEvent.ACTION_DOWN && e.repeatCount == 0) take(e.keyCode)
         else if (e.action == KeyEvent.ACTION_UP && e.keyCode == taken) close()
         return true
     }
 
-    private var trigger = 0
+    /** The key was a trigger or hat direction, closed when the axes let go. */
+    private var byAxis = false
 
     override fun onRawMotion(e: MotionEvent): Boolean {
+        if (stick) return stickMotion(e)
         val lt = maxOf(e.getAxisValue(MotionEvent.AXIS_LTRIGGER), e.getAxisValue(MotionEvent.AXIS_BRAKE))
         val rt = maxOf(e.getAxisValue(MotionEvent.AXIS_RTRIGGER), e.getAxisValue(MotionEvent.AXIS_GAS))
-        when {
-            taken == null && lt > 0.6f -> { trigger = KeyEvent.KEYCODE_BUTTON_L2; take(trigger) }
-            taken == null && rt > 0.6f -> { trigger = KeyEvent.KEYCODE_BUTTON_R2; take(trigger) }
-            taken != null && taken == trigger && lt < 0.2f && rt < 0.2f -> close()
+        // A d-pad reported as a hat stands for its keys, as the emulator setups expect.
+        val hx = e.getAxisValue(MotionEvent.AXIS_HAT_X)
+        val hy = e.getAxisValue(MotionEvent.AXIS_HAT_Y)
+        val code = when {
+            lt > 0.6f -> KeyEvent.KEYCODE_BUTTON_L2
+            rt > 0.6f -> KeyEvent.KEYCODE_BUTTON_R2
+            hy < -0.5f -> KeyEvent.KEYCODE_DPAD_UP
+            hy > 0.5f -> KeyEvent.KEYCODE_DPAD_DOWN
+            hx < -0.5f -> KeyEvent.KEYCODE_DPAD_LEFT
+            hx > 0.5f -> KeyEvent.KEYCODE_DPAD_RIGHT
+            else -> null
         }
+        if (taken == null && code != null) { byAxis = true; take(code) }
+        else if (byAxis && lt < 0.2f && rt < 0.2f && kotlin.math.abs(hx) < 0.5f && kotlin.math.abs(hy) < 0.5f) close()
+        return true
+    }
+
+    /** With [stick]: the button pressed to cancel, closed on its release. */
+    private var cancelKey: Int? = null
+
+    private fun stickMotion(e: MotionEvent): Boolean {
+        val moved = STICK_AXES.map { it to e.getAxisValue(it) }
+        if (taken == null) moved.filter { kotlin.math.abs(it.second) > 0.6f }.maxByOrNull { kotlin.math.abs(it.second) }?.let { take(it.first) }
+        else if (moved.all { kotlin.math.abs(it.second) < 0.2f }) close()
         return true
     }
 
@@ -209,6 +253,7 @@ class KeyCaptureScene(host: SceneHost, private val what: String, private val onK
 
     companion object {
         private const val TIMEOUT_MS = 10_000L
+        private val STICK_AXES = Stick.entries.mapNotNull { it.axes }.flatMap { listOf(it.first, it.second) }
     }
 }
 

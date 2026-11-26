@@ -23,17 +23,25 @@ data class PadInfo(
     val descriptor: String = "",
     /** Its joystick axes that rest at 0 (triggers): MotionRange min 0. */
     val halfAxes: Set<Int> = emptySet(),
+    /** The sticks as the controls profile has them ([withSticks]). */
+    val leftStickChoice: Stick = Stick.AUTO,
+    val rightStickChoice: Stick = Stick.AUTO,
 ) {
     fun has(axis: Int) = axis in axes
 
-    /** The right stick's (x, y) axes, null without one. */
-    val rightStick: Pair<Int, Int>? get() = when {
-        has(MotionEvent.AXIS_Z) && has(MotionEvent.AXIS_RZ) -> MotionEvent.AXIS_Z to MotionEvent.AXIS_RZ
-        has(MotionEvent.AXIS_RX) && has(MotionEvent.AXIS_RY) -> MotionEvent.AXIS_RX to MotionEvent.AXIS_RY
-        else -> null
-    }
+    /** The first of [candidates] it reports, not the [other] stick's. */
+    private fun auto(candidates: List<Stick>, other: Stick): Pair<Int, Int>? =
+        candidates.firstOrNull { s -> s != other && s.axes?.let { has(it.first) && has(it.second) } == true }?.axes
 
-    val hasLeftStick get() = has(MotionEvent.AXIS_X) && has(MotionEvent.AXIS_Y)
+    /** The left stick's (x, y) axes, null without one. */
+    val leftStick: Pair<Int, Int>? get() = leftStickChoice.axes ?: auto(listOf(Stick.XY), rightStickChoice)
+
+    /** The right stick's (x, y) axes, null without one. */
+    val rightStick: Pair<Int, Int>? get() = rightStickChoice.axes ?: auto(listOf(Stick.Z_RZ, Stick.RX_RY), leftStickChoice)
+
+    val hasLeftStick get() = leftStick != null
+
+    fun withSticks(p: ControlsProfile) = copy(leftStickChoice = p.leftStick, rightStickChoice = p.rightStick)
     val hasHat get() = has(MotionEvent.AXIS_HAT_X) && has(MotionEvent.AXIS_HAT_Y)
     val leftTrigger: Int? get() = listOf(MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_BRAKE).firstOrNull { has(it) }
     val rightTrigger: Int? get() = listOf(MotionEvent.AXIS_RTRIGGER, MotionEvent.AXIS_GAS).firstOrNull { has(it) }

@@ -43,8 +43,8 @@ object AutoSetup {
 
     fun runAll(ctx: Context): List<Result> {
         if (!Root.available()) return listOf(Result("Root", false, "Setting up emulators needs root (their settings are in their private folders)."))
-        val pad = PadInfo.detect(ctx) ?: return listOf(Result("Controller", false, "No built-in controller found."))
         val p = Controls.profile
+        val pad = PadInfo.detect(ctx)?.withSticks(p) ?: return listOf(Result("Controller", false, "No built-in controller found."))
         val apps = installed()
         if (apps.isEmpty()) return listOf(Result("Emulators", false, "None of the emulators MainUI can set up is installed ($names)."))
         val wii by lazy { wiiDiscIds() }

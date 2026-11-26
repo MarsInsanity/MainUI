@@ -1,6 +1,7 @@
 package io.github.marsinsanity.mainui.emu.setup
 
 import android.view.KeyEvent
+import android.view.MotionEvent
 import org.json.JSONObject
 
 /** A button of the handheld, by position: Settings > Emulator controls says which key it sends. */
@@ -47,6 +48,21 @@ enum class WiiPointer(val label: String, val short: String) {
     TOUCH("Touchscreen", "Touch"),
 }
 
+/** The axes an analog stick reports (Settings > Emulator controls > Handheld buttons). */
+enum class Stick(val label: String, val axes: Pair<Int, Int>?) {
+    /** Found by the usual axes: X / Y on the left, Z / RZ or RX / RY on the right. */
+    AUTO("Automatic", null),
+    XY("X / Y", MotionEvent.AXIS_X to MotionEvent.AXIS_Y),
+    Z_RZ("Z / RZ", MotionEvent.AXIS_Z to MotionEvent.AXIS_RZ),
+    RX_RY("RX / RY", MotionEvent.AXIS_RX to MotionEvent.AXIS_RY),
+    ;
+
+    companion object {
+        /** The stick with [axis] among its axes. */
+        fun of(axis: Int): Stick? = entries.firstOrNull { s -> s.axes?.let { axis == it.first || axis == it.second } == true }
+    }
+}
+
 /**
  * The buttons and choices MainUI sets every emulator up with (Settings > Emulator controls >
  * Set up emulators). Kept as JSON in the settings.
@@ -60,6 +76,8 @@ data class ControlsProfile(
     val wiiPointer: WiiPointer = WiiPointer.STICK,
     /** The Wii Remote's accelerometer and gyroscope follow the handheld's own (shake, tilt). */
     val wiiMotion: Boolean = true,
+    val leftStick: Stick = Stick.AUTO,
+    val rightStick: Stick = Stick.AUTO,
 ) {
     fun key(r: Role): Int = keys[r] ?: r.defaultKey
     fun hotkey(h: Hotkey): Int = hotkeys[h] ?: h.defaultKey
@@ -79,6 +97,9 @@ data class ControlsProfile(
         put("wiiDefault", wiiDefault.name)
         put("wiiPointer", wiiPointer.name)
         put("wiiMotion", wiiMotion)
+        // (Left out when automatic: a profile saved before these existed stays the same JSON.)
+        if (leftStick != Stick.AUTO) put("leftStick", leftStick.name)
+        if (rightStick != Stick.AUTO) put("rightStick", rightStick.name)
     }
 
     companion object {
@@ -96,6 +117,8 @@ data class ControlsProfile(
                 wiiDefault = runCatching { WiiController.valueOf(o.optString("wiiDefault")) }.getOrDefault(d.wiiDefault),
                 wiiPointer = runCatching { WiiPointer.valueOf(o.optString("wiiPointer")) }.getOrDefault(d.wiiPointer),
                 wiiMotion = o.optBoolean("wiiMotion", d.wiiMotion),
+                leftStick = runCatching { Stick.valueOf(o.optString("leftStick")) }.getOrDefault(d.leftStick),
+                rightStick = runCatching { Stick.valueOf(o.optString("rightStick")) }.getOrDefault(d.rightStick),
             )
         }
 

@@ -59,11 +59,13 @@ internal object DolphinMapping {
     private fun dpad(p: ControlsProfile, pad: PadInfo, prefix: String, alsoStick: Boolean = false) = listOf(
         Role.UP to "Up", Role.DOWN to "Down", Role.LEFT to "Left", Role.RIGHT to "Right",
     ).map { (r, n) ->
-        val stick = if (!alsoStick || !pad.hasLeftStick) null else when (r) {
-            Role.UP -> axis(MotionEvent.AXIS_Y, false)
-            Role.DOWN -> axis(MotionEvent.AXIS_Y, true)
-            Role.LEFT -> axis(MotionEvent.AXIS_X, false)
-            else -> axis(MotionEvent.AXIS_X, true)
+        val stick = pad.leftStick?.takeIf { alsoStick }?.let { (x, y) ->
+            when (r) {
+                Role.UP -> axis(y, false)
+                Role.DOWN -> axis(y, true)
+                Role.LEFT -> axis(x, false)
+                else -> axis(x, true)
+            }
         }
         "$prefix/$n" to any(btn(p, pad, r), stick)
     }
@@ -79,7 +81,7 @@ internal object DolphinMapping {
         e += "Buttons/Y" to btn(p, pad, Role.NORTH)
         e += "Buttons/Z" to btn(p, pad, Role.R1)
         e += "Buttons/Start" to btn(p, pad, Role.START)
-        if (pad.hasLeftStick) e += stick("Main Stick", MotionEvent.AXIS_X, MotionEvent.AXIS_Y)
+        pad.leftStick?.let { (x, y) -> e += stick("Main Stick", x, y) }
         pad.rightStick?.let { (x, y) -> e += stick("C-Stick", x, y) }
         e += "Triggers/L" to btn(p, pad, Role.L2)
         e += "Triggers/R" to btn(p, pad, Role.R2)
@@ -145,7 +147,7 @@ internal object DolphinMapping {
             WiiController.NUNCHUK -> {
                 e += "Nunchuk/Buttons/C" to btn(p, pad, Role.L1)
                 e += "Nunchuk/Buttons/Z" to btn(p, pad, Role.L2)
-                if (pad.hasLeftStick) e += stick("Nunchuk/Stick", MotionEvent.AXIS_X, MotionEvent.AXIS_Y)
+                pad.leftStick?.let { (x, y) -> e += stick("Nunchuk/Stick", x, y) }
                 for (a in listOf("X", "Y", "Z")) e += "Nunchuk/Shake/$a" to btn(p, pad, Role.L3)
             }
             WiiController.CLASSIC -> {
@@ -159,7 +161,7 @@ internal object DolphinMapping {
                 e += "Classic/Buttons/-" to btn(p, pad, Role.SELECT)
                 e += "Classic/Buttons/+" to btn(p, pad, Role.START)
                 e += "Classic/Buttons/Home" to combo(p, Hotkey.WII_HOME)
-                if (pad.hasLeftStick) e += stick("Classic/Left Stick", MotionEvent.AXIS_X, MotionEvent.AXIS_Y)
+                pad.leftStick?.let { (x, y) -> e += stick("Classic/Left Stick", x, y) }
                 pad.rightStick?.let { (x, y) -> e += stick("Classic/Right Stick", x, y) }
                 e += "Classic/Triggers/L" to btn(p, pad, Role.L1)
                 e += "Classic/Triggers/R" to btn(p, pad, Role.R1)

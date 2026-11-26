@@ -209,6 +209,9 @@ GameCube game on the Pocket 2+, and Wii games on the Pocket Mini.
     root).
 - **Handheld buttons**:
   - bind a button by pressing it; the row should show the new key and the next Set up should use it;
+  - bind a D-pad direction by pressing the D-pad: the row should say Up / Down / Left / Right;
+  - bind each stick by moving it: the row should say its axes (X / Y, Z / RZ), and *Automatic*
+    should name the axes found;
   - check that A still works right after binding.
 
 ## 13. Emulator controls (the other emulators)

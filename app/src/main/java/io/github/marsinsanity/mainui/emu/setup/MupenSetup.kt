@@ -34,7 +34,7 @@ internal object MupenMapping {
                 axes(right, MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_HAT_Y)
         }
         val rs = pad.rightStick
-        if (pad.hasLeftStick) axes(STICK_RIGHT, MotionEvent.AXIS_X, MotionEvent.AXIS_Y)
+        pad.leftStick?.let { (x, y) -> axes(STICK_RIGHT, x, y) }
         rs?.let { (x, y) -> axes(C_RIGHT, x, y) }
         // Without a stick the d-pad is the N64's stick; without a right stick, its C buttons.
         dpad(if (!pad.hasLeftStick) STICK_RIGHT else if (rs == null) C_RIGHT else DPAD_RIGHT)

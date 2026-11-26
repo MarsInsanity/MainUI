@@ -39,11 +39,11 @@ internal object AzaharMapping {
             Quad("up", Role.UP, MotionEvent.AXIS_HAT_Y, false), Quad("down", Role.DOWN, MotionEvent.AXIS_HAT_Y, true),
             Quad("left", Role.LEFT, MotionEvent.AXIS_HAT_X, false), Quad("right", Role.RIGHT, MotionEvent.AXIS_HAT_X, true),
         )) e += "dpad_$n" to if (pad.hasHat && p.key(r) == r.defaultKey) axis(hat, positive, true) else code(p.key(r))
-        if (pad.hasLeftStick) {
-            e += "circlepad_up" to axis(MotionEvent.AXIS_Y, false, false)
-            e += "circlepad_down" to axis(MotionEvent.AXIS_Y, true, false)
-            e += "circlepad_left" to axis(MotionEvent.AXIS_X, false, false)
-            e += "circlepad_right" to axis(MotionEvent.AXIS_X, true, false)
+        pad.leftStick?.let { (x, y) ->
+            e += "circlepad_up" to axis(y, false, false)
+            e += "circlepad_down" to axis(y, true, false)
+            e += "circlepad_left" to axis(x, false, false)
+            e += "circlepad_right" to axis(x, true, false)
         }
         pad.rightStick?.let { (x, y) ->
             e += "cstick_up" to axis(y, false, false)
@@ -121,9 +121,9 @@ internal object AzaharMapping {
             key("button_up", p.key(Role.UP), 709, "Up"); key("button_down", p.key(Role.DOWN), 710, "Down")
             key("button_left", p.key(Role.LEFT), 711, "Left"); key("button_right", p.key(Role.RIGHT), 712, "Right")
         }
-        if (pad.hasLeftStick) {
-            stick("circlepad_axis_horizontal", MotionEvent.AXIS_X, 713, vertical = false, reverseSuffix = "_0")
-            stick("circlepad_axis_vertical", MotionEvent.AXIS_Y, 713, vertical = true, reverseSuffix = "_1")
+        pad.leftStick?.let { (x, y) ->
+            stick("circlepad_axis_horizontal", x, 713, vertical = false, reverseSuffix = "_0")
+            stick("circlepad_axis_vertical", y, 713, vertical = true, reverseSuffix = "_1")
         }
         pad.rightStick?.let { (x, y) ->
             stick("cstick_axis_horizontal", x, 718, vertical = false, reverseSuffix = "_0")
