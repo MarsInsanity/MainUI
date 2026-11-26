@@ -61,10 +61,10 @@ class EmulatorControlsScene(host: SceneHost) : ListScene(host, "Emulator control
             action("Set up emulators", setupSub) { setUp() },
             action("Handheld buttons...", if (p.nintendoFace) "A on the right" else "A at the bottom") { host.push(HandheldButtonsScene(host)) },
             action("Hotkeys...", "${keyLabel(p.hotkeyButton)} + button") { host.push(HotkeysScene(host)) },
-            multi("Wii: default controller", WiiController.entries.map { it.name to it.label }, { p.wiiDefault.name }) { v ->
+            multi("Wii: default controller", WiiController.entries.map { it.name to it.short }, { p.wiiDefault.name }) { v ->
                 update { it.copy(wiiDefault = WiiController.valueOf(v)) }
             },
-            multi("Wii: pointer", WiiPointer.entries.map { it.name to it.label }, { p.wiiPointer.name }) { v ->
+            multi("Wii: pointer", WiiPointer.entries.map { it.name to it.short }, { p.wiiPointer.name }) { v ->
                 update { it.copy(wiiPointer = WiiPointer.valueOf(v)) }
             },
             toggle("Wii: motion controls (shake, tilt)", { p.wiiMotion }) { v -> update { it.copy(wiiMotion = v) } },

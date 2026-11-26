@@ -33,18 +33,18 @@ enum class Hotkey(val label: String, val defaultKey: Int, val wiiOnly: Boolean =
 }
 
 /** How a Wii game is played on the handheld; Dolphin gets one controller profile for each. */
-enum class WiiController(val label: String, val profile: String) {
-    NUNCHUK("Wii Remote + Nunchuk", "MainUI Wii Remote and Nunchuk"),
-    SIDEWAYS("Sideways Wii Remote", "MainUI Sideways Wii Remote"),
-    CLASSIC("Classic Controller", "MainUI Classic Controller"),
-    GAMECUBE("GameCube controller", "MainUI GameCube Controller"),
+enum class WiiController(val label: String, val short: String, val profile: String) {
+    NUNCHUK("Wii Remote + Nunchuk", "Nunchuk", "MainUI Wii Remote and Nunchuk"),
+    SIDEWAYS("Sideways Wii Remote", "Sideways", "MainUI Sideways Wii Remote"),
+    CLASSIC("Classic Controller", "Classic", "MainUI Classic Controller"),
+    GAMECUBE("GameCube controller", "GameCube", "MainUI GameCube Controller"),
 }
 
 /** Where the Wii Remote's pointer comes from. */
-enum class WiiPointer(val label: String) {
-    STICK("Right stick"),
-    MOTION("Tilting the handheld"),
-    TOUCH("Touchscreen"),
+enum class WiiPointer(val label: String, val short: String) {
+    STICK("Right stick", "Right stick"),
+    MOTION("Tilting the handheld", "Tilt"),
+    TOUCH("Touchscreen", "Touch"),
 }
 
 /**
